@@ -1,0 +1,66 @@
+{
+  "name": "My Problem Template",
+  "tag": "my-problem-template",
+  "version": "1.0.0",
+
+  "description": "A template for solving createing a problem on codeforces polygon.",
+
+  "time-limit": 1000,
+  "memory-limit": 256,
+
+  "tags": ["implementation", "math"],
+
+  "statements": {
+    "english": {
+      "title": "My Problem Template",
+      "legend": true,
+      "input-format": true,
+      "output-format": true,
+      "notes": true
+    },
+
+    "russian": {
+      "title": "Шаблон моей проблемы",
+      "legend": true,
+      "input-format": true,
+      "output-format": true
+    }
+  },
+
+  "solutions": [
+    {
+      "lang": "cpp",
+      "source": "./Solution.cpp",
+      "type": "main-correct"
+    },
+    {
+      "lang": "python",
+      "source": "./Solution.py",
+      "type": "correct"
+    },
+    {
+      "lang": "java",
+      "source": "./Solution.java",
+      "type": "tle"
+    }
+  ],
+
+  "generators": [
+    {
+      "name": "MainGenerator",
+      "source": "./Generator.cpp",
+      "tests-range": [3, 30]
+    }
+  ],
+
+  "checker": {
+    "custom": true,
+    "source": "./Checker.cpp",
+    "tests": "./checker-tests"
+  },
+
+  "validator": {
+    "source": "./Validator.cpp",
+    "tests": "./validator-tests"
+  }
+}
