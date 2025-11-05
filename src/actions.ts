@@ -6,7 +6,7 @@ import {
   runSolution,
   runValidatorTests,
   runCheckerTests,
-  // runSolutionAgainstMainCorrect,
+  compareResultsWithChecker,
 } from './helpers';
 import { logger } from './logger';
 import type ConfigFile from './types';
@@ -15,7 +15,7 @@ import path from 'path';
 import fs from 'fs';
 
 export const createTemplate = (directory: string) => {
-  logger.info('Creating problem template...');
+  logger.section('Creating problem template...');
 
   try {
     const problemDir = path.resolve(process.cwd(), directory);
@@ -39,8 +39,6 @@ export const generateTests = async (generatorName: string) => {
     logger.info(`Found ${generators.length} generator(s)`);
 
     await runMatchingGenerators(generators, generatorName);
-
-    logger.success('All test cases generated successfully!');
   } catch (error) {
     handleGenerationError(error);
   }
@@ -86,8 +84,6 @@ export const solveTests = async (solutionName: string, arg: string) => {
     } else {
       await runSolutionsOnGeneratorTests(matchingSolutions, config, arg);
     }
-
-    logger.success('Solutions run completed successfully!');
   } catch (error) {
     handleSolutionError(error);
   }
@@ -101,11 +97,56 @@ export const testWhat = async (what: string) => {
       await testCheckerItself();
       break;
     default:
-      // await testSolutionAgainstMainCorrect(what);
+      await testSolutionAgainstMainCorrect(what);
       break;
   }
 };
+export const fullVerification = async () => {
+  logger.section('Full Verification');
 
+  try {
+    const config = readConfigFile();
+
+    // Generate Tests
+    validateGeneratorsExist(config.generators);
+    logger.info(`Found ${config.generators.length} generator(s)`);
+    await runMatchingGenerators(config.generators, 'all');
+
+    // Validate Tests
+    ensureValidatorExists(config.validator);
+    logger.info('Found validator');
+    // validate the validator itself
+    await runValidatorTests(config.validator);
+    // validate all generated tests
+    await validateAllTests(config.validator);
+
+    // Checker Self
+    ensureCheckerExists(config.checker);
+    logger.info('Found checker');
+    await runCheckerTests(config.checker);
+
+    // Run Solutions
+    validateSolutionsExist(config.solutions);
+    ensureMainSolutionExists(config.solutions);
+    logger.info(`Found ${config.solutions.length} solution(s)`);
+    // run all solutions on all tests
+    await runSolutionsOnAllTests(config.solutions, config);
+    const mainSolution = getMainSolution(config.solutions);
+
+    // validate all solutions against main correct solution
+    for (const solution of config.solutions) {
+      if (solution.name !== mainSolution.name) {
+        await compareResultsWithChecker(config.checker, mainSolution, solution);
+      }
+    }
+
+    logger.success('Full verification completed successfully!');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error(`Full verification failed: ${message}`);
+    process.exit(1);
+  }
+};
 /*
 Utility functions to help with action implementations
 */
@@ -177,40 +218,40 @@ function ensureCheckerExists(
     throw new Error('No checker defined in the configuration file.');
   }
 }
-// function ensureMainSolutionExists(
-//   solutions: Solution[] | undefined
-// ): asserts solutions is Solution[] {
-//   if (!solutions || solutions.length === 0) {
-//     throw new Error('No solutions defined in the configuration file.');
-//   }
+function ensureMainSolutionExists(
+  solutions: Solution[] | undefined
+): asserts solutions is Solution[] {
+  if (!solutions || solutions.length === 0) {
+    throw new Error('No solutions defined in the configuration file.');
+  }
 
-//   for (const solution of solutions) {
-//     if (solution.name === 'main-correct') {
-//       return;
-//     }
-//   }
+  for (const solution of solutions) {
+    if (solution.type === 'main-correct') {
+      return;
+    }
+  }
 
-//   throw new Error(
-//     'No solution with type "main-correct" found in the configuration file.'
-//   );
-// }
+  throw new Error(
+    'No solution with type "main-correct" found in the configuration file.'
+  );
+}
 
-// function ensureSolutionExists(
-//   solutions: Solution[] | undefined,
-//   solutionName: string
-// ): asserts solutions is Solution[] {
-//   if (!solutions || solutions.length === 0) {
-//     throw new Error('No solutions defined in the configuration file.');
-//   }
+function ensureSolutionExists(
+  solutions: Solution[] | undefined,
+  solutionName: string
+): asserts solutions is Solution[] {
+  if (!solutions || solutions.length === 0) {
+    throw new Error('No solutions defined in the configuration file.');
+  }
 
-//   for (const solution of solutions) {
-//     if (solution.name === solutionName) {
-//       return;
-//     }
-//   }
+  for (const solution of solutions) {
+    if (solution.name === solutionName) {
+      return;
+    }
+  }
 
-//   throw new Error(`No solution named "${solutionName}" found.`);
-// }
+  throw new Error(`No solution named "${solutionName}" found.`);
+}
 
 function isNumeric(value: string): boolean {
   return !isNaN(parseInt(value, 10));
@@ -218,12 +259,10 @@ function isNumeric(value: string): boolean {
 
 async function validateAllTests(validator: Validator) {
   await runValidator(validator);
-  logger.success('All tests validated successfully!');
 }
 
 async function validateSingleTest(validator: Validator, testNumber: number) {
   await runValidator(validator, testNumber, testNumber);
-  logger.success(`Test ${testNumber} validated successfully!`);
 }
 
 async function validateGeneratorTests(
@@ -240,9 +279,6 @@ async function validateGeneratorTests(
 
   const [start, end] = generator['tests-range'];
   await runValidator(config.validator, start, end);
-  logger.success(
-    `Tests generated by "${generatorName}" validated successfully!`
-  );
 }
 
 function handleValidationError(error: unknown) {
@@ -363,23 +399,35 @@ async function testCheckerItself() {
   }
 }
 
-// async function testSolutionAgainstMainCorrect(solutionName: string) {
-//   try {
-//     const config = readConfigFile();
-//     const solutions = config.solutions;
-//     const checker = config.checker;
-//     ensureMainSolutionExists(solutions);
-//     ensureSolutionExists(solutions, solutionName);
-//     ensureCheckerExists(checker);
+async function testSolutionAgainstMainCorrect(solutionName: string) {
+  try {
+    const config = readConfigFile();
+    const solutions = config.solutions;
+    const checker = config.checker;
 
-//     await runSolutionAgainstMainCorrect(
-//       solutions,
-//       solutionName,
-//       checker,
-//       config['time-limit'],
-//       config['memory-limit']
-//     );
-//   } catch (error) {
-//     handleSolutionError(error);
-//   }
-// }
+    ensureMainSolutionExists(solutions);
+    ensureSolutionExists(solutions, solutionName);
+    ensureCheckerExists(checker);
+
+    const mainSolution = getMainSolution(solutions);
+    const solution = solutions.find(s => s.name === solutionName)!;
+    // run main solution
+    await solveTests(mainSolution.name, 'all');
+    // run target solution
+    await solveTests(solutionName, 'all');
+    // compare the results using the checker
+    await compareResultsWithChecker(checker, mainSolution, solution);
+  } catch (error) {
+    handleSolutionError(error);
+  }
+}
+
+function getMainSolution(solutions: Solution[]): Solution {
+  for (const solution of solutions) {
+    if (solution.type === 'main-correct') {
+      return solution;
+    }
+  }
+  // tell ts that this line is never reached
+  throw new Error('Main correct solution not found.');
+}

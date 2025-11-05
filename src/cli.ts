@@ -7,6 +7,7 @@ import {
   validateTests,
   solveTests,
   testWhat,
+  fullVerification,
 } from './actions';
 
 const program = new Command();
@@ -48,5 +49,12 @@ program
     'Test the Validator or the Checker against their tests or test a solution agains the main correct solution\n\tThe <what> can be "validator", "checker", or a solution name.'
   )
   .action(testWhat);
+
+program
+  .command('verify')
+  .description(
+    'Run full verification of the problem including test generation, validation, and solution testing'
+  )
+  .action(fullVerification);
 
 program.parse(process.argv);

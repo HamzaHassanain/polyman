@@ -2,12 +2,12 @@ type SolutionLang = 'cpp' | 'python' | 'java';
 type SolutionType =
   | 'main-correct'
   | 'correct'
+  | 'incorrect'
   | 'tle'
-  | 'wrong'
-  | 'tle-or-wrong'
+  | 'tle-or-correct'
+  | 'tle-or-mle'
   | 'mle'
-  | 'ole'
-  | 'rte'
+  | 'failed'
   | 'pe';
 
 type Solution = {
