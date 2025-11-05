@@ -1,4 +1,11 @@
-import ConfigFile, { Generator, Solution, Validator } from './types';
+import ConfigFile, {
+  Checker,
+  Generator,
+  Solution,
+  Validator,
+  ValidatorTest,
+  CheckerTest,
+} from './types';
 import { logger } from './logger';
 import { executor } from './executor';
 import path from 'path';
@@ -24,7 +31,7 @@ export function copyTemplate(srcDir: string, destDir: string) {
 }
 
 export function readConfigFile(): ConfigFile {
-  const configFilePath = path.resolve(process.cwd(), 'config.json');
+  const configFilePath = path.resolve(process.cwd(), 'Config.json');
   const configData = fs.readFileSync(configFilePath, 'utf-8');
   return JSON.parse(configData) as ConfigFile;
 }
@@ -49,6 +56,204 @@ export async function runGenerator(generator: Generator) {
     executor.cleanup();
   }
 }
+export async function runValidator(
+  validator: Validator,
+  testBegin?: number,
+  testEnd?: number
+) {
+  logger.info('Running Validator...');
+
+  try {
+    const compiledPath = await compileCPP(validator.source);
+    const testsDir = path.resolve(process.cwd(), 'tests');
+    const testFiles = fs.readdirSync(testsDir);
+    const filteredTests = filterTestsByRange(testFiles, testBegin, testEnd);
+
+    const results = await validateTestFiles(
+      compiledPath,
+      testsDir,
+      filteredTests
+    );
+    logValidationResults(results);
+
+    if (results.failed > 0) {
+      throw new Error(`${results.failed} test(s) failed validation`);
+    }
+  } finally {
+    executor.cleanup();
+  }
+}
+export async function runSolution(
+  solution: Solution,
+  timeout: number,
+  memoryLimitMB: number,
+  testBegin?: number,
+  testEnd?: number
+) {
+  logger.info(`Running Solution: ${solution.name}`);
+
+  try {
+    const cmdToRun = await compileSolution(solution.source);
+    const testsDir = path.resolve(process.cwd(), 'tests');
+    const outputDir = ensureOutputDirectory(solution.name);
+    const testFiles = fs.readdirSync(testsDir);
+    const filteredTests = filterTestsByRange(testFiles, testBegin, testEnd);
+
+    await runSolutionOnTests(
+      cmdToRun,
+      testsDir,
+      outputDir,
+      filteredTests,
+      solution,
+      timeout,
+      memoryLimitMB
+    );
+
+    logger.success(
+      `Solution ${logger.highlight(solution.name)} ran on all tests`
+    );
+  } catch (error) {
+    logger.error(`Failed to run solution: ${solution.name}`);
+    throw error instanceof Error ? error : new Error(String(error));
+  } finally {
+    executor.cleanup();
+  }
+}
+
+export async function runValidatorTests(validator: Validator) {
+  logger.info('Running Validator Tests...');
+  try {
+    const validatorTests: ValidatorTest[] = await parseValidatorTests();
+    const compiledPath = await compileCPP(validator.source);
+
+    for (const [index, test] of validatorTests.entries()) {
+      const testFileTempFilePath = path.resolve(
+        process.cwd(),
+        `temp_validator_test.txt`
+      );
+      fs.writeFileSync(testFileTempFilePath, test.stdin);
+
+      const result = await executor.executeWithRedirect(
+        compiledPath,
+        {
+          timeout: DEFAULT_TIMEOUT,
+          memoryLimitMB: DEFAULT_MEMORY_LIMIT,
+          silent: true,
+        },
+        testFileTempFilePath,
+        undefined
+      );
+
+      fs.unlinkSync(testFileTempFilePath);
+
+      const expectedVerdict =
+        test.expectedVerdict === 'VALID' ||
+        test.expectedVerdict === 1 ||
+        test.expectedVerdict === 'valid'
+          ? 'VALID'
+          : 'INVALID';
+
+      if (result.exitCode === 0 && expectedVerdict === 'VALID') {
+        logger.success(
+          `Validator Test ${logger.highlight((index + 1).toString())} passed (expected VALID)`
+        );
+      } else if (result.exitCode !== 0 && expectedVerdict !== 'VALID') {
+        logger.success(
+          `Validator Test ${logger.highlight((index + 1).toString())} passed (expected INVALID)`
+        );
+      } else {
+        logger.error(
+          `Validator Test ${logger.highlight((index + 1).toString())} failed (expected ${expectedVerdict})`
+        );
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error(`Failed to run validator tests: ${message}`);
+    process.exit(1);
+  } finally {
+    executor.cleanup();
+  }
+}
+
+export async function runCheckerTests(checker: Checker) {
+  logger.info('Running Checker Tests...');
+
+  try {
+    const checkerTests: CheckerTest[] = await parseCheckerTests();
+    const compiledPath = await compileCPP(checker.source);
+
+    for (const [index, test] of checkerTests.entries()) {
+      const inputTempFilePath = path.resolve(
+        process.cwd(),
+        `temp_checker_input.txt`
+      );
+      const ouputFileTempFilePath = path.resolve(
+        process.cwd(),
+        `temp_checker_output.txt`
+      );
+      const answerFileTempFilePath = path.resolve(
+        process.cwd(),
+        `temp_checker_answer.txt`
+      );
+
+      fs.writeFileSync(inputTempFilePath, test.stdin);
+      fs.writeFileSync(ouputFileTempFilePath, test.stdout);
+      fs.writeFileSync(answerFileTempFilePath, test.answer);
+
+      const result = await executor.execute(
+        makeCheckerCommand(
+          compiledPath,
+          inputTempFilePath,
+          ouputFileTempFilePath,
+          answerFileTempFilePath
+        ),
+        {
+          timeout: DEFAULT_TIMEOUT,
+          memoryLimitMB: DEFAULT_MEMORY_LIMIT,
+          silent: true,
+        }
+      );
+
+      fs.unlinkSync(inputTempFilePath);
+      fs.unlinkSync(ouputFileTempFilePath);
+      fs.unlinkSync(answerFileTempFilePath);
+
+      if (result.exitCode === 0 && test.verdict.toUpperCase() === 'OK') {
+        logger.success(
+          `Checker Test ${logger.highlight((index + 1).toString())} passed`
+        );
+        logger.log(`\t ${result.stdout.trim()}`);
+      } else if (result.exitCode !== 0 && test.verdict.toUpperCase() !== 'OK') {
+        logger.success(
+          `Checker Test ${logger.highlight((index + 1).toString())} passed`
+        );
+        logger.log(`\t ${result.stderr.trim()}`);
+      } else {
+        logger.error(
+          `Checker Test ${logger.highlight((index + 1).toString())} failed`
+        );
+        logger.log(
+          `\t ${result.exitCode === 0 ? result.stdout.trim() : result.stderr.trim()}`
+        );
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error(`Failed to run checker tests: ${message}`);
+    process.exit(1);
+  } finally {
+    executor.cleanup();
+  }
+}
+
+// export async function runSolutionAgainstMainCorrect(
+//   solutions: Solution[],
+//   solutionName: string,
+//   checker: Checker,
+//   timeLimit: number,
+//   memoryLimit: number
+// ) {}
 
 function ensureTestsDirectory(): string {
   const testsDir = path.resolve(process.cwd(), 'tests');
@@ -100,34 +305,6 @@ function logGeneratorSuccess(generator: Generator) {
 function handleGeneratorError(generatorName: string, error: unknown) {
   logger.error(`Failed to run generator: ${generatorName}`);
   throw error instanceof Error ? error : new Error(String(error));
-}
-
-export async function runValidator(
-  validator: Validator,
-  testBegin?: number,
-  testEnd?: number
-) {
-  logger.info('Running Validator...');
-
-  try {
-    const compiledPath = await compileCPP(validator.source);
-    const testsDir = path.resolve(process.cwd(), 'tests');
-    const testFiles = fs.readdirSync(testsDir);
-    const filteredTests = filterTestsByRange(testFiles, testBegin, testEnd);
-
-    const results = await validateTestFiles(
-      compiledPath,
-      testsDir,
-      filteredTests
-    );
-    logValidationResults(results);
-
-    if (results.failed > 0) {
-      throw new Error(`${results.failed} test(s) failed validation`);
-    }
-  } finally {
-    executor.cleanup();
-  }
 }
 
 function filterTestsByRange(
@@ -197,43 +374,6 @@ function logValidationResults(results: { passed: number; failed: number }) {
     logger.success(
       `All ${logger.highlight(results.passed.toString())} test(s) passed validation!`
     );
-  }
-}
-
-export async function runSolution(
-  solution: Solution,
-  timeout: number,
-  memoryLimitMB: number,
-  testBegin?: number,
-  testEnd?: number
-) {
-  logger.info(`Running Solution: ${solution.name}`);
-
-  try {
-    const cmdToRun = await compileSolution(solution.source);
-    const testsDir = path.resolve(process.cwd(), 'tests');
-    const outputDir = ensureOutputDirectory(solution.name);
-    const testFiles = fs.readdirSync(testsDir);
-    const filteredTests = filterTestsByRange(testFiles, testBegin, testEnd);
-
-    await runSolutionOnTests(
-      cmdToRun,
-      testsDir,
-      outputDir,
-      filteredTests,
-      solution,
-      timeout,
-      memoryLimitMB
-    );
-
-    logger.success(
-      `Solution ${logger.highlight(solution.name)} ran on all tests`
-    );
-  } catch (error) {
-    logger.error(`Failed to run solution: ${solution.name}`);
-    throw error instanceof Error ? error : new Error(String(error));
-  } finally {
-    executor.cleanup();
   }
 }
 
@@ -328,7 +468,7 @@ function writeMemoryOutput(
   fs.writeFileSync(outputPath, `Memory Limit Exceeded (${memoryLimit} MB)`);
 }
 
-export async function compileSolution(sourcePath: string): Promise<string> {
+async function compileSolution(sourcePath: string): Promise<string> {
   const ext = path.extname(sourcePath);
 
   switch (ext) {
@@ -343,7 +483,7 @@ export async function compileSolution(sourcePath: string): Promise<string> {
   }
 }
 
-export async function compileCPP(sourcePath: string): Promise<string> {
+async function compileCPP(sourcePath: string): Promise<string> {
   const absolutePath = path.resolve(process.cwd(), sourcePath);
 
   if (path.extname(absolutePath) !== '.cpp') {
@@ -361,7 +501,7 @@ export async function compileCPP(sourcePath: string): Promise<string> {
   return outputPath;
 }
 
-export async function compileJava(sourcePath: string): Promise<string> {
+async function compileJava(sourcePath: string): Promise<string> {
   const absolutePath = path.resolve(sourcePath);
   const directory = path.dirname(absolutePath);
   const fileName = path.basename(absolutePath);
@@ -373,4 +513,55 @@ export async function compileJava(sourcePath: string): Promise<string> {
   });
 
   return `java -cp ${directory} ${className}`;
+}
+
+function parseValidatorTests(): Promise<ValidatorTest[]> {
+  return new Promise((resolve, reject) => {
+    const testsFilePath = path.resolve(process.cwd(), 'validator_tests.json');
+    fs.readFile(testsFilePath, 'utf-8', (err, data) => {
+      if (err) {
+        return reject(new Error('Failed to read validator tests file.'));
+      }
+      try {
+        const tests = JSON.parse(data) as { tests: ValidatorTest[] };
+        if (tests.tests) {
+          return resolve(tests.tests);
+        } else {
+          return reject(new Error('Invalid validator tests JSON structure.'));
+        }
+      } catch {
+        reject(new Error('Failed to parse validator tests JSON.'));
+      }
+    });
+  });
+}
+
+function parseCheckerTests(): Promise<CheckerTest[]> {
+  return new Promise((resolve, reject) => {
+    const testsFilePath = path.resolve(process.cwd(), 'checker_tests.json');
+    fs.readFile(testsFilePath, 'utf-8', (err, data) => {
+      if (err) {
+        return reject(new Error('Failed to read checker tests file.'));
+      }
+      try {
+        const tests = JSON.parse(data) as { tests: CheckerTest[] };
+        if (tests.tests) {
+          return resolve(tests.tests);
+        } else {
+          return reject(new Error('Invalid checker tests JSON structure.'));
+        }
+      } catch {
+        reject(new Error('Failed to parse checker tests JSON.'));
+      }
+    });
+  });
+}
+
+function makeCheckerCommand(
+  checkerPath: string,
+  inputPath: string,
+  outputPath: string,
+  answerPath: string
+): string {
+  return `${checkerPath} ${inputPath} ${outputPath} ${answerPath}`;
 }

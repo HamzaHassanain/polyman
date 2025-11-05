@@ -1,0 +1,14 @@
+{
+  "tests": [
+    {
+      "stdin": "5\n1 2 3 4 5\n",
+      "stdout": "YES",
+      "verdict": "ok"
+    },
+    {
+      "stdin": "5\n1 2 3 4 5\n",
+      "stdout": "YES",
+      "verdict": "ok"
+    }
+  ]
+}
