@@ -122,50 +122,13 @@ export async function runSolution(
 
 export async function runValidatorTests(validator: Validator) {
   logger.info('Running Validator Tests...');
+
   try {
-    const validatorTests: ValidatorTest[] = await parseValidatorTests();
+    const validatorTests = await parseValidatorTests();
     const compiledPath = await compileCPP(validator.source);
 
     for (const [index, test] of validatorTests.entries()) {
-      const testFileTempFilePath = path.resolve(
-        process.cwd(),
-        `temp_validator_test.txt`
-      );
-      fs.writeFileSync(testFileTempFilePath, test.stdin);
-
-      const result = await executor.executeWithRedirect(
-        compiledPath,
-        {
-          timeout: DEFAULT_TIMEOUT,
-          memoryLimitMB: DEFAULT_MEMORY_LIMIT,
-          silent: true,
-        },
-        testFileTempFilePath,
-        undefined
-      );
-
-      fs.unlinkSync(testFileTempFilePath);
-
-      const expectedVerdict =
-        test.expectedVerdict === 'VALID' ||
-        test.expectedVerdict === 1 ||
-        test.expectedVerdict === 'valid'
-          ? 'VALID'
-          : 'INVALID';
-
-      if (result.exitCode === 0 && expectedVerdict === 'VALID') {
-        logger.success(
-          `Validator Test ${logger.highlight((index + 1).toString())} passed (expected VALID)`
-        );
-      } else if (result.exitCode !== 0 && expectedVerdict !== 'VALID') {
-        logger.success(
-          `Validator Test ${logger.highlight((index + 1).toString())} passed (expected INVALID)`
-        );
-      } else {
-        logger.error(
-          `Validator Test ${logger.highlight((index + 1).toString())} failed (expected ${expectedVerdict})`
-        );
-      }
+      await executeValidatorTest(compiledPath, test, index + 1);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -180,63 +143,11 @@ export async function runCheckerTests(checker: Checker) {
   logger.info('Running Checker Tests...');
 
   try {
-    const checkerTests: CheckerTest[] = await parseCheckerTests();
+    const checkerTests = await parseCheckerTests();
     const compiledPath = await compileCPP(checker.source);
 
     for (const [index, test] of checkerTests.entries()) {
-      const inputTempFilePath = path.resolve(
-        process.cwd(),
-        `temp_checker_input.txt`
-      );
-      const ouputFileTempFilePath = path.resolve(
-        process.cwd(),
-        `temp_checker_output.txt`
-      );
-      const answerFileTempFilePath = path.resolve(
-        process.cwd(),
-        `temp_checker_answer.txt`
-      );
-
-      fs.writeFileSync(inputTempFilePath, test.stdin);
-      fs.writeFileSync(ouputFileTempFilePath, test.stdout);
-      fs.writeFileSync(answerFileTempFilePath, test.answer);
-
-      const result = await executor.execute(
-        makeCheckerCommand(
-          compiledPath,
-          inputTempFilePath,
-          ouputFileTempFilePath,
-          answerFileTempFilePath
-        ),
-        {
-          timeout: DEFAULT_TIMEOUT,
-          memoryLimitMB: DEFAULT_MEMORY_LIMIT,
-          silent: true,
-        }
-      );
-
-      fs.unlinkSync(inputTempFilePath);
-      fs.unlinkSync(ouputFileTempFilePath);
-      fs.unlinkSync(answerFileTempFilePath);
-
-      if (result.exitCode === 0 && test.verdict.toUpperCase() === 'OK') {
-        logger.success(
-          `Checker Test ${logger.highlight((index + 1).toString())} passed`
-        );
-        logger.log(`\t ${result.stdout.trim()}`);
-      } else if (result.exitCode !== 0 && test.verdict.toUpperCase() !== 'OK') {
-        logger.success(
-          `Checker Test ${logger.highlight((index + 1).toString())} passed`
-        );
-        logger.log(`\t ${result.stderr.trim()}`);
-      } else {
-        logger.error(
-          `Checker Test ${logger.highlight((index + 1).toString())} failed`
-        );
-        logger.log(
-          `\t ${result.exitCode === 0 ? result.stdout.trim() : result.stderr.trim()}`
-        );
-      }
+      await executeCheckerTest(compiledPath, test, index + 1);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -246,14 +157,6 @@ export async function runCheckerTests(checker: Checker) {
     executor.cleanup();
   }
 }
-
-// export async function runSolutionAgainstMainCorrect(
-//   solutions: Solution[],
-//   solutionName: string,
-//   checker: Checker,
-//   timeLimit: number,
-//   memoryLimit: number
-// ) {}
 
 function ensureTestsDirectory(): string {
   const testsDir = path.resolve(process.cwd(), 'tests');
@@ -557,11 +460,119 @@ function parseCheckerTests(): Promise<CheckerTest[]> {
   });
 }
 
-function makeCheckerCommand(
-  checkerPath: string,
-  inputPath: string,
-  outputPath: string,
-  answerPath: string
-): string {
-  return `${checkerPath} ${inputPath} ${outputPath} ${answerPath}`;
+async function executeValidatorTest(
+  compiledPath: string,
+  test: ValidatorTest,
+  testNumber: number
+) {
+  const tempFilePath = createTempTestFile(test.stdin);
+
+  try {
+    const result = await executor.executeWithRedirect(
+      compiledPath,
+      {
+        timeout: DEFAULT_TIMEOUT,
+        memoryLimitMB: DEFAULT_MEMORY_LIMIT,
+        silent: true,
+      },
+      tempFilePath,
+      undefined
+    );
+
+    const expectedVerdict = normalizeValidatorVerdict(test.expectedVerdict);
+    logValidatorTestResult(result.exitCode, expectedVerdict, testNumber);
+  } finally {
+    fs.unlinkSync(tempFilePath);
+  }
+}
+
+async function executeCheckerTest(
+  compiledPath: string,
+  test: CheckerTest,
+  testNumber: number
+) {
+  const tempFiles = createCheckerTempFiles(test);
+
+  try {
+    const result = await executor.execute(
+      `${compiledPath} ${tempFiles.input} ${tempFiles.output} ${tempFiles.answer}`,
+      {
+        timeout: DEFAULT_TIMEOUT,
+        memoryLimitMB: DEFAULT_MEMORY_LIMIT,
+        silent: true,
+      }
+    );
+
+    logCheckerTestResult(result, test.verdict, testNumber);
+  } finally {
+    cleanupTempFiles([tempFiles.input, tempFiles.output, tempFiles.answer]);
+  }
+}
+
+function createTempTestFile(content: string): string {
+  const tempFilePath = path.resolve(process.cwd(), 'temp_validator_test.txt');
+  fs.writeFileSync(tempFilePath, content);
+  return tempFilePath;
+}
+
+function createCheckerTempFiles(test: CheckerTest) {
+  const inputPath = path.resolve(process.cwd(), 'temp_checker_input.txt');
+  const outputPath = path.resolve(process.cwd(), 'temp_checker_output.txt');
+  const answerPath = path.resolve(process.cwd(), 'temp_checker_answer.txt');
+
+  fs.writeFileSync(inputPath, test.stdin);
+  fs.writeFileSync(outputPath, test.stdout);
+  fs.writeFileSync(answerPath, test.answer);
+
+  return { input: inputPath, output: outputPath, answer: answerPath };
+}
+
+function cleanupTempFiles(filePaths: string[]) {
+  filePaths.forEach(filePath => fs.unlinkSync(filePath));
+}
+
+function normalizeValidatorVerdict(verdict: string | number): string {
+  return verdict === 'VALID' || verdict === 1 || verdict === 'valid'
+    ? 'VALID'
+    : 'INVALID';
+}
+
+function logValidatorTestResult(
+  exitCode: number,
+  expectedVerdict: string,
+  testNumber: number
+) {
+  const passed = (exitCode === 0) === (expectedVerdict === 'VALID');
+
+  if (passed) {
+    logger.success(
+      `Validator Test ${logger.highlight(testNumber.toString())} passed (expected ${expectedVerdict})`
+    );
+  } else {
+    logger.error(
+      `Validator Test ${logger.highlight(testNumber.toString())} failed (expected ${expectedVerdict})`
+    );
+  }
+}
+
+function logCheckerTestResult(
+  result: { exitCode: number; stdout: string; stderr: string },
+  expectedVerdict: string,
+  testNumber: number
+) {
+  const success = result.exitCode === 0;
+  const expectedSuccess = expectedVerdict.toUpperCase() === 'OK';
+  const passed = success === expectedSuccess;
+
+  if (passed) {
+    logger.success(
+      `Checker Test ${logger.highlight(testNumber.toString())} passed`
+    );
+    logger.log(`\t ${success ? result.stdout.trim() : result.stderr.trim()}`);
+  } else {
+    logger.error(
+      `Checker Test ${logger.highlight(testNumber.toString())} failed`
+    );
+    logger.log(`\t ${success ? result.stdout.trim() : result.stderr.trim()}`);
+  }
 }
