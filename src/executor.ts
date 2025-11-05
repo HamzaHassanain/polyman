@@ -12,7 +12,7 @@ export interface ExecutionResult {
 
 export interface ExecutionOptions {
   timeout: number;
-  memoryLimitMB?: number; // Memory limit in megabytes
+  memoryLimitMB?: number;
   cwd?: string;
   onSuccess?: (result: ExecutionResult) => void;
   onError?: (result: ExecutionResult) => void;
@@ -20,6 +20,12 @@ export interface ExecutionOptions {
   onMemoryExceeded?: (result: ExecutionResult) => void;
   silent?: boolean;
 }
+
+const TIMEOUT_EXIT_CODE = 124;
+const OOM_KILL_EXIT_CODE = 137;
+const SEGFAULT_EXIT_CODE = 139;
+const ABORT_EXIT_CODE = 134;
+const KILL_GRACE_PERIOD_MS = 100;
 
 export class CommandExecutor {
   private tempFiles: string[] = [];
@@ -29,18 +35,71 @@ export class CommandExecutor {
     command: string,
     options: ExecutionOptions
   ): Promise<ExecutionResult> {
-    const {
-      timeout,
-      memoryLimitMB,
-      cwd,
-      onSuccess,
-      onError,
-      onTimeout,
-      onMemoryExceeded,
-      silent = false,
-    } = options;
+    const wrappedCommand = this.applyMemoryLimit(
+      command,
+      options.memoryLimitMB
+    );
 
-    const result: ExecutionResult = {
+    return new Promise<ExecutionResult>(resolve => {
+      const { process: child, result } = this.spawnProcess(
+        wrappedCommand,
+        options
+      );
+      const collectors = this.createOutputCollectors(child);
+      const timeoutHandler = this.createTimeoutHandler(
+        child,
+        options,
+        result,
+        collectors,
+        resolve
+      );
+
+      this.attachEventHandlers(
+        child,
+        options,
+        result,
+        collectors,
+        timeoutHandler,
+        resolve
+      );
+    });
+  }
+
+  private applyMemoryLimit(command: string, memoryLimitMB?: number): string {
+    if (!memoryLimitMB) return command;
+
+    const isJava = command.trim().startsWith('java ');
+
+    if (process.platform === 'win32') {
+      logger.warning('Memory limits on Windows are not fully supported.');
+      return command;
+    }
+
+    if (isJava) {
+      return command.replace(/^java\s+/, `java -Xmx${memoryLimitMB}m `);
+    }
+
+    const memoryLimitKB = memoryLimitMB * 1024;
+    return `(ulimit -v ${memoryLimitKB}; ${command})`;
+  }
+
+  private spawnProcess(command: string, options: ExecutionOptions) {
+    const child = spawn(command, {
+      shell: true,
+      cwd: options.cwd,
+      detached: true,
+    });
+
+    this.activeProcesses.add(child);
+
+    return {
+      process: child,
+      result: this.createEmptyResult(),
+    };
+  }
+
+  private createEmptyResult(): ExecutionResult {
+    return {
       stdout: '',
       stderr: '',
       exitCode: 0,
@@ -48,213 +107,233 @@ export class CommandExecutor {
       timedOut: false,
       memoryExceeded: false,
     };
+  }
 
-    return new Promise<ExecutionResult>(resolve => {
-      // Wrap command with memory limit if specified
-      let wrappedCommand = command;
-      if (memoryLimitMB) {
-        wrappedCommand = this.wrapCommandWithMemoryLimit(
-          command,
-          memoryLimitMB
-        );
-      }
+  private createOutputCollectors(child: ChildProcess) {
+    const collectors = { stdout: '', stderr: '', isResolved: false };
 
-      // Use shell to execute the command
-      const child = spawn(wrappedCommand, {
-        shell: true,
-        cwd,
-        detached: true, // Create a new process group
-      });
-
-      this.activeProcesses.add(child);
-
-      let stdoutData = '';
-      let stderrData = '';
-      let isResolved = false;
-
-      child.stdout?.on('data', (data: Buffer) => {
-        stdoutData += data.toString();
-      });
-
-      child.stderr?.on('data', (data: Buffer) => {
-        stderrData += data.toString();
-      });
-
-      const timeoutId = setTimeout(() => {
-        if (!isResolved && child.pid && !child.killed) {
-          result.timedOut = true;
-          isResolved = true;
-
-          this.killProcessTree(child.pid);
-
-          setTimeout(() => {
-            if (!child.killed) {
-              child.kill('SIGKILL');
-            }
-          }, 100);
-
-          clearTimeout(timeoutId);
-          this.activeProcesses.delete(child);
-
-          result.stdout = stdoutData;
-          result.stderr = `Command timed out after ${timeout}ms`;
-          result.exitCode = 124; // Timeout exit code
-          result.success = false;
-
-          if (!silent) {
-            logger.warning(`Process killed after ${timeout}ms timeout`);
-          }
-
-          if (onTimeout) {
-            onTimeout(result);
-          }
-          resolve(result);
-        }
-      }, timeout);
-
-      child.on('close', (code, signal) => {
-        if (isResolved) return; // Already handled by timeout
-
-        clearTimeout(timeoutId);
-        this.activeProcesses.delete(child);
-        isResolved = true;
-
-        result.stdout = stdoutData;
-        result.stderr = stderrData;
-        result.exitCode = code ?? (signal ? 1 : 0);
-
-        const possibleMemoryError =
-          code === 137 || // Exit code 137 = 128 + 9 (SIGKILL, often from OOM killer)
-          code === 139 || // Exit code 139 = 128 + 11 (SIGSEGV, segfault from bad allocation)
-          code === 134 || // SIGABRT - often from failed allocation
-          signal === 'SIGABRT';
-
-        const hasMemoryErrorMessage =
-          stderrData.includes('OutOfMemory') ||
-          stderrData.includes('bad_alloc') ||
-          stderrData.includes('OOM') ||
-          stderrData.includes('MemoryError');
-
-        if (possibleMemoryError || hasMemoryErrorMessage) {
-          result.memoryExceeded = true;
-          result.success = false;
-
-          if (!silent) {
-            logger.warning(
-              `Process terminated: possible memory limit exceeded (${memoryLimitMB}MB) - Exit code: ${code}, Signal: ${signal}`
-            );
-          }
-
-          if (onMemoryExceeded) {
-            onMemoryExceeded(result);
-          }
-
-          resolve(result);
-          return;
-        }
-
-        if (code === 0) {
-          result.success = true;
-
-          if (!silent && result.stdout) {
-            logger.dim(result.stdout.trim());
-          }
-
-          if (onSuccess) {
-            onSuccess(result);
-          }
-        } else {
-          result.success = false;
-
-          if (!silent && result.stderr) {
-            logger.error(result.stderr.trim());
-          }
-
-          if (onError) {
-            onError(result);
-          }
-        }
-
-        resolve(result);
-      });
-
-      child.on('error', err => {
-        if (isResolved) return;
-
-        clearTimeout(timeoutId);
-        this.activeProcesses.delete(child);
-        isResolved = true;
-
-        result.success = false;
-        result.stderr = err.message;
-        result.exitCode = 1;
-
-        if (!silent) {
-          logger.error(err.message);
-        }
-
-        if (onError) {
-          onError(result);
-        }
-
-        resolve(result);
-      });
+    child.stdout?.on('data', (data: Buffer) => {
+      collectors.stdout += data.toString();
     });
+
+    child.stderr?.on('data', (data: Buffer) => {
+      collectors.stderr += data.toString();
+    });
+
+    return collectors;
+  }
+
+  private createTimeoutHandler(
+    child: ChildProcess,
+    options: ExecutionOptions,
+    result: ExecutionResult,
+    collectors: { stdout: string; stderr: string; isResolved: boolean },
+    resolve: (value: ExecutionResult) => void
+  ) {
+    return setTimeout(() => {
+      if (collectors.isResolved || !child.pid || child.killed) return;
+
+      this.handleTimeout(child, options, result, collectors, resolve);
+    }, options.timeout);
+  }
+
+  private handleTimeout(
+    child: ChildProcess,
+    options: ExecutionOptions,
+    result: ExecutionResult,
+    collectors: { stdout: string; stderr: string; isResolved: boolean },
+    resolve: (value: ExecutionResult) => void
+  ) {
+    collectors.isResolved = true;
+    result.timedOut = true;
+
+    this.killProcessTree(child.pid!);
+    setTimeout(() => child.kill('SIGKILL'), KILL_GRACE_PERIOD_MS);
+
+    this.activeProcesses.delete(child);
+
+    Object.assign(result, {
+      stdout: collectors.stdout,
+      stderr: `Command timed out after ${options.timeout}ms`,
+      exitCode: TIMEOUT_EXIT_CODE,
+      success: false,
+    });
+
+    if (!options.silent) {
+      logger.warning(`Process killed after ${options.timeout}ms timeout`);
+    }
+
+    options.onTimeout?.(result);
+    resolve(result);
+  }
+
+  private attachEventHandlers(
+    child: ChildProcess,
+    options: ExecutionOptions,
+    result: ExecutionResult,
+    collectors: { stdout: string; stderr: string; isResolved: boolean },
+    timeoutId: NodeJS.Timeout,
+    resolve: (value: ExecutionResult) => void
+  ) {
+    child.on('close', (code, signal) => {
+      if (collectors.isResolved) return;
+
+      clearTimeout(timeoutId);
+      this.activeProcesses.delete(child);
+      collectors.isResolved = true;
+
+      this.handleProcessClose(
+        code,
+        signal,
+        options,
+        result,
+        collectors,
+        resolve
+      );
+    });
+
+    child.on('error', err => {
+      if (collectors.isResolved) return;
+
+      clearTimeout(timeoutId);
+      this.activeProcesses.delete(child);
+      collectors.isResolved = true;
+
+      this.handleProcessError(err, options, result, resolve);
+    });
+  }
+
+  private handleProcessClose(
+    code: number | null,
+    signal: NodeJS.Signals | null,
+    options: ExecutionOptions,
+    result: ExecutionResult,
+    collectors: { stdout: string; stderr: string },
+    resolve: (value: ExecutionResult) => void
+  ) {
+    Object.assign(result, {
+      stdout: collectors.stdout,
+      stderr: collectors.stderr,
+      exitCode: code ?? 1,
+    });
+
+    if (this.isMemoryError(code, signal, collectors.stderr)) {
+      this.handleMemoryError(code, signal, options, result, resolve);
+      return;
+    }
+
+    if (code === 0) {
+      this.handleSuccess(options, result, resolve);
+    } else {
+      this.handleError(options, result, resolve);
+    }
+  }
+
+  private isMemoryError(
+    code: number | null,
+    signal: NodeJS.Signals | null,
+    stderr: string
+  ): boolean {
+    const hasMemoryExitCode =
+      code === OOM_KILL_EXIT_CODE ||
+      code === SEGFAULT_EXIT_CODE ||
+      code === ABORT_EXIT_CODE ||
+      signal === 'SIGABRT';
+
+    const hasMemoryErrorMessage =
+      stderr.includes('OutOfMemory') ||
+      stderr.includes('bad_alloc') ||
+      stderr.includes('OOM') ||
+      stderr.includes('MemoryError');
+
+    return hasMemoryExitCode || hasMemoryErrorMessage;
+  }
+
+  private handleMemoryError(
+    code: number | null,
+    signal: NodeJS.Signals | null,
+    options: ExecutionOptions,
+    result: ExecutionResult,
+    resolve: (value: ExecutionResult) => void
+  ) {
+    result.memoryExceeded = true;
+    result.success = false;
+
+    if (!options.silent) {
+      logger.warning(
+        `Process terminated: memory limit exceeded - Exit code: ${code}, Signal: ${signal}`
+      );
+    }
+
+    options.onMemoryExceeded?.(result);
+    resolve(result);
+  }
+
+  private handleSuccess(
+    options: ExecutionOptions,
+    result: ExecutionResult,
+    resolve: (value: ExecutionResult) => void
+  ) {
+    result.success = true;
+
+    if (!options.silent && result.stdout) {
+      logger.dim(result.stdout.trim());
+    }
+
+    options.onSuccess?.(result);
+    resolve(result);
+  }
+
+  private handleError(
+    options: ExecutionOptions,
+    result: ExecutionResult,
+    resolve: (value: ExecutionResult) => void
+  ) {
+    result.success = false;
+
+    if (!options.silent && result.stderr) {
+      logger.error(result.stderr.trim());
+    }
+
+    options.onError?.(result);
+    resolve(result);
+  }
+
+  private handleProcessError(
+    err: Error,
+    options: ExecutionOptions,
+    result: ExecutionResult,
+    resolve: (value: ExecutionResult) => void
+  ) {
+    result.success = false;
+    result.stderr = err.message;
+    result.exitCode = 1;
+
+    if (!options.silent) {
+      logger.error(err.message);
+    }
+
+    options.onError?.(result);
+    resolve(result);
   }
 
   private killProcessTree(pid: number) {
     try {
       if (process.platform === 'win32') {
-        // On Windows, use taskkill to kill the process tree
         spawn('taskkill', ['/pid', pid.toString(), '/T', '/F'], {
           shell: true,
           stdio: 'ignore',
         });
       } else {
-        // On Unix-like systems, kill the entire process group
-        // The negative PID kills the process group
         try {
           process.kill(-pid, 'SIGKILL');
         } catch {
-          try {
-            process.kill(pid, 'SIGKILL');
-          } catch {
-            // Process might already be dead
-          }
+          process.kill(pid, 'SIGKILL');
         }
       }
     } catch {
-      // Ignore errors - process might already be terminated
+      // Process already terminated
     }
-  }
-
-  private wrapCommandWithMemoryLimit(
-    command: string,
-    memoryLimitMB: number
-  ): string {
-    // On Unix-like systems, use ulimit to set memory limit
-
-    const isJava = command.trim().startsWith('java ');
-
-    if (process.platform !== 'win32' && !isJava) {
-      const memoryLimitKB = memoryLimitMB * 1024;
-
-      return `(ulimit -v ${memoryLimitKB} ; ${command})`;
-    }
-    if (isJava) {
-      const memoryLimitKB = memoryLimitMB * 1024;
-      const newCommand = command.replace(
-        /^java\s+/,
-        `java -Xmx${memoryLimitKB}k `
-      );
-
-      return newCommand;
-    }
-
-    logger.warning(
-      'Memory limits on Windows are not fully supported. Process will run without memory restrictions.'
-    );
-    return command;
   }
 
   async executeWithRedirect(
@@ -263,19 +342,23 @@ export class CommandExecutor {
     inputFile?: string,
     outputFile?: string
   ): Promise<ExecutionResult> {
-    let fullCommand = command;
+    const redirectedCommand = this.buildRedirectedCommand(
+      command,
+      inputFile,
+      outputFile
+    );
+    return this.execute(redirectedCommand, options);
+  }
 
-    if (inputFile) {
-      fullCommand = `${fullCommand} < ${inputFile}`;
-    }
-
-    if (outputFile) {
-      fullCommand = `${fullCommand} > ${outputFile}`;
-    }
-
-    return this.execute(fullCommand, {
-      ...options,
-    });
+  private buildRedirectedCommand(
+    command: string,
+    inputFile?: string,
+    outputFile?: string
+  ): string {
+    let result = command;
+    if (inputFile) result = `${result} < ${inputFile}`;
+    if (outputFile) result = `${result} > ${outputFile}`;
+    return result;
   }
 
   registerTempFile(filePath: string) {
@@ -283,21 +366,22 @@ export class CommandExecutor {
   }
 
   cleanup() {
+    this.killAllActiveProcesses();
+    this.activeProcesses.clear();
+    this.tempFiles = [];
+  }
+
+  private killAllActiveProcesses() {
     for (const process of this.activeProcesses) {
       if (process.pid && !process.killed) {
         try {
           this.killProcessTree(process.pid);
           process.kill('SIGKILL');
         } catch {
-          // Process might already be dead
+          // Process already dead
         }
       }
     }
-    this.activeProcesses.clear();
-
-    // Note: We don't automatically delete temp files as they might be test outputs
-    // that need to be preserved. This is just for tracking.
-    this.tempFiles = [];
   }
 
   getTempFiles(): string[] {
@@ -305,5 +389,4 @@ export class CommandExecutor {
   }
 }
 
-// Singleton instance
 export const executor = new CommandExecutor();

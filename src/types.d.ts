@@ -2,24 +2,23 @@ type SolutionLang = 'cpp' | 'python' | 'java';
 type SolutionType =
   | 'main-correct'
   | 'correct'
+  | 'incorrect'
   | 'tle'
-  | 'wrong'
-  | 'tle-or-wrong'
+  | 'tle-or-correct'
+  | 'tle-or-mle'
   | 'mle'
-  | 'ole'
-  | 'rte'
+  | 'failed'
   | 'pe';
 
 type Solution = {
   name: string;
-  lang: SolutionLang;
   source: string;
   type: SolutionType;
 };
 
 type Generator = {
   name: string;
-  source: string;
+  source?: string;
   'tests-range': [number, number];
 };
 
@@ -28,10 +27,21 @@ type Checker = {
   source: string;
   tests?: string;
 };
+type CheckerTest = {
+  stdin: string;
+  stdout: string;
+  answer: string;
+  verdict: 'OK' | 'WA' | 'ok' | 'wa' | 'PE' | 'pe';
+};
 
 type Validator = {
   source: string;
   tests?: string;
+};
+
+type ValidatorTest = {
+  stdin: string;
+  expectedVerdict: 'VALID' | 'INVALID' | 0 | 1 | 'valid' | 'invalid';
 };
 
 interface ConfigFile {
@@ -64,5 +74,14 @@ interface ConfigFile {
   validator: Validator;
 }
 
-export { Solution, Generator, Checker, Validator, SolutionLang, SolutionType };
+export {
+  Solution,
+  Generator,
+  Checker,
+  Validator,
+  SolutionLang,
+  SolutionType,
+  ValidatorTest,
+  CheckerTest,
+};
 export default ConfigFile;
