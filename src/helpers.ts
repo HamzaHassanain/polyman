@@ -76,7 +76,11 @@ export async function runGenerator(generator: Generator) {
   }
 }
 
-export async function runValidator(validator: Validator) {
+export async function runValidator(
+  validator: Validator,
+  testBegin?: number,
+  testEnd?: number
+) {
   // const spinner = logger.startSpinner('Running validator...\n');
 
   logger.info('Running Validator...');
@@ -94,6 +98,23 @@ export async function runValidator(validator: Validator) {
     for (const testFile of testFiles) {
       const testFilePath = path.join(testsDir, testFile);
 
+      let willRun = true;
+      if (testBegin !== undefined && testEnd !== undefined) {
+        if (testFile.startsWith('test')) {
+          const numberPart = testFile.slice(4, testFile.lastIndexOf('.'));
+          const testNumber = parseInt(numberPart, 10);
+          if (
+            isNaN(testNumber) ||
+            testNumber < testBegin ||
+            testNumber > testEnd
+          ) {
+            willRun = false;
+          }
+        } else {
+          willRun = false;
+        }
+      }
+      if (!willRun) continue;
       await executor.executeWithRedirect(
         compiledPath,
         {
@@ -140,7 +161,9 @@ export async function runValidator(validator: Validator) {
 export async function runSolution(
   solution: Solution,
   timeout: number,
-  memoryLimitMB: number
+  memoryLimitMB: number,
+  testBegin?: number,
+  testEnd?: number
 ) {
   // const spinner = logger.startSpinner(
   //   `Running solution: ${logger.highlight(solution.name)}\n`
@@ -161,14 +184,32 @@ export async function runSolution(
 
     const outputDir = path.resolve(process.cwd(), 'outputs', solution.name);
 
-    if (fs.existsSync(outputDir)) {
-      fs.rmSync(outputDir, { recursive: true, force: true });
+    if (!fs.existsSync(outputDir)) {
+      // fs.rmSync(outputDir, { recursive: true, force: true });
+      fs.mkdirSync(outputDir, { recursive: true });
     }
-    fs.mkdirSync(outputDir, { recursive: true });
 
     for (const testFile of testFiles) {
       const testFilePath = path.join(testsDir, testFile);
       const testOutputDir = path.resolve(outputDir, `output_${testFile}`);
+
+      let willRun = true;
+      if (testBegin !== undefined && testEnd !== undefined) {
+        if (testFile.startsWith('test')) {
+          const numberPart = testFile.slice(4, testFile.lastIndexOf('.'));
+          const testNumber = parseInt(numberPart, 10);
+          if (
+            isNaN(testNumber) ||
+            testNumber < testBegin ||
+            testNumber > testEnd
+          ) {
+            willRun = false;
+          }
+        } else {
+          willRun = false;
+        }
+      }
+      if (!willRun) continue;
 
       await executor.executeWithRedirect(
         cmdToRun,
@@ -181,15 +222,24 @@ export async function runSolution(
               `Solution ${logger.highlight(solution.name)} failed on test ${logger.highlight(testFile)}`
             );
             logger.error(`Error: ${result.stderr}`);
+            fs.writeFileSync(testOutputDir, result.stderr);
           },
           onTimeout: () => {
             logger.error(
               `Solution ${logger.highlight(solution.name)} timed out on test ${logger.highlight(testFile)}`
             );
+            fs.writeFileSync(
+              testOutputDir,
+              `Time Limit Exceeded after ${timeout}ms`
+            );
           },
           onMemoryExceeded: () => {
             logger.error(
               `Solution ${logger.highlight(solution.name)} exceeded memory limit on test ${logger.highlight(testFile)}`
+            );
+            fs.writeFileSync(
+              testOutputDir,
+              `Memory Limit Exceeded (${memoryLimitMB} MB)`
             );
           },
         },
