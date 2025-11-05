@@ -1,9 +1,6 @@
 import chalk from 'chalk';
-// import ora, { Ora } from 'ora';
 
 export class Logger {
-  // private spinner: Ora | null = null;
-
   success(message: string) {
     console.log(chalk.green('✔'), chalk.green(message));
   }
@@ -23,35 +20,6 @@ export class Logger {
   log(message: string) {
     console.log(chalk.white(message));
   }
-
-  // startSpinner(message: string): Ora {
-  //   this.spinner = ora({
-  //     text: message,
-  //     color: 'cyan',
-  //   }).start();
-  //   return this.spinner;
-  // }
-
-  // succeedSpinner(message?: string) {
-  //   if (this.spinner) {
-  //     this.spinner.succeed(message);
-  //     this.spinner = null;
-  //   }
-  // }
-
-  // failSpinner(message?: string) {
-  //   if (this.spinner) {
-  //     this.spinner.fail(message);
-  //     this.spinner = null;
-  //   }
-  // }
-
-  // stopSpinner() {
-  //   if (this.spinner) {
-  //     this.spinner.stop();
-  //     this.spinner = null;
-  //   }
-  // }
 
   section(title: string) {
     console.log();

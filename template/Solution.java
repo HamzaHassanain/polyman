@@ -1,5 +1,3 @@
-package template;
-
 import java.util.*;
 
 public class Solution {

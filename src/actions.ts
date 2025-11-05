@@ -6,165 +6,270 @@ import {
   runSolution,
 } from './helpers';
 import { logger } from './logger';
+import type ConfigFile from './types';
+import type { Generator, Validator, Solution } from './types';
 import path from 'path';
 import fs from 'fs';
 
 export const createTemplate = (directory: string) => {
-  // const spinner = logger.startSpinner('Creating problem template...');
   logger.info('Creating problem template...');
+
   try {
-    const pwd = process.cwd();
-    const problemDir = path.resolve(pwd, directory);
+    const problemDir = path.resolve(process.cwd(), directory);
     const templateDir = path.resolve(__dirname, '../template');
 
     fs.mkdirSync(problemDir, { recursive: true });
     copyTemplate(templateDir, problemDir);
 
-    // spinner.succeed(
-    //   `Template created successfully at ${logger.highlight(directory)}`
-    // );
-    logger.info(`Next steps:`);
-    logger.log(`  1. cd ${directory}`);
-    logger.log(`  2. Edit config.json to configure your problem`);
-    logger.log(`  3. Run ${logger.highlight('polyman generate-tests')}`);
+    logTemplateCreationSuccess(directory);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    // spinner.fail('Failed to create template');
-    logger.error(message);
-    process.exit(1);
+    handleTemplateCreationError(error);
   }
 };
+
+function logTemplateCreationSuccess(directory: string) {
+  logger.info('Next steps:');
+  logger.log(`  1. cd ${directory}`);
+  logger.log(
+    `  2. Do your thing, add your solutions, generators, and validator`
+  );
+  logger.log(`  3. Edit config.json to configure your problem`);
+  logger.log(
+    `  4. Run ${logger.highlight('polyman generate-tests all')} to generate all tests`
+  );
+  logger.log(
+    `  5. Run ${logger.highlight('polyman validate-tests all')} to validate all tests`
+  );
+  logger.log(
+    `  6. Run ${logger.highlight(
+      'polyman solve-tests <solution-name> all'
+    )} to run a solution on all tests`
+  );
+}
+
+function handleTemplateCreationError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  logger.error(message);
+  process.exit(1);
+}
 
 export const generateTests = async (generatorName: string) => {
   logger.section('Test Generation');
 
   try {
     const { generators } = readConfigFile();
-    if (!generators || generators.length === 0) {
-      logger.warning('No test generators defined in the configuration file.');
-      return;
-    }
+    validateGeneratorsExist(generators);
 
     logger.info(`Found ${generators.length} generator(s)`);
 
-    for (const generator of generators) {
-      if (generator.name === generatorName || generatorName === 'all') {
-        await runGenerator(generator);
-      }
-    }
+    await runMatchingGenerators(generators, generatorName);
 
     logger.success('All test cases generated successfully!');
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    logger.error(`Failed to generate tests: ${message}`);
-    process.exit(1);
+    handleGenerationError(error);
   }
 };
+
+function validateGeneratorsExist(
+  generators: Generator[] | undefined
+): asserts generators is Generator[] {
+  if (!generators || generators.length === 0) {
+    logger.warning('No test generators defined in the configuration file.');
+    process.exit(0);
+  }
+}
+
+async function runMatchingGenerators(
+  generators: Generator[],
+  generatorName: string
+) {
+  for (const generator of generators) {
+    if (generatorName === 'all' || generator.name === generatorName) {
+      await runGenerator(generator);
+    }
+  }
+}
+
+function handleGenerationError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  logger.error(`Failed to generate tests: ${message}`);
+  process.exit(1);
+}
 
 export const validateTests = async (arg: string) => {
   logger.section('Test Validation');
 
   try {
     const config = readConfigFile();
-    if (!config.validator) {
-      throw new Error('No validator defined in the configuration file.');
-    }
+    ensureValidatorExists(config.validator);
 
     if (arg === 'all') {
-      await runValidator(config.validator);
-      logger.success('All tests validated successfully!');
+      await validateAllTests(config.validator);
+    } else if (isNumeric(arg)) {
+      await validateSingleTest(config.validator, parseInt(arg, 10));
     } else {
-      const testNumber = parseInt(arg, 10);
-      if (!isNaN(testNumber)) {
-        await runValidator(config.validator, testNumber, testNumber);
-        logger.success(`Test ${testNumber} validated successfully!`);
-      } else {
-        const generator = config.generators?.find(g => g.name === arg);
-        if (!generator) {
-          throw new Error(
-            `No generator named "${arg}" found in the configuration file.`
-          );
-        }
-        const [start, end] = generator['tests-range'];
-        await runValidator(config.validator, start, end);
-        logger.success(`Tests generated by "${arg}" validated successfully!`);
-      }
+      await validateGeneratorTests(config, arg);
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    logger.error(`Failed to validate tests: ${message}`);
-    process.exit(1);
+    handleValidationError(error);
   }
 };
+
+function ensureValidatorExists(
+  validator: Validator | undefined
+): asserts validator is Validator {
+  if (!validator) {
+    throw new Error('No validator defined in the configuration file.');
+  }
+}
+
+function isNumeric(value: string): boolean {
+  return !isNaN(parseInt(value, 10));
+}
+
+async function validateAllTests(validator: Validator) {
+  await runValidator(validator);
+  logger.success('All tests validated successfully!');
+}
+
+async function validateSingleTest(validator: Validator, testNumber: number) {
+  await runValidator(validator, testNumber, testNumber);
+  logger.success(`Test ${testNumber} validated successfully!`);
+}
+
+async function validateGeneratorTests(
+  config: ConfigFile,
+  generatorName: string
+) {
+  const generator = config.generators?.find(g => g.name === generatorName);
+
+  if (!generator) {
+    throw new Error(
+      `No generator named "${generatorName}" found in the configuration file.`
+    );
+  }
+
+  const [start, end] = generator['tests-range'];
+  await runValidator(config.validator, start, end);
+  logger.success(
+    `Tests generated by "${generatorName}" validated successfully!`
+  );
+}
+
+function handleValidationError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  logger.error(`Failed to validate tests: ${message}`);
+  process.exit(1);
+}
 
 export const solveTests = async (solutionName: string, arg: string) => {
   logger.section(`Running Solution: ${solutionName}`);
 
   try {
     const config = readConfigFile();
-    if (!config.solutions || config.solutions.length === 0) {
-      throw new Error('No solutions defined in the configuration file.');
-    }
-    let found = false;
-    if (arg === 'all') {
-      for (const solution of config.solutions) {
-        if (solution.name === solutionName || solutionName === 'all') {
-          found = true;
-          await runSolution(
-            solution,
-            config['time-limit'],
-            config['memory-limit']
-          );
-        }
-      }
-    } else {
-      const testNumber = parseInt(arg, 10);
-      if (!isNaN(testNumber)) {
-        for (const solution of config.solutions) {
-          if (solution.name === solutionName || solutionName === 'all') {
-            found = true;
-            await runSolution(
-              solution,
-              config['time-limit'],
-              config['memory-limit'],
-              testNumber,
-              testNumber
-            );
-          }
-        }
-      } else {
-        const generator = config.generators?.find(g => g.name === arg);
-        if (!generator) {
-          throw new Error(
-            `No generator named "${arg}" found in the configuration file.`
-          );
-        }
-        const [start, end] = generator['tests-range'];
-        for (const solution of config.solutions) {
-          if (solution.name === solutionName || solutionName === 'all') {
-            found = true;
-            await runSolution(
-              solution,
-              config['time-limit'],
-              config['memory-limit'],
-              start,
-              end
-            );
-          }
-        }
-      }
-    }
+    validateSolutionsExist(config.solutions);
 
-    if (!found) {
-      throw new Error(
-        `Solution named "${solutionName}" not found or no solutions defined.`
+    const matchingSolutions = findMatchingSolutions(
+      config.solutions,
+      solutionName
+    );
+
+    if (arg === 'all') {
+      await runSolutionsOnAllTests(matchingSolutions, config);
+    } else if (isNumeric(arg)) {
+      await runSolutionsOnSingleTest(
+        matchingSolutions,
+        config,
+        parseInt(arg, 10)
       );
+    } else {
+      await runSolutionsOnGeneratorTests(matchingSolutions, config, arg);
     }
 
     logger.success('Solutions run completed successfully!');
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    logger.error(`Failed to run solution: ${message}`);
-    process.exit(1);
+    handleSolutionError(error);
   }
 };
+
+function validateSolutionsExist(
+  solutions: Solution[] | undefined
+): asserts solutions is Solution[] {
+  if (!solutions || solutions.length === 0) {
+    throw new Error('No solutions defined in the configuration file.');
+  }
+}
+
+function findMatchingSolutions(
+  solutions: Solution[],
+  solutionName: string
+): Solution[] {
+  const matching = solutions.filter(
+    s => solutionName === 'all' || s.name === solutionName
+  );
+
+  if (matching.length === 0) {
+    throw new Error(
+      `Solution named "${solutionName}" not found or no solutions defined.`
+    );
+  }
+
+  return matching;
+}
+
+async function runSolutionsOnAllTests(
+  solutions: Solution[],
+  config: ConfigFile
+) {
+  for (const solution of solutions) {
+    await runSolution(solution, config['time-limit'], config['memory-limit']);
+  }
+}
+
+async function runSolutionsOnSingleTest(
+  solutions: Solution[],
+  config: ConfigFile,
+  testNumber: number
+) {
+  for (const solution of solutions) {
+    await runSolution(
+      solution,
+      config['time-limit'],
+      config['memory-limit'],
+      testNumber,
+      testNumber
+    );
+  }
+}
+
+async function runSolutionsOnGeneratorTests(
+  solutions: Solution[],
+  config: ConfigFile,
+  generatorName: string
+) {
+  const generator = config.generators?.find(g => g.name === generatorName);
+
+  if (!generator) {
+    throw new Error(
+      `No generator named "${generatorName}" found in the configuration file.`
+    );
+  }
+
+  const [start, end] = generator['tests-range'];
+
+  for (const solution of solutions) {
+    await runSolution(
+      solution,
+      config['time-limit'],
+      config['memory-limit'],
+      start,
+      end
+    );
+  }
+}
+
+function handleSolutionError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  logger.error(`Failed to run solution: ${message}`);
+  process.exit(1);
+}

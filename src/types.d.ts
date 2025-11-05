@@ -12,14 +12,13 @@ type SolutionType =
 
 type Solution = {
   name: string;
-  lang: SolutionLang;
   source: string;
   type: SolutionType;
 };
 
 type Generator = {
   name: string;
-  source: string;
+  source?: string;
   'tests-range': [number, number];
 };
 

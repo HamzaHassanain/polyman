@@ -29,23 +29,28 @@
 
   "solutions": [
     {
-      "lang": "cpp",
+      "name": "correctcpp",
       "source": "./Solution.cpp",
-      "type": "main-correct"
-    },
-    {
-      "lang": "python",
-      "source": "./Solution.py",
       "type": "correct"
     },
     {
-      "lang": "java",
+      "name": "maincorrectpy",
+      "source": "./Solution.py",
+      "type": "main-correct"
+    },
+    {
+      "name": "tlejeva",
       "source": "./Solution.java",
       "type": "tle"
     }
   ],
 
   "generators": [
+    {
+      "name": "samples",
+      "source": "NA",
+      "tests-range": [1, 2]
+    },
     {
       "name": "MainGenerator",
       "source": "./Generator.cpp",
