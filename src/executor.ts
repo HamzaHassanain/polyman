@@ -40,27 +40,40 @@ export class CommandExecutor {
       options.memoryLimitMB
     );
 
-    return new Promise<ExecutionResult>(resolve => {
+    return new Promise<ExecutionResult>((resolve, reject) => {
       const { process: child, result } = this.spawnProcess(
         wrappedCommand,
         options
       );
       const collectors = this.createOutputCollectors(child);
-      const timeoutHandler = this.createTimeoutHandler(
-        child,
-        options,
-        result,
-        collectors,
-        resolve
+
+      // This ensures that we can cancel the timeout if the process ends early
+      const [timeoutPromise, cancelTimeout] = this.cancellableDelay(
+        options.timeout
       );
+      timeoutPromise
+        .then(() => {
+          this.handleTimeout(
+            child,
+            options,
+            result,
+            collectors,
+            resolve,
+            reject
+          );
+        })
+        .catch(err => {
+          reject(err instanceof Error ? err : new Error(String(err)));
+        });
 
       this.attachEventHandlers(
         child,
         options,
         result,
         collectors,
-        timeoutHandler,
-        resolve
+        cancelTimeout,
+        resolve,
+        reject
       );
     });
   }
@@ -122,19 +135,18 @@ export class CommandExecutor {
 
     return collectors;
   }
+  private cancellableDelay(ms: number): [Promise<void>, () => void] {
+    let timeoutId: NodeJS.Timeout;
 
-  private createTimeoutHandler(
-    child: ChildProcess,
-    options: ExecutionOptions,
-    result: ExecutionResult,
-    collectors: { stdout: string; stderr: string; isResolved: boolean },
-    resolve: (value: ExecutionResult) => void
-  ) {
-    return setTimeout(() => {
-      if (collectors.isResolved || !child.pid || child.killed) return;
+    const promise = new Promise<void>(resolve => {
+      timeoutId = setTimeout(resolve, ms);
+    });
 
-      this.handleTimeout(child, options, result, collectors, resolve);
-    }, options.timeout);
+    const cancel = () => {
+      clearTimeout(timeoutId);
+    };
+
+    return [promise, cancel];
   }
 
   private handleTimeout(
@@ -142,8 +154,11 @@ export class CommandExecutor {
     options: ExecutionOptions,
     result: ExecutionResult,
     collectors: { stdout: string; stderr: string; isResolved: boolean },
-    resolve: (value: ExecutionResult) => void
+    resolve: (value: ExecutionResult) => void,
+    reject: (reason?: any) => void
   ) {
+    if (collectors.isResolved || child.killed) return;
+
     collectors.isResolved = true;
     result.timedOut = true;
 
@@ -163,8 +178,12 @@ export class CommandExecutor {
       logger.warning(`Process killed after ${options.timeout}ms timeout`);
     }
 
-    options.onTimeout?.(result);
-    resolve(result);
+    if (options.onTimeout) {
+      options.onTimeout(result);
+      resolve(result);
+    } else {
+      reject(new Error(`Process killed after ${options.timeout}ms timeout`));
+    }
   }
 
   private attachEventHandlers(
@@ -172,34 +191,34 @@ export class CommandExecutor {
     options: ExecutionOptions,
     result: ExecutionResult,
     collectors: { stdout: string; stderr: string; isResolved: boolean },
-    timeoutId: NodeJS.Timeout,
-    resolve: (value: ExecutionResult) => void
+    cancelTimeout: () => void,
+    resolve: (value: ExecutionResult) => void,
+    reject: (reason?: any) => void
   ) {
     child.on('close', (code, signal) => {
       if (collectors.isResolved) return;
 
-      clearTimeout(timeoutId);
       this.activeProcesses.delete(child);
       collectors.isResolved = true;
-
+      cancelTimeout();
       this.handleProcessClose(
         code,
         signal,
         options,
         result,
         collectors,
-        resolve
+        resolve,
+        reject
       );
     });
 
     child.on('error', err => {
       if (collectors.isResolved) return;
-
-      clearTimeout(timeoutId);
+      cancelTimeout();
       this.activeProcesses.delete(child);
       collectors.isResolved = true;
 
-      this.handleProcessError(err, options, result, resolve);
+      this.handleProcessError(err, options, result, resolve, reject);
     });
   }
 
@@ -209,7 +228,8 @@ export class CommandExecutor {
     options: ExecutionOptions,
     result: ExecutionResult,
     collectors: { stdout: string; stderr: string },
-    resolve: (value: ExecutionResult) => void
+    resolve: (value: ExecutionResult) => void,
+    reject: (reason?: any) => void
   ) {
     Object.assign(result, {
       stdout: collectors.stdout,
@@ -218,14 +238,14 @@ export class CommandExecutor {
     });
 
     if (this.isMemoryError(code, signal, collectors.stderr)) {
-      this.handleMemoryError(code, signal, options, result, resolve);
+      this.handleMemoryError(code, signal, options, result, resolve, reject);
       return;
     }
 
     if (code === 0) {
       this.handleSuccess(options, result, resolve);
     } else {
-      this.handleError(options, result, resolve);
+      this.handleError(options, result, resolve, reject);
     }
   }
 
@@ -254,7 +274,8 @@ export class CommandExecutor {
     signal: NodeJS.Signals | null,
     options: ExecutionOptions,
     result: ExecutionResult,
-    resolve: (value: ExecutionResult) => void
+    resolve: (value: ExecutionResult) => void,
+    reject: (reason?: any) => void
   ) {
     result.memoryExceeded = true;
     result.success = false;
@@ -265,8 +286,12 @@ export class CommandExecutor {
       );
     }
 
-    options.onMemoryExceeded?.(result);
-    resolve(result);
+    if (options.onMemoryExceeded) {
+      options.onMemoryExceeded(result);
+      resolve(result);
+    } else {
+      reject(new Error('Memory limit exceeded'));
+    }
   }
 
   private handleSuccess(
@@ -287,7 +312,8 @@ export class CommandExecutor {
   private handleError(
     options: ExecutionOptions,
     result: ExecutionResult,
-    resolve: (value: ExecutionResult) => void
+    resolve: (value: ExecutionResult) => void,
+    reject: (reason?: any) => void
   ) {
     result.success = false;
 
@@ -295,15 +321,24 @@ export class CommandExecutor {
       logger.error(result.stderr.trim());
     }
 
-    options.onError?.(result);
-    resolve(result);
+    if (options.onError) {
+      options.onError(result);
+      resolve(result);
+    } else {
+      reject(
+        new Error(
+          `Command failed with exit code ${result.exitCode}\n${result.stderr}`
+        )
+      );
+    }
   }
 
   private handleProcessError(
     err: Error,
     options: ExecutionOptions,
     result: ExecutionResult,
-    resolve: (value: ExecutionResult) => void
+    resolve: (value: ExecutionResult) => void,
+    reject: (reason?: any) => void
   ) {
     result.success = false;
     result.stderr = err.message;
@@ -313,8 +348,12 @@ export class CommandExecutor {
       logger.error(err.message);
     }
 
-    options.onError?.(result);
-    resolve(result);
+    if (options.onError) {
+      options.onError(result);
+      resolve(result);
+    } else {
+      reject(err);
+    }
   }
 
   private killProcessTree(pid: number) {
