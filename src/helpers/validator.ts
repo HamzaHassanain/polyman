@@ -71,7 +71,7 @@ async function runValidator(
       memoryLimitMB: DEFAULT_MEMORY_LIMIT,
       silent: true,
       onError: result => {
-        if (expectedVerdict == 'VALID')
+        if (expectedVerdict === 'VALID')
           throw new Error(result.stderr || 'Validator execution failed');
       },
       onTimeout: () => {
@@ -97,7 +97,7 @@ async function runValidator(
     undefined
   );
 
-  if (expectedVerdict == 'INVALID') {
+  if (expectedVerdict === 'INVALID') {
     throw new Error('Validator did not detect invalid test');
   }
 }

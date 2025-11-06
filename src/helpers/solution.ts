@@ -2,11 +2,10 @@ import ConfigFile, { Checker, Solution } from '../types';
 import { executor } from '../executor';
 import fs from 'fs';
 import path from 'path';
-import { DEFAULT_TIMEOUT, DEFAULT_MEMORY_LIMIT } from './utils';
-import { compileCPP, compileJava, filterTestsByRange } from './utils';
-import { readConfigFile } from './utils';
-import { ensureCheckerExists } from './checker';
+import { throwError, DEFAULT_MEMORY_LIMIT, DEFAULT_TIMEOUT } from './utils';
+import { compileCPP, compileJava, readConfigFile } from './utils';
 import { logger } from '../logger';
+import { ensureCheckerExists } from './checker';
 
 export function validateSolutionsExist(
   solutions: Solution[] | undefined
@@ -31,66 +30,172 @@ export function findMatchingSolutions(
 
   return matching;
 }
-export async function runSolutionsOnAllTests(
+
+export async function runMatchingSolutionsOnTests(
   solutions: Solution[],
-  config: ConfigFile
-) {
-  for (const solution of solutions) {
-    logger.log(
-      `  ${logger.dim('→')} ${logger.highlight(solution.name)} ${logger.dim(`(${solution.type})`)}`
-    );
-    await runSolution(solution, config['time-limit'], config['memory-limit']);
-    logger.success(`    Completed successfully`);
-  }
-}
-export async function runSolutionsOnSingleTest(
-  solutions: Solution[],
+  solutionName: string,
   config: ConfigFile,
-  testNumber: number
+  testNumber?: number
 ) {
-  for (const solution of solutions) {
-    await runSolution(
-      solution,
-      config['time-limit'],
-      config['memory-limit'],
-      testNumber,
-      testNumber
-    );
-  }
-}
-export async function runSolutionsOnGeneratorTests(
-  solutions: Solution[],
-  config: ConfigFile,
-  generatorName: string
-) {
-  const generator = config.generators?.find(g => g.name === generatorName);
+  const matchingSolutions = findMatchingSolutions(solutions, solutionName);
 
-  if (!generator) {
-    throw new Error(
-      `No generator named "${generatorName}" found in the configuration file.`
-    );
+  if (matchingSolutions.length === 0) {
+    throw new Error(`No solutions matched the name "${solutionName}"`);
   }
 
-  const [start, end] = generator['tests-range'];
+  try {
+    for (const solution of matchingSolutions) {
+      logger.info(
+        `Running solution: ${logger.highlight(solution.name)} ${logger.dim(`(${solution.type})`)}`
+      );
+      const compiledPath = await compileSolution(solution.source);
+      ensureOutputDirectory(solution.name);
 
-  for (const solution of solutions) {
-    await runSolution(
-      solution,
-      config['time-limit'],
-      config['memory-limit'],
-      start,
-      end
-    );
+      const testsDir = path.resolve(process.cwd(), 'tests');
+      const testFiles = getTestFilesToRun(testsDir, testNumber);
+
+      for (const testFile of testFiles) {
+        try {
+          await runSolution(
+            solution,
+            compiledPath,
+            config['time-limit'],
+            config['memory-limit'],
+            testFile
+          );
+        } catch (error) {
+          throwError(error, `Failed on test file ${testFile}`);
+        }
+      }
+
+      logger.log(
+        `  ${logger.bold('→')} Completed running solution ${logger.highlight(solution.name)}`
+      );
+      console.log();
+    }
+  } catch (error) {
+    throwError(error, 'Failed to run solutions on tests');
   }
 }
-export function handleSolutionError(
-  error: unknown,
-  isCancelationPoint = false
-) {
-  const message = error instanceof Error ? error.message : String(error);
-  logger.error(`${message}`);
-  if (isCancelationPoint) process.exit(1);
+
+function getTestFilesToRun(testsDir: string, testNumber?: number): string[] {
+  if (testNumber !== undefined) {
+    return [`test${testNumber}.txt`];
+  }
+
+  return fs
+    .readdirSync(testsDir)
+    .filter(file => file.startsWith('test') && file.endsWith('.txt'));
 }
+
+async function runSolution(
+  solution: Solution,
+  compiledPath: string,
+  timeout: number,
+  memoryLimitMB: number,
+  inputFile: string
+) {
+  const outputFilePath = path.resolve(
+    process.cwd(),
+    'solutions-outputs',
+    solution.name,
+    path.basename(inputFile).replace('test', 'output_')
+  );
+  const inputFilePath = path.resolve(process.cwd(), 'tests', inputFile);
+  await executor.executeWithRedirect(
+    compiledPath,
+    {
+      timeout,
+      memoryLimitMB,
+      silent: true,
+      onError: result => {
+        writeErrorOutputAndThrow(outputFilePath, result.stderr);
+      },
+      onTimeout: () => {
+        writeTimeoutOutputAndThrow(outputFilePath, timeout);
+      },
+      onMemoryExceeded: () => {
+        writeMemoryOutputAndThrow(outputFilePath, memoryLimitMB);
+      },
+    },
+    inputFilePath,
+    outputFilePath
+  );
+}
+function ensureOutputDirectory(solutionName: string): string {
+  const outputDir = path.resolve(
+    process.cwd(),
+    'solutions-outputs',
+    solutionName
+  );
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
+  }
+  return outputDir;
+}
+
+async function compileSolution(sourcePath: string): Promise<string> {
+  const ext = path.extname(sourcePath);
+
+  switch (ext) {
+    case '.cpp':
+      return await compileCPP(sourcePath);
+    case '.py':
+      return `python3 ${sourcePath}`;
+    case '.java':
+      return await compileJava(sourcePath);
+    default:
+      throw new Error(`Unsupported solution file extension: ${ext}`);
+  }
+}
+// export async function runSolutionsOnSingleTest(
+//   solutions: Solution[],
+//   config: ConfigFile,
+//   testNumber: number
+// ) {
+//   for (const solution of solutions) {
+//     await runSolution(
+//       solution,
+//       config['time-limit'],
+//       config['memory-limit'],
+//       testNumber,
+//       testNumber
+//     );
+//   }
+// }
+// export async function runSolutionsOnGeneratorTests(
+//   solutions: Solution[],
+//   config: ConfigFile,
+//   generatorName: string
+// ) {
+//   const generator = config.generators?.find(g => g.name === generatorName);
+
+//   if (!generator) {
+//     throw new Error(
+//       `No generator named "${generatorName}" found in the configuration file.`
+//     );
+//   }
+
+//   const [start, end] = generator['tests-range'];
+
+//   for (const solution of solutions) {
+//     await runSolution(
+//       solution,
+//       config['time-limit'],
+//       config['memory-limit'],
+//       start,
+//       end
+//     );
+//   }
+// }
+// export function handleSolutionError(
+//   error: unknown,
+//   isCancelationPoint = false
+// ) {
+//   const message = error instanceof Error ? error.message : String(error);
+//   logger.error(`${message}`);
+//   if (isCancelationPoint) process.exit(1);
+// }
 export async function testSolutionAgainstMainCorrect(solutionName: string) {
   try {
     const config = readConfigFile();
@@ -116,21 +221,20 @@ export async function testSolutionAgainstMainCorrect(solutionName: string) {
       `  ${logger.dim('→')} Running main solution ${logger.dim('(generating outputs...)')}`
     );
     try {
-      await runSolutionsOnAllTests([mainSolution], config);
-    } catch (err) {
-      const error = new Error(
-        `Failed to run ${logger.bold('Main')} solution:\n\t${String(err instanceof Error ? err.message : err)}`
-      );
-      handleSolutionError(error, true);
+      await runMatchingSolutionsOnTests([mainSolution], 'all', config);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const newErrorMessage = `Failed to run ${logger.bold('Main Solution')}: \n\t${message}`;
+      throwError(new Error(newErrorMessage));
     }
 
     logger.log(
       `  ${logger.dim('→')} Running target solution ${logger.dim('(generating outputs...)')}`
     );
     try {
-      await runSolutionsOnAllTests([solution], config);
-    } catch (error) {
-      handleSolutionError(error);
+      await runMatchingSolutionsOnTests([solution], 'all', config);
+    } catch {
+      // @ts-nocheck
     }
 
     logger.log(
@@ -139,13 +243,13 @@ export async function testSolutionAgainstMainCorrect(solutionName: string) {
     try {
       await compareResultsWithChecker(checker, mainSolution, solution);
     } catch (error) {
-      handleSolutionError(error);
+      throwError(error, 'Comparison with checker failed');
     }
 
     console.log();
     logger.successBox(`"${solutionName}" BEHAVES AS EXPECTED!`);
   } catch (error) {
-    handleSolutionError(error);
+    throwError(error, `Failed to test solution "${solutionName}"`);
   }
 }
 export function ensureMainSolutionExists(
@@ -234,139 +338,22 @@ function createVerdictTracker() {
     didWA: false,
   };
 }
-async function runSolution(
-  solution: Solution,
-  timeout: number,
-  memoryLimitMB: number,
-  testBegin?: number,
-  testEnd?: number
-) {
-  try {
-    const cmdToRun = await compileSolution(solution.source);
-    const testsDir = path.resolve(process.cwd(), 'tests');
-    const outputDir = ensureOutputDirectory(solution.name);
-    const testFiles = fs.readdirSync(testsDir);
-    const filteredTests = filterTestsByRange(testFiles, testBegin, testEnd);
 
-    await runSolutionOnTests(
-      cmdToRun,
-      testsDir,
-      outputDir,
-      filteredTests,
-      solution,
-      timeout,
-      memoryLimitMB
-    );
-  } catch (error) {
-    throw error instanceof Error
-      ? error
-      : new Error(`Failed to run solution ${solution.name}: ${String(error)}`);
-  } finally {
-    executor.cleanup();
-  }
-}
-function ensureOutputDirectory(solutionName: string): string {
-  const outputDir = path.resolve(
-    process.cwd(),
-    'solutions-outputs',
-    solutionName
-  );
-  if (!fs.existsSync(outputDir)) {
-    fs.mkdirSync(outputDir, { recursive: true });
-  }
-  return outputDir;
-}
-
-async function runSolutionOnTests(
-  cmdToRun: string,
-  testsDir: string,
-  outputDir: string,
-  testFiles: string[],
-  solution: Solution,
-  timeout: number,
-  memoryLimitMB: number
-) {
-  for (const testFile of testFiles) {
-    const testFilePath = path.join(testsDir, testFile);
-    const testOutputPath = path.resolve(outputDir, `output_${testFile}`);
-
-    await executor.executeWithRedirect(
-      cmdToRun,
-      {
-        timeout,
-        memoryLimitMB,
-        silent: true,
-        onError: result =>
-          writeErrorOutputAndThrow(
-            solution.name,
-            testFile,
-            testOutputPath,
-            result.stderr
-          ),
-        onTimeout: () =>
-          writeTimeoutOutputAndThrow(
-            solution.name,
-            testFile,
-            testOutputPath,
-            timeout
-          ),
-        onMemoryExceeded: () =>
-          writeMemoryOutputAndThrow(
-            solution.name,
-            testFile,
-            testOutputPath,
-            memoryLimitMB
-          ),
-      },
-      testFilePath,
-      testOutputPath
-    );
-  }
-}
-function writeErrorOutputAndThrow(
-  _solutionName: string,
-  _testFile: string,
-  outputPath: string,
-  stderr: string
-) {
+function writeErrorOutputAndThrow(outputPath: string, stderr: string) {
   fs.writeFileSync(outputPath, `Runtime Error: ${stderr}`);
   throw new Error(`Runtime Error: ${stderr}`);
 }
 
-function writeTimeoutOutputAndThrow(
-  _solutionName: string,
-  _testFile: string,
-  outputPath: string,
-  timeout: number
-) {
+function writeTimeoutOutputAndThrow(outputPath: string, timeout: number) {
   fs.writeFileSync(outputPath, `Time Limit Exceeded after ${timeout}ms`);
   throw new Error(`Time Limit Exceeded after ${timeout}ms`);
 }
 
-function writeMemoryOutputAndThrow(
-  _solutionName: string,
-  _testFile: string,
-  outputPath: string,
-  memoryLimit: number
-) {
+function writeMemoryOutputAndThrow(outputPath: string, memoryLimit: number) {
   fs.writeFileSync(outputPath, `Memory Limit Exceeded (${memoryLimit} MB)`);
   throw new Error(`Memory Limit Exceeded (${memoryLimit} MB)`);
 }
 
-async function compileSolution(sourcePath: string): Promise<string> {
-  const ext = path.extname(sourcePath);
-
-  switch (ext) {
-    case '.cpp':
-      return await compileCPP(sourcePath);
-    case '.py':
-      return `python3 ${sourcePath}`;
-    case '.java':
-      return await compileJava(sourcePath);
-    default:
-      throw new Error(`Unsupported solution file extension: ${ext}`);
-  }
-}
 function getTestFiles(testsDir: string): string[] {
   return fs.readdirSync(testsDir).filter(file => file.startsWith('test'));
 }

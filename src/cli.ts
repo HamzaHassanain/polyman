@@ -30,16 +30,16 @@ program
   .action(generateTests);
 
 program
-  .command('run-validator <arg>')
+  .command('run-validator <test>')
   .description(
-    'Run the validator on the generated tests\n\tThe <arg>:\n\t\t"all" - to validate all tests\n\t\ta test number - to validate a specific test'
+    'Run the validator on the generated tests\n\tThe <test>:\n\t\t"all" - to validate all tests\n\t\ta test number - to validate a specific test'
   )
   .action(validateTests);
 
 program
-  .command('run-solution <solution-name> <arg>')
+  .command('run-solution <solution-name> <test>')
   .description(
-    'Run a solution with a given name on the generated tests.\n\tThe <arg>:\n\t\t"all" - to run on all tests\n\t\ta test number - to run on a specific test'
+    'Run a solution with a given name on the generated tests.\n\tThe <test>:\n\t\t"all" - to run on all tests\n\t\ta test number - to run on a specific test'
   )
   .action(solveTests);
 

@@ -23,8 +23,8 @@ export interface ExecutionOptions {
 
 const TIMEOUT_EXIT_CODE = 124;
 const OOM_KILL_EXIT_CODE = 137;
-const SEGFAULT_EXIT_CODE = 139;
-const ABORT_EXIT_CODE = 134;
+// const SEGFAULT_EXIT_CODE = 139;
+// const ABORT_EXIT_CODE = 134;
 const KILL_GRACE_PERIOD_MS = 100;
 
 export class CommandExecutor {
@@ -201,15 +201,19 @@ export class CommandExecutor {
       this.activeProcesses.delete(child);
       collectors.isResolved = true;
       cancelTimeout();
-      this.handleProcessClose(
-        code,
-        signal,
-        options,
-        result,
-        collectors,
-        resolve,
-        reject
-      );
+      try {
+        this.handleProcessClose(
+          code,
+          signal,
+          options,
+          result,
+          collectors,
+          resolve,
+          reject
+        );
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
     });
 
     child.on('error', err => {
@@ -217,8 +221,11 @@ export class CommandExecutor {
       cancelTimeout();
       this.activeProcesses.delete(child);
       collectors.isResolved = true;
-
-      this.handleProcessError(err, options, result, resolve, reject);
+      try {
+        this.handleProcessError(err, options, result, resolve, reject);
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
     });
   }
 
@@ -256,8 +263,7 @@ export class CommandExecutor {
   ): boolean {
     const hasMemoryExitCode =
       code === OOM_KILL_EXIT_CODE ||
-      code === SEGFAULT_EXIT_CODE ||
-      code === ABORT_EXIT_CODE ||
+      // code === ABORT_EXIT_CODE ||
       signal === 'SIGABRT';
 
     const hasMemoryErrorMessage =

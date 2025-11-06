@@ -9,26 +9,21 @@ import {
 import {
   logTemplateCreationSuccess,
   copyTemplate,
-  handleTemplateCreationError,
 } from './helpers/create-template';
 
 import {
   ensureGeneratorsExist,
   runMatchingGenerators,
-  handleGenerationError,
 } from './helpers/generator';
 
 import {
   validateSolutionsExist,
-  findMatchingSolutions,
-  runSolutionsOnAllTests,
-  runSolutionsOnSingleTest,
-  runSolutionsOnGeneratorTests,
-  handleSolutionError,
   testSolutionAgainstMainCorrect,
+  // runSolutionsOnAllTests,
   ensureMainSolutionExists,
   getMainSolution,
   compareResultsWithChecker,
+  runMatchingSolutionsOnTests,
 } from './helpers/solution';
 
 import {
@@ -58,7 +53,7 @@ export const createTemplate = (directory: string) => {
     logger.success('Template created successfully!');
     logTemplateCreationSuccess(directory);
   } catch (error) {
-    handleTemplateCreationError(error);
+    logErrorAndExit(error);
   }
 };
 export const generateTests = async (generatorName: string) => {
@@ -75,7 +70,7 @@ export const generateTests = async (generatorName: string) => {
       `All tests generated successfully for: ${logger.highlight(generatorName)}`
     );
   } catch (error) {
-    handleGenerationError(error);
+    logErrorAndExit(error);
   }
 };
 
@@ -110,30 +105,27 @@ export const solveTests = async (solutionName: string, arg: string) => {
     const config = readConfigFile();
     validateSolutionsExist(config.solutions);
 
-    const matchingSolutions = findMatchingSolutions(
-      config.solutions,
-      solutionName
-    );
-
     if (arg === 'all') {
-      await runSolutionsOnAllTests(matchingSolutions, config);
+      logger.info('Running on all tests...');
+      await runMatchingSolutionsOnTests(config.solutions, solutionName, config);
     } else if (isNumeric(arg)) {
       logger.info(
         `Running on test ${logger.highlight(arg)} ${logger.dim(`(timeout: ${config['time-limit']}ms, memory: ${config['memory-limit']}MB)`)}`
       );
-      await runSolutionsOnSingleTest(
-        matchingSolutions,
+      await runMatchingSolutionsOnTests(
+        config.solutions,
+        solutionName,
         config,
         parseInt(arg, 10)
       );
       logger.success(`Completed test ${arg}`);
     } else {
-      logger.info(`Running on tests from generator: ${logger.highlight(arg)}`);
-      await runSolutionsOnGeneratorTests(matchingSolutions, config, arg);
-      logger.success(`Completed all tests from "${arg}"`);
+      throw new Error(
+        `Invalid argument "${arg}" for solution runner. Please use "all" or a test number.`
+      );
     }
   } catch (error) {
-    handleSolutionError(error);
+    logErrorAndExit(error);
   }
 };
 export const testWhat = async (what: string) => {
@@ -196,7 +188,7 @@ export const fullVerification = async () => {
     logger.info(
       `Found ${logger.highlight(config.solutions.length.toString())} solution(s)`
     );
-    await runSolutionsOnAllTests(config.solutions, config);
+    await runMatchingSolutionsOnTests(config.solutions, 'all', config);
     logger.stepComplete('All solutions ran successfully');
 
     // Validate Solutions Against Main Correct

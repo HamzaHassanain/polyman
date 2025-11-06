@@ -27,11 +27,14 @@ type Checker = {
   source: string;
   tests?: string;
 };
+
+type CheckerVerdict = 'OK' | 'WA' | 'ok' | 'wa' | 'PE' | 'pe';
+
 type CheckerTest = {
   stdin: string;
   stdout: string;
   answer: string;
-  verdict: 'OK' | 'WA' | 'ok' | 'wa' | 'PE' | 'pe';
+  verdict: CheckerVerdict;
 };
 
 type Validator = {
@@ -85,5 +88,6 @@ export {
   ValidatorTest,
   CheckerTest,
   ValidatorVerdict,
+  CheckerVerdict,
 };
 export default ConfigFile;

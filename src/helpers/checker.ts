@@ -1,11 +1,67 @@
-import fs from 'fs';
-import path from 'path';
+import { Checker, CheckerTest, CheckerVerdict } from '../types';
 import { executor } from '../executor';
-import { compileCPP } from './utils';
+import path from 'path';
+import fs from 'fs';
+import {
+  compileCPP,
+  readConfigFile,
+  throwError,
+  ensureDirectoryExists,
+  removeDirectoryRecursively,
+} from './utils';
 import { DEFAULT_TIMEOUT, DEFAULT_MEMORY_LIMIT } from './utils';
 import { logger } from '../logger';
-import { Checker, CheckerTest } from '../types';
-import { readConfigFile } from './utils';
+
+async function runChecker(
+  execCommand: string,
+  inputFilePath: string,
+  outputFilePath: string,
+  answerFilePath: string,
+  expectedVerdict: CheckerVerdict
+) {
+  await executor.execute(
+    `${execCommand} ${inputFilePath} ${outputFilePath} ${answerFilePath}`,
+    {
+      timeout: DEFAULT_TIMEOUT,
+      memoryLimitMB: DEFAULT_MEMORY_LIMIT,
+      silent: true,
+      onError: () => {
+        if (expectedVerdict.toUpperCase() === 'OK') {
+          throw new Error(
+            `Checker execution failed: expected OK but got WA/PE`
+          );
+        }
+      },
+      onTimeout: () => {
+        logger.error(
+          `${logger.bold(
+            'Checker Unexpectedly Exceeded Time Limit!'
+          )} (${DEFAULT_TIMEOUT}ms)`
+        );
+        executor.cleanup();
+        process.exit(1);
+      },
+      onMemoryExceeded: () => {
+        logger.error(
+          ` ${logger.bold(
+            'Checker Unexpectedly Exceeded Memory Limit!'
+          )} (${DEFAULT_MEMORY_LIMIT} MB)`
+        );
+        executor.cleanup();
+        process.exit(1);
+      },
+    }
+  );
+
+  if (
+    expectedVerdict.toUpperCase() === 'WA' ||
+    expectedVerdict.toUpperCase() === 'PE'
+  ) {
+    throw new Error(
+      `Checker execution failed: expected ${expectedVerdict} but got OK`
+    );
+  }
+}
 
 export function ensureCheckerExists(
   checker: Checker | undefined
@@ -15,36 +71,83 @@ export function ensureCheckerExists(
   }
 }
 
+export async function testCheckerItself() {
+  try {
+    const config = readConfigFile();
+    ensureCheckerExists(config.checker);
+
+    await makeCheckerTests();
+    await runCheckerTests(config.checker);
+  } catch (error) {
+    throwError(error, 'Failed to test checker');
+  } finally {
+    executor.cleanup();
+    removeDirectoryRecursively('checker_tests');
+  }
+}
+
+async function makeCheckerTests() {
+  const checkerTests = await parseCheckerTests();
+
+  ensureDirectoryExists('checker_tests');
+  for (const [index, test] of checkerTests.entries()) {
+    const inputPath = path.resolve(
+      process.cwd(),
+      'checker_tests',
+      `test${index + 1}_input.txt`
+    );
+    const outputPath = path.resolve(
+      process.cwd(),
+      'checker_tests',
+      `test${index + 1}_output.txt`
+    );
+    const answerPath = path.resolve(
+      process.cwd(),
+      'checker_tests',
+      `test${index + 1}_answer.txt`
+    );
+
+    fs.writeFileSync(inputPath, test.stdin);
+    fs.writeFileSync(outputPath, test.stdout);
+    fs.writeFileSync(answerPath, test.answer);
+  }
+}
+
 export async function runCheckerTests(checker: Checker) {
+  let someFailed = false;
   try {
     const checkerTests = await parseCheckerTests();
     const compiledPath = await compileCPP(checker.source);
 
-    for (const [index, test] of checkerTests.entries()) {
-      await executeCheckerTest(compiledPath, test, index + 1);
+    const testsDir = path.resolve(process.cwd(), 'checker_tests');
+
+    for (const [index, { verdict }] of checkerTests.entries()) {
+      const inputFilePath = path.join(testsDir, `test${index + 1}_input.txt`);
+      const outputFilePath = path.join(testsDir, `test${index + 1}_output.txt`);
+      const answerFilePath = path.join(testsDir, `test${index + 1}_answer.txt`);
+
+      try {
+        await runChecker(
+          compiledPath,
+          inputFilePath,
+          outputFilePath,
+          answerFilePath,
+          verdict
+        );
+      } catch (error) {
+        someFailed = true;
+        logger.error(
+          `Checker Test ${index + 1} failed:\n\t${(error as Error).message}, expected to be ${verdict}`
+        );
+      }
     }
   } catch (error) {
-    throw error instanceof Error
-      ? error
-      : new Error(`Failed to run checker tests: ${String(error)}`);
+    throwError(error, 'Failed to compile checker');
   } finally {
     executor.cleanup();
   }
-}
 
-export async function testCheckerItself() {
-  try {
-    const config = readConfigFile();
-    const checker = config.checker;
-
-    ensureCheckerExists(checker);
-
-    logger.info('Running checker self-tests...');
-    await runCheckerTests(checker);
-    logger.success('All checker tests passed');
-  } catch (error) {
-    handleCheckerError(error);
-  }
+  if (someFailed) throw new Error('Some checker tests failed');
 }
 
 function parseCheckerTests(): Promise<CheckerTest[]> {
@@ -66,67 +169,4 @@ function parseCheckerTests(): Promise<CheckerTest[]> {
       }
     });
   });
-}
-
-async function executeCheckerTest(
-  compiledPath: string,
-  test: CheckerTest,
-  testNumber: number
-) {
-  const tempFiles = createCheckerTempFiles(test);
-
-  try {
-    const result = await executor.execute(
-      `${compiledPath} ${tempFiles.input} ${tempFiles.output} ${tempFiles.answer}`,
-      {
-        timeout: DEFAULT_TIMEOUT,
-        memoryLimitMB: DEFAULT_MEMORY_LIMIT,
-        silent: true,
-      }
-    );
-
-    logCheckerTestResult(result, test.verdict, testNumber);
-  } finally {
-    cleanupTempFiles([tempFiles.input, tempFiles.output, tempFiles.answer]);
-  }
-}
-
-function createCheckerTempFiles(test: CheckerTest) {
-  const inputPath = path.resolve(process.cwd(), 'temp_checker_input.txt');
-  const outputPath = path.resolve(process.cwd(), 'temp_checker_output.txt');
-  const answerPath = path.resolve(process.cwd(), 'temp_checker_answer.txt');
-
-  fs.writeFileSync(inputPath, test.stdin);
-  fs.writeFileSync(outputPath, test.stdout);
-  fs.writeFileSync(answerPath, test.answer);
-
-  return { input: inputPath, output: outputPath, answer: answerPath };
-}
-
-function cleanupTempFiles(filePaths: string[]) {
-  filePaths.forEach(filePath => fs.unlinkSync(filePath));
-}
-
-function logCheckerTestResult(
-  result: { exitCode: number; stdout: string; stderr: string },
-  expectedVerdict: string,
-  testNumber: number
-): boolean {
-  const success = result.exitCode === 0;
-  const expectedSuccess = expectedVerdict.toUpperCase() === 'OK';
-  const passed = success === expectedSuccess;
-
-  if (!passed) {
-    throw new Error(
-      `Checker Test ${testNumber} failed: expected ${expectedVerdict} but got ${success ? 'OK' : 'WA/PE'}`
-    );
-  }
-
-  return true;
-}
-
-function handleCheckerError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  logger.error(`${message}`);
-  process.exit(1);
 }
