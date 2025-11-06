@@ -2,8 +2,6 @@ import {
   ensureValidatorExists,
   validateAllTests,
   validateSingleTest,
-  validateGeneratorTests,
-  handleValidationError,
   testValidatorItself,
   runValidatorTests,
 } from './helpers/validator';
@@ -39,7 +37,7 @@ import {
   runCheckerTests,
 } from './helpers/checker';
 
-import { readConfigFile, isNumeric } from './helpers/utils';
+import { readConfigFile, isNumeric, logErrorAndExit } from './helpers/utils';
 
 import { logger } from './logger';
 
@@ -70,10 +68,6 @@ export const generateTests = async (generatorName: string) => {
     const { generators } = readConfigFile();
     ensureGeneratorsExist(generators);
 
-    logger.info(
-      `Found ${logger.highlight(generators.length.toString())} generator(s)`
-    );
-
     await runMatchingGenerators(generators, generatorName);
 
     console.log();
@@ -93,18 +87,20 @@ export const validateTests = async (arg: string) => {
     ensureValidatorExists(config.validator);
 
     if (arg === 'all') {
-      await validateAllTests(config.validator, config.generators!);
+      logger.info('Validating all tests...');
+      await validateAllTests(config.validator);
+      logger.success('All tests passed validation');
     } else if (isNumeric(arg)) {
       logger.info(`Validating test ${logger.highlight(arg)}...`);
       await validateSingleTest(config.validator, parseInt(arg, 10));
       logger.success(`Test ${arg} passed validation`);
     } else {
-      logger.info(`Validating tests from generator: ${logger.highlight(arg)}`);
-      await validateGeneratorTests(config, arg);
-      logger.success(`All tests from "${arg}" passed validation`);
+      throw new Error(
+        `Invalid argument "${arg}" for validator. Please use "all" or a test number.`
+      );
     }
   } catch (error) {
-    handleValidationError(error);
+    logErrorAndExit(error);
   }
 };
 export const solveTests = async (solutionName: string, arg: string) => {
@@ -142,17 +138,22 @@ export const solveTests = async (solutionName: string, arg: string) => {
 };
 export const testWhat = async (what: string) => {
   logger.section(`🔍 TESTING: ${what.toUpperCase()}`);
-
-  switch (what) {
-    case 'validator':
-      await testValidatorItself();
-      break;
-    case 'checker':
-      await testCheckerItself();
-      break;
-    default:
-      await testSolutionAgainstMainCorrect(what);
-      break;
+  try {
+    switch (what) {
+      case 'validator':
+        logger.info('Testing validator self-tests...');
+        await testValidatorItself();
+        logger.success('Validator self-tests passed');
+        break;
+      case 'checker':
+        await testCheckerItself();
+        break;
+      default:
+        await testSolutionAgainstMainCorrect(what);
+        break;
+    }
+  } catch (error) {
+    logErrorAndExit(error);
   }
 };
 export const fullVerification = async () => {
@@ -179,7 +180,7 @@ export const fullVerification = async () => {
 
     // Validate Generated Tests
     logger.step(stepNum++, 'Validating Generated Tests');
-    await validateAllTests(config.validator, config.generators);
+    await validateAllTests(config.validator);
     logger.stepComplete('All generated tests are valid');
 
     // Checker Self-Test

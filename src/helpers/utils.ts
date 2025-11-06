@@ -1,6 +1,7 @@
 import path from 'path';
 import { executor } from '../executor';
 import fs from 'fs';
+import { logger } from '../logger';
 import ConfigFile from '../types';
 
 export const DEFAULT_TIMEOUT = 10000;
@@ -71,4 +72,34 @@ export function readConfigFile(): ConfigFile {
 }
 export function isNumeric(value: string): boolean {
   return !isNaN(parseInt(value, 10));
+}
+export function logError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  logger.error(`${message}`);
+}
+export function logErrorAndExit(error: unknown) {
+  logError(error);
+  process.exit(1);
+}
+export function logErrorAndThrow(error: unknown, message = '') {
+  logError(error);
+  throwError(error, message);
+}
+export function throwError(error: unknown, message = ''): never {
+  throw error instanceof Error
+    ? error
+    : new Error(`${message}: ${String(error)}`);
+}
+
+export function ensureDirectoryExists(dirName: string) {
+  const dirPath = path.resolve(process.cwd(), dirName);
+  if (!fs.existsSync(dirPath)) {
+    fs.mkdirSync(dirPath, { recursive: true });
+  }
+}
+export function removeDirectoryRecursively(dirName: string) {
+  const dirPath = path.resolve(process.cwd(), dirName);
+  if (fs.existsSync(dirPath)) {
+    fs.rmSync(dirPath, { recursive: true, force: true });
+  }
 }

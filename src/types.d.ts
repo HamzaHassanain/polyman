@@ -39,9 +39,10 @@ type Validator = {
   tests?: string;
 };
 
+type ValidatorVerdict = 'VALID' | 'INVALID' | 'valid' | 'invalid';
 type ValidatorTest = {
   stdin: string;
-  expectedVerdict: 'VALID' | 'INVALID' | 0 | 1 | 'valid' | 'invalid';
+  expectedVerdict: ValidatorVerdict;
 };
 
 interface ConfigFile {
@@ -83,5 +84,6 @@ export {
   SolutionType,
   ValidatorTest,
   CheckerTest,
+  ValidatorVerdict,
 };
 export default ConfigFile;

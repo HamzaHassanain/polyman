@@ -485,12 +485,14 @@ async function runCheckerComparison(
         logger.error(
           `${logger.bold('Checker Unexpectedly Exceeded Time Limit!')} (${DEFAULT_TIMEOUT}ms), on test ${testFile}`
         );
+        executor.cleanup();
         process.exit(1);
       },
       onMemoryExceeded: () => {
         logger.error(
           `${logger.bold('Checker Unexpectedly Exceeded Memory Limit!')} (${DEFAULT_MEMORY_LIMIT} MB), on test ${testFile}`
         );
+        executor.cleanup();
         process.exit(1);
       },
     }
