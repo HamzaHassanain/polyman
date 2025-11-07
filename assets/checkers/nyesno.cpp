@@ -1,3 +1,4 @@
+// Description: Checks multiple YES/NO answers (case insensitive)
 #include "testlib.h"
 #include <string>
 
@@ -6,13 +7,15 @@ using namespace std;
 const string YES = "YES";
 const string NO = "NO";
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
     setName("%s", ("multiple " + YES + "/" + NO + " (case insensitive)").c_str());
     registerTestlibCmd(argc, argv);
 
     int index = 0, yesCount = 0, noCount = 0;
     string pa;
-    while (!ans.seekEof() && !ouf.seekEof()) {
+    while (!ans.seekEof() && !ouf.seekEof())
+    {
         index++;
         string ja = upperCase(ans.readToken());
         pa = upperCase(ouf.readToken());
@@ -35,13 +38,15 @@ int main(int argc, char *argv[]) {
     }
 
     int extraInAnsCount = 0;
-    while (!ans.seekEof()) {
+    while (!ans.seekEof())
+    {
         ans.readToken();
         extraInAnsCount++;
     }
 
     int extraInOufCount = 0;
-    while (!ouf.seekEof()) {
+    while (!ouf.seekEof())
+    {
         ouf.readToken();
         extraInOufCount++;
     }

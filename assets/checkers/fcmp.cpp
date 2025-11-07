@@ -1,16 +1,19 @@
+// Description: Compares two files as sequences of lines (exact match)
 #include "testlib.h"
 #include <string>
 
 using namespace std;
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
     setName("compare files as sequence of lines");
     registerTestlibCmd(argc, argv);
 
     std::string strAnswer;
 
     int n = 0;
-    while (!ans.eof()) {
+    while (!ans.eof())
+    {
         std::string j = ans.readString();
 
         if (j.empty() && ans.eof())

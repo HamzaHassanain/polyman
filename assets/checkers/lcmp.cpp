@@ -1,3 +1,4 @@
+// Description: Compares two files line by line, ignoring extra whitespace within lines
 #include "testlib.h"
 #include <string>
 #include <vector>
@@ -5,7 +6,8 @@
 
 using namespace std;
 
-bool compareWords(const string& a, const string& b) {
+bool compareWords(const string &a, const string &b)
+{
     vector<string> va, vb;
     stringstream sa;
 
@@ -22,14 +24,16 @@ bool compareWords(const string& a, const string& b) {
     return (va == vb);
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
     setName("compare files as sequence of tokens in lines");
     registerTestlibCmd(argc, argv);
 
     string strAnswer;
 
     int n = 0;
-    while (!ans.eof()) {
+    while (!ans.eof())
+    {
         std::string j = ans.readString();
 
         if (j.empty() && ans.eof())

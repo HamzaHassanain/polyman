@@ -1,12 +1,46 @@
-import ConfigFile, { Checker, Solution } from '../types';
+/**
+ * @fileoverview Solution compilation, execution, and verification utilities.
+ * Provides functions to run solutions on test inputs, compare outputs with checkers,
+ * and validate solution behavior against expected verdicts (TLE, MLE, WA, etc.).
+ */
+
+import ConfigFile, {
+  Checker,
+  Solution,
+  SolutionType,
+  VerdictTracker,
+} from '../types';
 import { executor } from '../executor';
 import fs from 'fs';
 import path from 'path';
-import { throwError, DEFAULT_MEMORY_LIMIT, DEFAULT_TIMEOUT } from './utils';
-import { compileCPP, compileJava, readConfigFile } from './utils';
-import { logger } from '../logger';
-import { ensureCheckerExists } from './checker';
+import { throwError } from './utils';
+import {
+  compileCPP,
+  compileJava,
+  readConfigFile,
+  readFirstLine,
+} from './utils';
+import { fmt } from '../formatter';
+import {
+  ensureCheckerExists,
+  runChecker,
+  getExpectedCheckerVerdict,
+  compileChecker,
+} from './checker';
 
+/**
+ * Ensures solutions are defined in configuration.
+ * Type assertion function that throws if no solutions exist.
+ *
+ * @param {Solution[] | undefined} solutions - Solutions array to validate
+ *
+ * @throws {Error} If no solutions are defined
+ *
+ * @example
+ * const config = readConfigFile();
+ * validateSolutionsExist(config.solutions);
+ * // Now TypeScript knows solutions is defined and non-empty
+ */
 export function validateSolutionsExist(
   solutions: Solution[] | undefined
 ): asserts solutions is Solution[] {
@@ -14,6 +48,20 @@ export function validateSolutionsExist(
     throw new Error('No solutions defined in the configuration file.');
   }
 }
+
+/**
+ * Finds solutions matching a given name or returns all solutions.
+ *
+ * @param {Solution[]} solutions - Array of solution configurations
+ * @param {string} solutionName - Name of solution to find, or 'all' for all solutions
+ * @returns {Solution[]} Array of matching solutions
+ *
+ * @throws {Error} If no solutions match the name
+ *
+ * @example
+ * const matching = findMatchingSolutions(config.solutions, 'main');
+ * // Returns: [{ name: 'main', source: 'Solution.cpp', type: 'main-correct' }]
+ */
 export function findMatchingSolutions(
   solutions: Solution[],
   solutionName: string
@@ -31,6 +79,116 @@ export function findMatchingSolutions(
   return matching;
 }
 
+/**
+ * Runs a single solution on test files.
+ * Compiles the solution and executes it on all tests or a specific test.
+ * Creates output files in solutions-outputs/<solution-name>/ directory.
+ *
+ * @param {Solution} solution - Solution configuration
+ * @param {ConfigFile} config - Configuration containing time/memory limits
+ * @param {number} [testNumber] - Optional specific test number to run on
+ *
+ * @throws {Error} If solution compilation fails
+ * @throws {Error} If solution fails on any test with TLE, MLE, or RTE
+ *
+ * @example
+ * const solution = config.solutions.find(s => s.name === 'main')!;
+ * await runSingleSolutionOnTests(solution, config);
+ *
+ * @example
+ * // Run on specific test
+ * await runSingleSolutionOnTests(solution, config, 5);
+ */
+export async function runSingleSolutionOnTests(
+  solution: Solution,
+  config: ConfigFile,
+  testNumber?: number
+) {
+  fmt.info(
+    `  ${fmt.infoIcon()} Running solution: ${fmt.highlight(solution.name)} ${fmt.dim(`(${solution.type})`)}`
+  );
+  const thrownErrors = new Set<string>();
+
+  try {
+    const compiledPath = await compileSolution(solution.source);
+    ensureOutputDirectory(solution.name);
+
+    const testsDir = path.resolve(process.cwd(), 'tests');
+    const testFiles = getTestFilesToRun(testsDir, testNumber);
+
+    for (const testFile of testFiles) {
+      if (thrownErrors.size > 0) {
+        break;
+      }
+      try {
+        await runSolution(
+          solution,
+          compiledPath,
+          config['time-limit'],
+          config['memory-limit'],
+          testFile
+        );
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message + ` (test: ${testFile})`
+            : String(error);
+        thrownErrors.add(message);
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    thrownErrors.add(
+      `Failed to compile solution ${solution.name}:\n\t${message}`
+    );
+  }
+
+  if (thrownErrors.size > 0) {
+    fmt.log(
+      `    ${fmt.dim('→')} Completed running solution ${fmt.highlight(solution.name)} ${fmt.bold('With Failures:')}`
+    );
+    for (const errMsg of thrownErrors) {
+      fmt.error(`      ${fmt.cross()} ${errMsg}`);
+    }
+    console.log();
+    throw new Error(
+      `Solution ${fmt.highlight(solution.name)} failed on tests: \t\n${Array.from(thrownErrors).join('\n')}`
+    );
+  } else {
+    fmt.log(
+      `    ${fmt.dim('→')} Completed running solution ${fmt.highlight(solution.name)}`
+    );
+  }
+  console.log();
+}
+
+/**
+ * Runs matching solutions on test files.
+ * Finds solutions by name and executes each one on all tests or a specific test.
+ * Creates output files in solutions-outputs/<solution-name>/ directory.
+ *
+ * @param {Solution[]} solutions - Array of solution configurations
+ * @param {string} solutionName - Name of solution to run, or 'all' for all solutions
+ * @param {ConfigFile} config - Configuration containing time/memory limits
+ * @param {number} [testNumber] - Optional specific test number to run on
+ *
+ * @throws {Error} If no solutions match the name
+ * @throws {Error} If solution compilation fails
+ * @throws {Error} If solution execution fails unexpectedly
+ * @throws {Error} If solution fails on any test with TLE, MLE, or RTE
+ *
+ * @example
+ * // From actions.ts solveTests - run on all tests
+ * await runMatchingSolutionsOnTests(config.solutions, 'main', config);
+ *
+ * @example
+ * // Run on specific test
+ * await runMatchingSolutionsOnTests(config.solutions, 'wa-solution', config, 5);
+ *
+ * @example
+ * // Run all solutions
+ * await runMatchingSolutionsOnTests(config.solutions, 'all', config);
+ */
 export async function runMatchingSolutionsOnTests(
   solutions: Solution[],
   solutionName: string,
@@ -43,41 +201,44 @@ export async function runMatchingSolutionsOnTests(
     throw new Error(`No solutions matched the name "${solutionName}"`);
   }
 
-  try {
-    for (const solution of matchingSolutions) {
-      logger.info(
-        `Running solution: ${logger.highlight(solution.name)} ${logger.dim(`(${solution.type})`)}`
-      );
-      const compiledPath = await compileSolution(solution.source);
-      ensureOutputDirectory(solution.name);
+  const failedSolutionsErrorMessages = new Set<string>();
 
-      const testsDir = path.resolve(process.cwd(), 'tests');
-      const testFiles = getTestFilesToRun(testsDir, testNumber);
-
-      for (const testFile of testFiles) {
-        try {
-          await runSolution(
-            solution,
-            compiledPath,
-            config['time-limit'],
-            config['memory-limit'],
-            testFile
-          );
-        } catch (error) {
-          throwError(error, `Failed on test file ${testFile}`);
-        }
-      }
-
-      logger.log(
-        `  ${logger.bold('→')} Completed running solution ${logger.highlight(solution.name)}`
-      );
-      console.log();
+  for (const solution of matchingSolutions) {
+    try {
+      await runSingleSolutionOnTests(solution, config, testNumber);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      failedSolutionsErrorMessages.add(message);
     }
-  } catch (error) {
-    throwError(error, 'Failed to run solutions on tests');
+  }
+
+  if (failedSolutionsErrorMessages.size > 0) {
+    throw new Error(
+      `${fmt.bold('Some solutions failed:')}\n\n${Array.from(
+        failedSolutionsErrorMessages
+      ).join('\n\n')}`
+    );
   }
 }
 
+/**
+ * Gets array of test files to run based on test number.
+ * If testNumber is provided, returns single test file.
+ * Otherwise returns all test*.txt files from tests directory.
+ *
+ * @private
+ * @param {string} testsDir - Path to tests directory
+ * @param {number} [testNumber] - Optional specific test number
+ * @returns {string[]} Array of test filenames
+ *
+ * @example
+ * getTestFilesToRun('/path/to/tests', 5)
+ * // Returns: ['test5.txt']
+ *
+ * @example
+ * getTestFilesToRun('/path/to/tests')
+ * // Returns: ['test1.txt', 'test2.txt', ...]
+ */
 function getTestFilesToRun(testsDir: string, testNumber?: number): string[] {
   if (testNumber !== undefined) {
     return [`test${testNumber}.txt`];
@@ -88,6 +249,31 @@ function getTestFilesToRun(testsDir: string, testNumber?: number): string[] {
     .filter(file => file.startsWith('test') && file.endsWith('.txt'));
 }
 
+/**
+ * Runs a compiled solution on a test input file.
+ * Executes solution with time/memory limits, handles output files, and error scenarios.
+ * Creates output file with either solution output or error message (TLE, MLE, RTE).
+ *
+ * @private
+ * @param {Solution} solution - Solution configuration
+ * @param {string} compiledPath - Path to compiled executable or interpreter command
+ * @param {number} timeout - Time limit in milliseconds
+ * @param {number} memoryLimitMB - Memory limit in megabytes
+ * @param {string} inputFile - Name of test input file
+ *
+ * @throws {Error} If runtime error occurs
+ * @throws {Error} If time limit exceeded
+ * @throws {Error} If memory limit exceeded
+ *
+ * @example
+ * await runSolution(
+ *   { name: 'main', source: 'Solution.cpp', type: 'main-correct' },
+ *   './Solution',
+ *   2000,
+ *   256,
+ *   'test1.txt'
+ * );
+ */
 async function runSolution(
   solution: Solution,
   compiledPath: string,
@@ -99,7 +285,7 @@ async function runSolution(
     process.cwd(),
     'solutions-outputs',
     solution.name,
-    path.basename(inputFile).replace('test', 'output_')
+    `output_${inputFile}`
   );
   const inputFilePath = path.resolve(process.cwd(), 'tests', inputFile);
   await executor.executeWithRedirect(
@@ -122,6 +308,19 @@ async function runSolution(
     outputFilePath
   );
 }
+/**
+ * Creates output directory for solution if it doesn't exist.
+ * Directory structure: solutions-outputs/<solution-name>/
+ *
+ * @private
+ * @param {string} solutionName - Name of solution
+ * @returns {string} Absolute path to created output directory
+ *
+ * @example
+ * const dir = ensureOutputDirectory('main');
+ * // Returns: '/path/to/project/solutions-outputs/main'
+ * // Creates directory if needed
+ */
 function ensureOutputDirectory(solutionName: string): string {
   const outputDir = path.resolve(
     process.cwd(),
@@ -134,6 +333,24 @@ function ensureOutputDirectory(solutionName: string): string {
   return outputDir;
 }
 
+/**
+ * Compiles a solution based on file extension.
+ * Supports C++ (.cpp), Python (.py), and Java (.java).
+ *
+ * @private
+ * @param {string} sourcePath - Path to solution source file
+ * @returns {Promise<string>} Command to execute the solution
+ *
+ * @throws {Error} If file extension is not supported
+ *
+ * @example
+ * await compileSolution('Solution.cpp')
+ * // Returns: '/path/to/Solution' (compiled executable)
+ *
+ * @example
+ * await compileSolution('Solution.py')
+ * // Returns: 'python3 Solution.py' (interpreter command)
+ */
 async function compileSolution(sourcePath: string): Promise<string> {
   const ext = path.extname(sourcePath);
 
@@ -148,54 +365,24 @@ async function compileSolution(sourcePath: string): Promise<string> {
       throw new Error(`Unsupported solution file extension: ${ext}`);
   }
 }
-// export async function runSolutionsOnSingleTest(
-//   solutions: Solution[],
-//   config: ConfigFile,
-//   testNumber: number
-// ) {
-//   for (const solution of solutions) {
-//     await runSolution(
-//       solution,
-//       config['time-limit'],
-//       config['memory-limit'],
-//       testNumber,
-//       testNumber
-//     );
-//   }
-// }
-// export async function runSolutionsOnGeneratorTests(
-//   solutions: Solution[],
-//   config: ConfigFile,
-//   generatorName: string
-// ) {
-//   const generator = config.generators?.find(g => g.name === generatorName);
 
-//   if (!generator) {
-//     throw new Error(
-//       `No generator named "${generatorName}" found in the configuration file.`
-//     );
-//   }
-
-//   const [start, end] = generator['tests-range'];
-
-//   for (const solution of solutions) {
-//     await runSolution(
-//       solution,
-//       config['time-limit'],
-//       config['memory-limit'],
-//       start,
-//       end
-//     );
-//   }
-// }
-// export function handleSolutionError(
-//   error: unknown,
-//   isCancelationPoint = false
-// ) {
-//   const message = error instanceof Error ? error.message : String(error);
-//   logger.error(`${message}`);
-//   if (isCancelationPoint) process.exit(1);
-// }
+/**
+ * Tests a solution against the main correct solution using the checker.
+ * Runs both solutions on all tests, then compares outputs with the checker.
+ * Validates that the solution behaves according to its expected type (TLE, WA, etc.).
+ *
+ * @param {string} solutionName - Name of solution to test
+ *
+ * @throws {Error} If main solution doesn't exist
+ * @throws {Error} If target solution doesn't exist
+ * @throws {Error} If main solution fails
+ * @throws {Error} If comparison fails
+ *
+ * @example
+ * // From actions.ts testWhat command
+ * await testSolutionAgainstMainCorrect('wa-solution');
+ * // Validates that wa-solution gets WA on at least one test
+ */
 export async function testSolutionAgainstMainCorrect(solutionName: string) {
   try {
     const config = readConfigFile();
@@ -209,49 +396,60 @@ export async function testSolutionAgainstMainCorrect(solutionName: string) {
     const mainSolution = getMainSolution(solutions);
     const solution = solutions.find(s => s.name === solutionName)!;
 
-    logger.info(
-      `Main solution: ${logger.primary(mainSolution.name)} ${logger.dim(`(${mainSolution.type})`)}`
+    fmt.info(
+      `  ${fmt.infoIcon()} Main solution: ${fmt.primary(mainSolution.name)} ${fmt.dim(`(${mainSolution.type})`)}`
     );
-    logger.info(
-      `Target solution: ${logger.highlight(solutionName)} ${logger.dim(`(${solution.type})`)}`
+    fmt.info(
+      `  ${fmt.infoIcon()} Target solution: ${fmt.highlight(solutionName)} ${fmt.dim(`(${solution.type})`)}`
     );
     console.log();
 
-    logger.log(
-      `  ${logger.dim('→')} Running main solution ${logger.dim('(generating outputs...)')}`
+    fmt.log(
+      `  ${fmt.dim('→')} Running main solution ${fmt.dim('(generating outputs...)')}`
     );
     try {
-      await runMatchingSolutionsOnTests([mainSolution], 'all', config);
+      await runSingleSolutionOnTests(mainSolution, config);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const newErrorMessage = `Failed to run ${logger.bold('Main Solution')}: \n\t${message}`;
+      const newErrorMessage = `Failed to run ${fmt.bold('Main Solution')}: \n\t${message}`;
       throwError(new Error(newErrorMessage));
     }
 
-    logger.log(
-      `  ${logger.dim('→')} Running target solution ${logger.dim('(generating outputs...)')}`
+    fmt.log(
+      `  ${fmt.dim('→')} Running target solution ${fmt.dim('(generating outputs...)')}`
     );
     try {
-      await runMatchingSolutionsOnTests([solution], 'all', config);
+      await runSingleSolutionOnTests(solution, config);
     } catch {
       // @ts-nocheck
     }
 
-    logger.log(
-      `  ${logger.dim('→')} Comparing with checker ${logger.dim('(validating verdicts...)')}`
+    fmt.log(
+      `  ${fmt.dim('→')} Comparing with checker ${fmt.dim('(validating verdicts...)')}`
     );
     try {
-      await compareResultsWithChecker(checker, mainSolution, solution);
+      await startTheComparisonProcess(checker, mainSolution, solution);
     } catch (error) {
       throwError(error, 'Comparison with checker failed');
     }
-
-    console.log();
-    logger.successBox(`"${solutionName}" BEHAVES AS EXPECTED!`);
   } catch (error) {
     throwError(error, `Failed to test solution "${solutionName}"`);
   }
 }
+
+/**
+ * Ensures a main-correct solution exists in the configuration.
+ * Type assertion function that throws if no main-correct solution found.
+ *
+ * @param {Solution[] | undefined} solutions - Solutions array to validate
+ *
+ * @throws {Error} If no solutions are defined
+ * @throws {Error} If no main-correct solution exists
+ *
+ * @example
+ * const config = readConfigFile();
+ * ensureMainSolutionExists(config.solutions);
+ */
 export function ensureMainSolutionExists(
   solutions: Solution[] | undefined
 ): asserts solutions is Solution[] {
@@ -270,6 +468,19 @@ export function ensureMainSolutionExists(
   );
 }
 
+/**
+ * Ensures a specific solution exists in the configuration.
+ * Type assertion function that throws if solution not found.
+ *
+ * @param {Solution[] | undefined} solutions - Solutions array to validate
+ * @param {string} solutionName - Name of solution to find
+ *
+ * @throws {Error} If no solutions are defined
+ * @throws {Error} If solution with given name doesn't exist
+ *
+ * @example
+ * ensureSolutionExists(config.solutions, 'wa-solution');
+ */
 export function ensureSolutionExists(
   solutions: Solution[] | undefined,
   solutionName: string
@@ -287,6 +498,18 @@ export function ensureSolutionExists(
   throw new Error(`No solution named "${solutionName}" found.`);
 }
 
+/**
+ * Gets the main-correct solution from solutions array.
+ *
+ * @param {Solution[]} solutions - Array of solution configurations
+ * @returns {Solution} The main-correct solution
+ *
+ * @throws {Error} If no main-correct solution found (should never happen if ensureMainSolutionExists called first)
+ *
+ * @example
+ * const mainSolution = getMainSolution(config.solutions);
+ * // Returns: { name: 'main', source: 'Solution.cpp', type: 'main-correct' }
+ */
 export function getMainSolution(solutions: Solution[]): Solution {
   for (const solution of solutions) {
     if (solution.type === 'main-correct') {
@@ -296,13 +519,35 @@ export function getMainSolution(solutions: Solution[]): Solution {
   // tell ts that this line is never reached
   throw new Error('Main correct solution not found.');
 }
-export async function compareResultsWithChecker(
+
+/**
+ * Compares target solution outputs against main solution using checker.
+ * Runs checker on all test cases and tracks verdicts (WA, TLE, MLE, RTE).
+ * Validates that verdicts match the target solution's expected type.
+ *
+ * @param {Checker} checker - Checker configuration
+ * @param {Solution} mainSolution - Main correct solution
+ * @param {Solution} targetSolution - Solution to validate
+ *
+ * @throws {Error} If checker compilation fails
+ * @throws {Error} If verdict validation fails
+ * @throws {Error} If main solution has unexpected errors
+ *
+ * @example
+ * // From fullVerification and testSolutionAgainstMainCorrect
+ * await startTheComparisonProcess(
+ *   config.checker,
+ *   mainSolution,
+ *   waSolution
+ * );
+ */
+export async function startTheComparisonProcess(
   checker: Checker,
   mainSolution: Solution,
   targetSolution: Solution
 ) {
   try {
-    const compiledCheckerPath = await compileCPP(checker.source);
+    const compiledCheckerPath = await compileChecker(checker);
     const mainOutputDir = ensureOutputDirectory(mainSolution.name);
     const targetOutputDir = ensureOutputDirectory(targetSolution.name);
     const testsDir = path.resolve(process.cwd(), 'tests');
@@ -310,65 +555,196 @@ export async function compareResultsWithChecker(
 
     const verdictTracker = createVerdictTracker();
 
-    for (const [index, testFile] of testFiles.entries()) {
-      await compareTestOutputs(
-        testFile,
-        index + 1,
-        compiledCheckerPath,
-        testsDir,
-        mainOutputDir,
-        targetOutputDir,
-        targetSolution,
-        verdictTracker
-      );
+    for (const testFile of testFiles) {
+      if (
+        await checkIfShouldSkipRest(
+          testFile,
+          mainOutputDir,
+          targetOutputDir,
+          targetSolution,
+          verdictTracker
+        )
+      ) {
+        break;
+      }
+
+      const inputFilePath = path.join(testsDir, testFile);
+      const outputFilePath = path.join(targetOutputDir, `output_${testFile}`);
+      const answerFilePath = path.join(mainOutputDir, `output_${testFile}`);
+      const expectedVerdict = getExpectedCheckerVerdict(targetSolution.type);
+
+      try {
+        await runChecker(
+          compiledCheckerPath,
+          inputFilePath,
+          outputFilePath,
+          answerFilePath,
+          expectedVerdict
+        );
+
+        // expected verdict is correct and the checker did not throw
+        if (expectedVerdict.toUpperCase() !== 'OK') {
+          verdictTracker.didWA = true;
+        }
+      } catch {
+        if (expectedVerdict.toUpperCase() === 'OK') {
+          verdictTracker.didWA = true;
+        }
+      }
     }
 
     validateExpectedVerdicts(targetSolution, verdictTracker);
   } catch (error) {
-    handleComparisonError(error);
+    throwError(error, 'Error during solution comparison process');
   } finally {
     executor.cleanup();
   }
 }
-function createVerdictTracker() {
+/**
+ * Creates a verdict tracker object to monitor solution outcomes.
+ * Tracks TLE, MLE, RTE, PE, and WA verdicts during comparison.
+ *
+ * @private
+ * @returns {VerdictTracker} Tracker object with all flags set to false
+ *
+ * @example
+ * const tracker = createVerdictTracker();
+ * // Returns: { didTLE: false, didMLE: false, didRTE: false, didPE: false, didWA: false }
+ */
+function createVerdictTracker(): VerdictTracker {
   return {
     didTLE: false,
     didMLE: false,
     didRTE: false,
+    didPE: false,
     didWA: false,
   };
 }
 
+/**
+ * Writes runtime error message to output file and throws error.
+ * Used when solution crashes or has runtime errors.
+ *
+ * @private
+ * @param {string} outputPath - Path to output file
+ * @param {string} stderr - Error message from stderr
+ *
+ * @throws {Error} Always throws with runtime error message
+ *
+ * @example
+ * writeErrorOutputAndThrow('/path/to/output.txt', 'segmentation fault');
+ * // Creates file with: "Runtime Error: segmentation fault"
+ * // Then throws error
+ */
 function writeErrorOutputAndThrow(outputPath: string, stderr: string) {
   fs.writeFileSync(outputPath, `Runtime Error: ${stderr}`);
   throw new Error(`Runtime Error: ${stderr}`);
 }
 
+/**
+ * Writes timeout message to output file and throws error.
+ * Used when solution exceeds time limit.
+ *
+ * @private
+ * @param {string} outputPath - Path to output file
+ * @param {number} timeout - Time limit that was exceeded (in ms)
+ *
+ * @throws {Error} Always throws with TLE message
+ *
+ * @example
+ * writeTimeoutOutputAndThrow('/path/to/output.txt', 2000);
+ * // Creates file with: "Time Limit Exceeded after 2000ms"
+ * // Then throws error
+ */
 function writeTimeoutOutputAndThrow(outputPath: string, timeout: number) {
   fs.writeFileSync(outputPath, `Time Limit Exceeded after ${timeout}ms`);
   throw new Error(`Time Limit Exceeded after ${timeout}ms`);
 }
 
+/**
+ * Writes memory limit exceeded message to output file and throws error.
+ * Used when solution exceeds memory limit.
+ *
+ * @private
+ * @param {string} outputPath - Path to output file
+ * @param {number} memoryLimit - Memory limit that was exceeded (in MB)
+ *
+ * @throws {Error} Always throws with MLE message
+ *
+ * @example
+ * writeMemoryOutputAndThrow('/path/to/output.txt', 256);
+ * // Creates file with: "Memory Limit Exceeded (256 MB)"
+ * // Then throws error
+ */
 function writeMemoryOutputAndThrow(outputPath: string, memoryLimit: number) {
   fs.writeFileSync(outputPath, `Memory Limit Exceeded (${memoryLimit} MB)`);
   throw new Error(`Memory Limit Exceeded (${memoryLimit} MB)`);
 }
 
+/**
+ * Gets all test files from tests directory.
+ * Returns only files starting with 'test' prefix in sorted order by test number.
+ *
+ * @private
+ * @param {string} testsDir - Path to tests directory
+ * @returns {string[]} Array of test filenames
+ *
+ * @example
+ * getTestFiles('/path/to/tests')
+ * // Returns: ['test1.txt', 'test2.txt', 'test3.txt', ...]
+ */
 function getTestFiles(testsDir: string): string[] {
-  return fs.readdirSync(testsDir).filter(file => file.startsWith('test'));
+  return fs
+    .readdirSync(testsDir)
+    .filter(file => file.startsWith('test'))
+    .sort((a, b) => {
+      const numA = parseInt(a.replace('test', '').replace('.txt', ''));
+      const numB = parseInt(b.replace('test', '').replace('.txt', ''));
+      return numA - numB;
+    });
 }
-async function compareTestOutputs(
+
+/**
+ * Checks if tests should be skipped during checker comparison.
+ * Skips if output file doesn't exist or if output indicates TLE/MLE/RTE.
+ * Validates both main and target solution outputs for errors.
+ * Skipping Tests mean no checker comparison is needed.
+ *
+ * @private
+ * @param {string} testFile - Test filename
+ * @param {string} mainOutputDir - Main solution output directory
+ * @param {string} targetOutputDir - Target solution output directory
+ * @param {Solution} targetSolution - Target solution configuration
+ * @param {VerdictTracker} verdictTracker - Verdict tracking object
+ * @returns {Promise<boolean>} True if test should be skipped
+ *
+ * @throws {Error} If main solution has errors on test
+ * @throws {Error} If target solution has unexpected errors
+ *
+ * @example
+ * const shouldSkip = await checkIfShouldSkipRest(
+ *   'test1.txt',
+ *   '/path/to/main',
+ *   '/path/to/wa-solution',
+ *   waSolution,
+ *   tracker
+ * );
+ */
+async function checkIfShouldSkipRest(
   testFile: string,
-  testNumber: number,
-  compiledCheckerPath: string,
-  testsDir: string,
   mainOutputDir: string,
   targetOutputDir: string,
   targetSolution: Solution,
-  verdictTracker: ReturnType<typeof createVerdictTracker>
+  verdictTracker: VerdictTracker
 ) {
   const mainOutputPath = path.join(mainOutputDir, `output_${testFile}`);
   const targetOutputPath = path.join(targetOutputDir, `output_${testFile}`);
+
+  // if target ouput file does not exist, it means the solution failed to run on this test, either TLE, MLE, RTE
+  // So, the verdictTracker must have caught that already
+  if (!fs.existsSync(targetOutputPath)) {
+    return true;
+  }
 
   const mainFirstLine = await readFirstLine(mainOutputPath);
   const targetFirstLine = await readFirstLine(targetOutputPath);
@@ -381,22 +757,25 @@ async function compareTestOutputs(
     verdictTracker
   );
 
-  if (shouldSkipCheckerComparison(targetFirstLine)) {
-    return;
-  }
-
-  await runCheckerComparison(
-    compiledCheckerPath,
-    testsDir,
-    testFile,
-    targetOutputPath,
-    mainOutputPath,
-    targetSolution,
-    verdictTracker,
-    testNumber
-  );
+  return shouldSkipCheckerComparison(targetFirstLine);
 }
 
+/**
+ * Validates main solution output for errors.
+ * Main solution should never have TLE, MLE, or RTE.
+ *
+ * @private
+ * @param {string} firstLine - First line of output file
+ * @param {string} testFile - Test filename
+ *
+ * @throws {Error} If main solution timed out
+ * @throws {Error} If main solution exceeded memory
+ * @throws {Error} If main solution had runtime error
+ *
+ * @example
+ * validateMainSolutionOutput('42', 'test1.txt'); // OK
+ * validateMainSolutionOutput('Time Limit Exceeded', 'test1.txt'); // Throws
+ */
 function validateMainSolutionOutput(firstLine: string, testFile: string) {
   if (isTLE(firstLine)) {
     throw new Error(`Main Solution timed out on test ${testFile}`);
@@ -409,11 +788,30 @@ function validateMainSolutionOutput(firstLine: string, testFile: string) {
   }
 }
 
+/**
+ * Validates target solution output against expected solution type.
+ * Updates verdict tracker and throws if behavior doesn't match type.
+ *
+ * @private
+ * @param {string} firstLine - First line of output file
+ * @param {string} testFile - Test filename
+ * @param {Solution} targetSolution - Target solution configuration
+ * @param {VerdictTracker} verdictTracker - Verdict tracking object
+ *
+ * @throws {Error} If TLE occurs but solution not marked as TLE type
+ * @throws {Error} If MLE occurs but solution not marked as MLE type
+ * @throws {Error} If RTE occurs but solution not marked as failed/incorrect
+ *
+ * @example
+ * // For TLE solution
+ * validateTargetSolutionOutput('Time Limit Exceeded', 'test1.txt', tleSolution, tracker);
+ * // Updates tracker.didTLE = true
+ */
 function validateTargetSolutionOutput(
   firstLine: string,
   testFile: string,
   targetSolution: Solution,
-  verdictTracker: ReturnType<typeof createVerdictTracker>
+  verdictTracker: VerdictTracker
 ) {
   if (isTLE(firstLine)) {
     verdictTracker.didTLE = true;
@@ -443,6 +841,18 @@ function validateTargetSolutionOutput(
   }
 }
 
+/**
+ * Determines if checker comparison should be skipped for this output.
+ * Skip if output indicates TLE, MLE, or RTE (already handled).
+ *
+ * @private
+ * @param {string} firstLine - First line of output file
+ * @returns {boolean} True if should skip checker comparison
+ *
+ * @example
+ * shouldSkipCheckerComparison('Time Limit Exceeded') // returns true
+ * shouldSkipCheckerComparison('42') // returns false
+ */
 function shouldSkipCheckerComparison(firstLine: string): boolean {
   if (isTLE(firstLine)) return true;
   if (isMLE(firstLine)) return true;
@@ -450,74 +860,81 @@ function shouldSkipCheckerComparison(firstLine: string): boolean {
   return false;
 }
 
-async function runCheckerComparison(
-  compiledCheckerPath: string,
-  testsDir: string,
-  testFile: string,
-  targetOutputPath: string,
-  mainOutputPath: string,
-  targetSolution: Solution,
-  verdictTracker: ReturnType<typeof createVerdictTracker>,
-  _testNumber: number
-) {
-  const inputPath = path.join(testsDir, testFile);
-  const result = await executor.execute(
-    `${compiledCheckerPath} ${inputPath} ${targetOutputPath} ${mainOutputPath}`,
-    {
-      timeout: DEFAULT_TIMEOUT,
-      memoryLimitMB: DEFAULT_MEMORY_LIMIT,
-      silent: true,
-      onError: () => {},
-      onTimeout: () => {
-        logger.error(
-          `${logger.bold('Checker Unexpectedly Exceeded Time Limit!')} (${DEFAULT_TIMEOUT}ms), on test ${testFile}`
-        );
-        executor.cleanup();
-        process.exit(1);
-      },
-      onMemoryExceeded: () => {
-        logger.error(
-          `${logger.bold('Checker Unexpectedly Exceeded Memory Limit!')} (${DEFAULT_MEMORY_LIMIT} MB), on test ${testFile}`
-        );
-        executor.cleanup();
-        process.exit(1);
-      },
-    }
-  );
-
-  const expectedVerdict = getExpectedCheckerVerdict(targetSolution.type);
-  if (result.exitCode !== 0 && expectedVerdict !== 'OK') {
-    verdictTracker.didWA = true;
-    if (!isValidWAValue(targetSolution.type)) {
-      throw new Error(
-        `Target Solution got wrong answer on test ${testFile} but marked as ${targetSolution.type}\n\t${logger.bold(
-          result.stderr ? result.stderr : ''
-        )}`
-      );
-    }
-    return;
-  }
-}
-
+/**
+ * Validates that observed verdicts match expected solution type.
+ * Ensures solutions behave according to their declared type (TLE, MLE, WA, etc.).
+ *
+ * @private
+ * @param {Solution} targetSolution - Target solution configuration
+ * @param {VerdictTracker} verdictTracker - Verdict tracking object
+ *
+ * @throws {Error} If TLE observed but solution not marked as TLE type
+ * @throws {Error} If MLE observed but solution not marked as MLE type
+ * @throws {Error} If RTE observed but solution not marked as failed/incorrect
+ * @throws {Error} If WA observed but solution not marked as incorrect/wa
+ * @throws {Error} If no errors but solution marked as incorrect/failed
+ * @throws {Error} If TLE solution didn't timeout on any test
+ * @throws {Error} If MLE solution didn't exceed memory on any test
+ *
+ * @example
+ * // For TLE solution that timed out
+ * validateExpectedVerdicts(tleSolution, { didTLE: true, ... }); // OK
+ *
+ * @example
+ * // For TLE solution that didn't timeout
+ * validateExpectedVerdicts(tleSolution, { didTLE: false, ... }); // Throws
+ */
 function validateExpectedVerdicts(
   targetSolution: Solution,
-  verdictTracker: ReturnType<typeof createVerdictTracker>
+  verdictTracker: VerdictTracker
 ) {
-  // For solutions specifically marked as TLE (not tle-or-*)
+  if (verdictTracker.didTLE) {
+    if (!isTLEValue(targetSolution.type)) {
+      throw new Error(
+        `Solution ${fmt.highlight(targetSolution.name)} marked as ${targetSolution.type} but had Time Limit Exceeded on some tests`
+      );
+    }
+  }
+  if (verdictTracker.didMLE) {
+    if (!isValidMLEValue(targetSolution.type)) {
+      throw new Error(
+        `Solution ${fmt.highlight(targetSolution.name)} marked as ${targetSolution.type} but got Memory Limit Exceeded on some tests`
+      );
+    }
+  }
+
+  if (verdictTracker.didRTE) {
+    if (!isValidRTEValue(targetSolution.type)) {
+      throw new Error(
+        `Solution ${fmt.highlight(targetSolution.name)} marked as ${fmt.highlight(targetSolution.type)} but got Runtime Error on some tests`
+      );
+    }
+  }
+
+  if (verdictTracker.didWA) {
+    if (!isValidWAValue(targetSolution.type)) {
+      throw new Error(
+        `Solution ${fmt.highlight(targetSolution.name)} marked as ${fmt.highlight(targetSolution.type)} but got Wrong Answer on some tests`
+      );
+    }
+  }
   if (targetSolution.type === 'tle' && !verdictTracker.didTLE) {
     throw new Error(
-      'Target Solution is marked as TLE but did not time out on any test'
+      `Target Solution ${fmt.highlight(targetSolution.name)} is marked as ${fmt.highlight(targetSolution.type)} but did not time out on any test`
     );
   }
 
-  // For solutions specifically marked as MLE
   if (targetSolution.type === 'mle' && !verdictTracker.didMLE) {
     throw new Error(
-      'Target Solution is marked as MLE but did not exceed memory limit on any test'
+      `Target Solution ${fmt.highlight(targetSolution.name)} is marked as ${fmt.highlight(targetSolution.type)} but did not exceed memory limit on any test`
     );
   }
 
-  // For solutions marked as incorrect or failed, they should have gotten at least one error
+  if (targetSolution.type === 'wa' && !verdictTracker.didWA) {
+    throw new Error(
+      `Target Solution ${fmt.highlight(targetSolution.name)} is marked as ${fmt.highlight(targetSolution.type)} but passed all tests correctly`
+    );
+  }
   if (
     (targetSolution.type === 'incorrect' || targetSolution.type === 'failed') &&
     !verdictTracker.didTLE &&
@@ -526,52 +943,69 @@ function validateExpectedVerdicts(
     !verdictTracker.didWA
   ) {
     throw new Error(
-      `Target Solution is marked as ${targetSolution.type} but passed all tests correctly`
+      `Target Solution ${fmt.highlight(targetSolution.name)} is marked as ${targetSolution.type} but passed all tests correctly`
     );
   }
 }
 
-function handleComparisonError(error: unknown) {
-  throw error instanceof Error ? error : new Error(String(error));
-}
-
-function readFirstLine(filePath: string): Promise<string> {
-  // use file stream
-
-  const fileStream = fs.createReadStream(filePath, { encoding: 'utf-8' });
-  return new Promise<string>((resolve, reject) => {
-    let data = '';
-    fileStream.on('data', chunk => {
-      data += String(chunk);
-      const lines = data.split(/\r?\n/);
-      if (lines.length > 1) {
-        fileStream.close();
-        resolve(lines[0]);
-      }
-    });
-    fileStream.on('end', () => {
-      const lines = data.split(/\r?\n/);
-      resolve(lines[0] || '');
-    });
-    fileStream.on('error', err => {
-      reject(err);
-    });
-  });
-}
-
+/**
+ * Checks if first line indicates Time Limit Exceeded.
+ *
+ * @private
+ * @param {string} firstLine - First line of output file
+ * @returns {boolean} True if TLE detected
+ *
+ * @example
+ * isTLE('Time Limit Exceeded after 2000ms') // returns true
+ * isTLE('42') // returns false
+ */
 function isTLE(firstLine: string): boolean {
   return firstLine.startsWith('Time Limit Exceeded');
 }
 
+/**
+ * Checks if first line indicates Memory Limit Exceeded.
+ *
+ * @private
+ * @param {string} firstLine - First line of output file
+ * @returns {boolean} True if MLE detected
+ *
+ * @example
+ * isMLE('Memory Limit Exceeded (256 MB)') // returns true
+ * isMLE('42') // returns false
+ */
 function isMLE(firstLine: string): boolean {
   return firstLine.startsWith('Memory Limit Exceeded');
 }
 
+/**
+ * Checks if first line indicates Runtime Error.
+ *
+ * @private
+ * @param {string} firstLine - First line of output file
+ * @returns {boolean} True if RTE detected
+ *
+ * @example
+ * isRTE('Runtime Error: segmentation fault') // returns true
+ * isRTE('42') // returns false
+ */
 function isRTE(firstLine: string): boolean {
   return firstLine.startsWith('Runtime Error');
 }
 
-function isTLEValue(solutionType: string): boolean {
+/**
+ * Checks if solution type allows TLE verdict.
+ *
+ * @private
+ * @param {SolutionType} solutionType - Solution type to check
+ * @returns {boolean} True if TLE is valid for this type
+ *
+ * @example
+ * isTLEValue('tle') // returns true
+ * isTLEValue('tle-or-correct') // returns true
+ * isTLEValue('main-correct') // returns false
+ */
+function isTLEValue(solutionType: SolutionType): boolean {
   const validTypes = [
     'tle',
     'tle-or-correct',
@@ -582,31 +1016,53 @@ function isTLEValue(solutionType: string): boolean {
   return validTypes.includes(solutionType);
 }
 
-function isValidMLEValue(solutionType: string): boolean {
+/**
+ * Checks if solution type allows MLE verdict.
+ *
+ * @private
+ * @param {SolutionType} solutionType - Solution type to check
+ * @returns {boolean} True if MLE is valid for this type
+ *
+ * @example
+ * isValidMLEValue('mle') // returns true
+ * isValidMLEValue('tle-or-mle') // returns true
+ * isValidMLEValue('wa') // returns false
+ */
+function isValidMLEValue(solutionType: SolutionType): boolean {
   const validTypes = ['mle', 'tle-or-mle', 'incorrect', 'failed'];
   return validTypes.includes(solutionType);
 }
 
-function isValidRTEValue(solutionType: string): boolean {
+/**
+ * Checks if solution type allows RTE verdict.
+ *
+ * @private
+ * @param {SolutionType} solutionType - Solution type to check
+ * @returns {boolean} True if RTE is valid for this type
+ *
+ * @example
+ * isValidRTEValue('incorrect') // returns true
+ * isValidRTEValue('failed') // returns true
+ * isValidRTEValue('main-correct') // returns false
+ */
+function isValidRTEValue(solutionType: SolutionType): boolean {
   const validTypes = ['incorrect', 'failed'];
   return validTypes.includes(solutionType);
 }
-function isValidWAValue(solutionType: string): boolean {
-  const validTypes = ['incorrect', 'wa', 'failed'];
+
+/**
+ * Checks if solution type allows WA verdict.
+ *
+ * @private
+ * @param {SolutionType} solutionType - Solution type to check
+ * @returns {boolean} True if WA is valid for this type
+ *
+ * @example
+ * isValidWAValue('wa') // returns true
+ * isValidWAValue('incorrect') // returns true
+ * isValidWAValue('main-correct') // returns false
+ */
+function isValidWAValue(solutionType: SolutionType): boolean {
+  const validTypes = ['incorrect', 'failed', 'wa'];
   return validTypes.includes(solutionType);
-}
-function getExpectedCheckerVerdict(solutionType: string): string {
-  switch (solutionType) {
-    case 'main-correct':
-    case 'correct':
-      return 'OK';
-    case 'incorrect':
-    case 'failed':
-    case 'wa':
-      return 'WA';
-    case 'pe':
-      return 'PE';
-    default:
-      return 'NA';
-  }
 }

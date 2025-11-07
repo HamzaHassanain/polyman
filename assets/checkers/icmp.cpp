@@ -1,6 +1,8 @@
+// Description: Compares two signed 32-bit integers
 #include "testlib.h"
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
     setName("compare two signed int%d's", 8 * int(sizeof(int)));
     registerTestlibCmd(argc, argv);
 

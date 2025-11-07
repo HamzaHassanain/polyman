@@ -1,8 +1,10 @@
+// Description: Compares two doubles with maximum absolute or relative error 1E-6
 #include "testlib.h"
 
 const double EPS = 1E-6;
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
     setName("compare two doubles, maximal absolute or relative error = %.10f", EPS);
     registerTestlibCmd(argc, argv);
 
