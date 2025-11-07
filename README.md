@@ -51,7 +51,7 @@ Polyman is a CLI tool that will allow codeforces problem setters to never get ou
 ### Install via npm
 
 ```bash
-npm install -g polyman
+npm install -g polyman-cli
 ```
 
 ### Install from Source
