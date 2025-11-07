@@ -1,6 +1,5 @@
 {
-  "name": "My Problem Template",
-  "tag": "my-problem-template",
+  "name": "my-problem-template",
   "version": "1.0.0",
 
   "description": "A template for solving createing a problem on codeforces polygon.",

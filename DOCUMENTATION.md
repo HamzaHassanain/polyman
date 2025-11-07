@@ -1,5 +1,3 @@
-# Polyman Documentation
-
 ## Table of Contents
 
 1. [Introduction](#introduction)
@@ -23,7 +21,7 @@
 
 ## Introduction
 
-**Polyman** is a comprehensive CLI tool designed for Codeforces problem setters to manage competitive programming problems directly from the terminal. It streamlines the entire problem preparation workflow, from template creation to complete verification.
+**Polyman** is a CLI tool designed for Codeforces problem setters to manage competitive programming problems directly from the terminal. It streamlines the entire problem preparation workflow, from template creation to complete verification.
 
 ### Features
 
@@ -102,9 +100,154 @@ polyman verify
 
 ### Config.json Structure
 
-The `Config.json` file is the central configuration for your problem. Here's the complete structure:
+```json
+{
+  "name": "problem-name",
+  "version": "1.0",
+  "description": "Problem description",
+  "time-limit": 2000,
+  "memory-limit": 256,
+  "tags": ["math", "implementation"],
 
+  "tags": ["difficulty"],
+
+  "statements": {
+    "english": {
+      "title": "Problem Title"
+    }
+  },
+
+  "solutions": [
+    {
+      "name": "main",
+      "source": "solutions/Solution.cpp",
+      "type": "main-correct"
+    },
+    {
+      "name": "wa-solution",
+      "source": "solutions/WA.cpp",
+      "type": "wa"
+    }
+  ],
+
+  "generators": [
+    {
+      "name": "gen-small",
+      "source": "generators/Small.cpp",
+      "tests-range": [1, 5]
+    },
+    {
+      "name": "gen-large",
+      "source": "generators/Large.cpp",
+      "tests-range": [6, 10]
+    }
+  ],
+
+  "checker": {
+    "custom": false,
+    "source": "ncmp.cpp"
+  },
+
+  "validator": {
+    "source": "validator/Validator.cpp"
+  }
+}
+```
+
+### Configuration Fields
+
+#### Required Fields
+
+- **`name`** (string): Problem identifier
+- **`tag`** (string): Difficulty tag
+- **`time-limit`** (number): Time limit in milliseconds
+- **`memory-limit`** (number): Memory limit in MB
+- **`solutions`** (array): Solution configurations
+- **`checker`** (object): Checker configuration
+- **`validator`** (object): Validator configuration
+
+#### Solution Configuration
+
+```json
+{
+  "name": "solution-identifier",
+  "source": "path/to/source.cpp",
+  "type": "solution-type"
+}
+```
+
+**Solution Types:**
+
+- `main-correct` - Must exist, exactly one per problem
+- `correct` - Additional correct solution
+- `wa` - Wrong answer (must fail on ≥1 test)
+- `tle` - Time limit exceeded
+- `mle` - Memory limit exceeded
+- `pe` - Presentation error
+- `failed` - Runtime error
+
+#### Checker Configuration
+
+**Custom Checker:**
+
+```json
+{
+  "custom": true,
+  "source": "checker/chk.cpp"
+}
+```
+
+**Standard Checker:**
+
+```json
+{
+  "custom": false,
+  "source": "ncmp.cpp"
+}
+```
+
+#### Generator Configuration
+
+```json
+{
+  "generators": [
+    {
+      "name": "generator-name",
+      "source": "generators/Generator.cpp",
+      "tests-range": [start, end]
+    }
+  ]
+}
+```
+
+- `tests-range`: [inclusive start, inclusive end]
 - Example: `[1, 10]` generates test1.txt through test10.txt
+
+#### Samples and Manual Tests
+
+- Please Note that, we termproraly put sample tests and manual tests inside the generators, but without a source, like below:
+
+```json
+{
+  "generators": [
+    {
+      // name must be "samples" for sample tests
+      "name": "samples",
+      "source": "NA",
+      "tests-range": [1, 2]
+    },
+    {
+      // name must be "manual" for manual tests
+      "name": "manual",
+      "source": "NA",
+      "tests-range": [3, 4]
+    }
+  ]
+}
+```
+
+- Also note that, you must create `tests/test1.txt`, `tests/test2.txt` files manually for sample tests, it must be named exactly like that.
+- Same for manual tests, you must create `tests/test3.txt`, `tests/test4.txt` files manually for manual tests.
 
 ---
 
@@ -377,132 +520,6 @@ polyman verify
 
 ## Workflows
 
-```json
-{
-  "name": "problem-name",
-  "tag": "difficulty",
-  "version": "1.0",
-  "description": "Problem description",
-  "time-limit": 2000,
-  "memory-limit": 256,
-  "tags": ["math", "implementation"],
-
-  "statements": {
-    "english": {
-      "title": "Problem Title",
-      "legend": true,
-      "input-format": true,
-      "output-format": true,
-      "notes": true
-    }
-  },
-
-  "solutions": [
-    {
-      "name": "main",
-      "source": "solutions/Solution.cpp",
-      "type": "main-correct"
-    },
-    {
-      "name": "wa-solution",
-      "source": "solutions/WA.cpp",
-      "type": "wa"
-    }
-  ],
-
-  "generators": [
-    {
-      "name": "gen-small",
-      "source": "generators/Small.cpp",
-      "tests-range": [1, 5]
-    },
-    {
-      "name": "gen-large",
-      "source": "generators/Large.cpp",
-      "tests-range": [6, 10]
-    }
-  ],
-
-  "checker": {
-    "custom": false,
-    "source": "ncmp.cpp"
-  },
-
-  "validator": {
-    "source": "validator/Validator.cpp"
-  }
-}
-```
-
-### Configuration Fields
-
-#### Required Fields
-
-- **`name`** (string): Problem identifier
-- **`tag`** (string): Difficulty tag
-- **`time-limit`** (number): Time limit in milliseconds
-- **`memory-limit`** (number): Memory limit in MB
-- **`solutions`** (array): Solution configurations
-- **`checker`** (object): Checker configuration
-- **`validator`** (object): Validator configuration
-
-#### Solution Configuration
-
-```json
-{
-  "name": "solution-identifier",
-  "source": "path/to/source.cpp",
-  "type": "solution-type"
-}
-```
-
-**Solution Types:**
-
-- `main-correct` - Must exist, exactly one per problem
-- `correct` - Additional correct solution
-- `wa` - Wrong answer (must fail on ≥1 test)
-- `tle` - Time limit exceeded
-- `mle` - Memory limit exceeded
-- `pe` - Presentation error
-- `failed` - Runtime error
-
-#### Checker Configuration
-
-**Custom Checker:**
-
-```json
-{
-  "custom": true,
-  "source": "checker/chk.cpp"
-}
-```
-
-**Standard Checker:**
-
-```json
-{
-  "custom": false,
-  "source": "ncmp.cpp"
-}
-```
-
-#### Generator Configuration
-
-```json
-{
-  "name": "generator-name",
-  "source": "generators/Generator.cpp",
-  "tests-range": [start, end]
-}
-```
-
-- `tests-range`: [inclusive start, inclusive end]
-- Example: `[1, 10]` generates test1.txt through test10.txt
-
----
-
-## Workflows
-
 ### Complete Problem Preparation Workflow
 
 Follow this end-to-end workflow to create a complete problem:
@@ -720,26 +737,27 @@ polyman run-generator gen-large
 
 When you create a new problem with `polyman new <directory>`, the following structure is generated:
 
+### NOTE: Keep in mind that, you must not change any of the directory names, as Polyman relies on these names to function properly.
+
 ```
 my-problem/
 ├── Config.json                    # Main configuration file
 ├── testlib.h                      # Testlib header (if downloaded)
-├── GUIDE.md                       # Quick reference guide
 │
-├── solutions/                     # Solution files
-│   ├── Solution.cpp              # Main correct solution (required)
-│   ├── Solution.py               # Python template
-│   └── Solution.java             # Java template
+├── solutions/                  # Solution files
+│   ├── acc.cpp                 # Main correct solution (required)
+│   ├── acc2.java               # Other correct solution (Java)
+│   └── tle.py                  # TLE solution (Python)
 │
 ├── generators/                    # Test generators
-│   └── Generator.cpp             # Main generator
+│   └── gen.cpp                     # Main generator
 │
 ├── checker/                       # Output checker
 │   ├── chk.cpp                   # Custom checker template (YES/NO)
 │   └── checker_tests.json        # Checker test cases
 │
 ├── validator/                     # Input validator
-│   ├── Validator.cpp             # Validator implementation
+│   ├── val.cpp                    # Validator implementation
 │   └── validator_tests.json      # Validator test cases
 │
 ├── statements/                    # Problem statements (LaTeX)
@@ -754,9 +772,8 @@ my-problem/
 │       └── output-format.tex
 │
 ├── tests/                         # Generated test files
-│   ├── test1.txt                 # Sample test (manual)
-│   ├── test2.txt                 # Sample test (manual)
-│   └── test*.txt                 # Generated tests (auto-created)
+│   ├── test1.txt                 # Sample test
+│   ├── test2.txt                 # Sample test
 │
 └── solutions-outputs/             # Solution outputs (auto-created)
     ├── main/
@@ -782,7 +799,7 @@ The central configuration file that defines:
 
 Contains all solution implementations:
 
-- **Solution.cpp**: Main correct solution (required, must be type `main-correct`)
+- **acc.cpp**: Main correct solution (required, must be type `main-correct`) (you may change the name as you want but do not forget to update the `Config.json` accordingly)
 - Additional solutions for testing (WA, TLE, etc.)
 - Supports C++, Python, and Java
 
@@ -793,6 +810,7 @@ Contains test generation programs:
 - Must accept test number as command-line argument
 - Must output test to stdout
 - Uses testlib.h for random generation
+- ONLY C++ is supported for generators
 
 #### validator/
 
@@ -801,6 +819,7 @@ Contains input validation logic:
 - **Validator.cpp**: Checks if test input is valid
 - **validator_tests.json**: Self-tests for validator
 - Uses testlib.h for input reading
+- ONLY C++ is supported for validators
 
 #### checker/
 
@@ -809,6 +828,7 @@ Contains output verification logic:
 - **chk.cpp**: Custom checker (if needed)
 - **checker_tests.json**: Self-tests for checker
 - Can use standard checkers (ncmp, wcmp, etc.)
+- ONLY C++ is supported for checkers
 
 #### tests/
 
@@ -847,7 +867,7 @@ Polyman supports various solution types to test different aspects of your proble
 ```json
 {
   "name": "main",
-  "source": "solutions/Solution.cpp",
+  "source": "solutions/acc.cpp",
   "type": "main-correct"
 }
 ```
@@ -879,7 +899,7 @@ Polyman supports various solution types to test different aspects of your proble
 **Requirements**:
 
 - Must get WA verdict on at least one test
-- Verified automatically by `polyman verify`
+- Verified by `polyman verify` or when testing solutions
 
 **Example**:
 
@@ -2209,143 +2229,7 @@ polyman verify
 
 ---
 
-### Example 2: Array Sum Problem
-
-**Problem**: Given an array of n integers, output their sum.
-
-#### Main Solution
-
-`solutions/Solution.cpp`:
-
-```cpp
-#include <iostream>
-using namespace std;
-
-int main() {
-    int n;
-    cin >> n;
-
-    long long sum = 0;
-    for (int i = 0; i < n; i++) {
-        int x;
-        cin >> x;
-        sum += x;
-    }
-
-    cout << sum << endl;
-    return 0;
-}
-```
-
-#### Validator
-
-`validator/Validator.cpp`:
-
-```cpp
-#include "testlib.h"
-using namespace std;
-
-int main(int argc, char* argv[]) {
-    registerValidation(argc, argv);
-
-    int n = inf.readInt(1, 100000, "n");
-    inf.readEoln();
-
-    for (int i = 0; i < n; i++) {
-        inf.readInt(-1000000000, 1000000000, format("a[%d]", i));
-        if (i < n - 1) inf.readSpace();
-    }
-    inf.readEoln();
-
-    inf.readEof();
-    return 0;
-}
-```
-
-#### Generator
-
-`generators/Generator.cpp`:
-
-```cpp
-#include "testlib.h"
-using namespace std;
-
-int main(int argc, char* argv[]) {
-    registerGen(argc, argv, 1);
-
-    int testNum = atoi(argv[1]);
-    int n = rnd.next(1, min(100000, testNum * 1000));
-
-    cout << n << endl;
-    for (int i = 0; i < n; i++) {
-        if (i > 0) cout << " ";
-        cout << rnd.next(-1000000000, 1000000000);
-    }
-    cout << endl;
-
-    return 0;
-}
-```
-
-#### WA Solution (Wrong Algorithm)
-
-`solutions/WA.cpp`:
-
-```cpp
-#include <iostream>
-using namespace std;
-
-int main() {
-    int n;
-    cin >> n;
-
-    // Wrong: multiplies instead of sums
-    long long product = 1;
-    for (int i = 0; i < n; i++) {
-        int x;
-        cin >> x;
-        product *= x;
-    }
-
-    cout << product << endl;
-    return 0;
-}
-```
-
-#### Config
-
-```json
-{
-  "name": "array-sum",
-  "tag": "easy",
-  "time-limit": 2000,
-  "memory-limit": 256,
-
-  "solutions": [
-    {
-      "name": "main",
-      "source": "solutions/Solution.cpp",
-      "type": "main-correct"
-    },
-    { "name": "wa-product", "source": "solutions/WA.cpp", "type": "wa" }
-  ],
-
-  "generators": [
-    {
-      "name": "gen",
-      "source": "generators/Generator.cpp",
-      "tests-range": [1, 30]
-    }
-  ],
-
-  "checker": { "custom": false, "source": "ncmp.cpp" },
-  "validator": { "source": "validator/Validator.cpp" }
-}
-```
-
----
-
-### Example 3: Permutation Validation Problem
+### Example 2: Permutation Validation Problem
 
 **Problem**: Check if the output is a valid permutation of 1..n (any order accepted).
 
@@ -2448,7 +2332,7 @@ int main(int argc, char* argv[]) {
 
 ---
 
-### Example 4: Graph Problem with Multiple Generators
+### Example 3: Graph Problem with Multiple Generators
 
 **Problem**: Given a graph, solve some graph problem.
 
@@ -2565,9 +2449,6 @@ A: Polyman is a CLI tool for Codeforces problem setters to automate problem prep
 
 **Q: Do I need to know testlib.h?**  
 A: Yes, basic testlib knowledge is recommended. See [testlib documentation](https://github.com/MikeMirzayanov/testlib).
-
-**Q: Can I use Polyman for other judges besides Codeforces?**  
-A: Yes, the tools and workflows are general-purpose, though some features are Codeforces-specific.
 
 ---
 
@@ -2840,13 +2721,3 @@ For issues, questions, and discussions:
 - **GitHub Issues**: [polyman/issues](https://github.com/HamzaHassanain/polyman/issues)
 - **Documentation**: [Online Docs](https://hamzahassanain.github.io/polyman/)
 - **Repository**: [github.com/HamzaHassanain/polyman](https://github.com/HamzaHassanain/polyman)
-
----
-
-**Version**: 1.0.0  
-**Last Updated**: November 2024  
-**Author**: Hamza Hassanain
-
----
-
-_Thank you for using Polyman! Happy problem setting! 🎯_

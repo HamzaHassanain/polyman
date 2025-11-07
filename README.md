@@ -13,12 +13,12 @@
 [![Documentation](https://img.shields.io/badge/docs-TypeDoc-blue?style=flat-square)](https://hamzahassanain.github.io/polyman/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](http://makeapullrequest.com)
 
-[Features](#-features) •
-[Installation](#-installation) •
-[Quick Start](#-quick-start) •
-[Documentation](#-documentation) •
-[Examples](#-examples) •
-[Contributing](#-contributing)
+[Features](#features) •
+[Installation](#installation) •
+[Quick Start](#quick-start) •
+[Documentation](#documentation) •
+[Examples](#examples) •
+[Contributing](#contributing)
 
 </div>
 
@@ -51,7 +51,7 @@ Polyman is a CLI tool that will allow codeforces problem setters to never get ou
 ### Install via npm
 
 ```bash
-npm install -g polyman
+npm install -g polyman-cli
 ```
 
 ### Install from Source
@@ -309,16 +309,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENCE) file
 
 - **Documentation**: [hamzahassanain.github.io/polyman](https://hamzahassanain.github.io/polyman/)
 - **Issues**: [GitHub Issues](https://github.com/HamzaHassanain/polyman/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/HamzaHassanain/polyman/discussions)
-
----
-
-<div align="center">
-
-**Made with ❤️ for Competitive Programming Problem Setters**
-
-⭐ Star us on GitHub — it motivates us a lot!
-
-[⬆ Back to Top](#polyman)
-
-</div>

@@ -181,7 +181,6 @@ type ValidatorTest = {
  *
  * @interface ConfigFile
  * @property {string} name - Problem name/identifier
- * @property {string} tag - Short tag for the problem
  * @property {string} [version] - Version number (optional)
  * @property {string} [description] - Brief problem description (optional)
  * @property {number} time-limit - Time limit in milliseconds
@@ -214,7 +213,7 @@ type ValidatorTest = {
  */
 interface ConfigFile {
   name: string;
-  tag: string;
+
   version?: string;
   description?: string;
 
