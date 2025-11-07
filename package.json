@@ -14,12 +14,16 @@
     "lint": "eslint . --ext .ts",
     "lint:fix": "eslint . --ext .ts --fix",
     "format": "prettier --write \"src/**/*.ts\"",
-    "format:check": "prettier --check \"src/**/*.ts\""
+    "format:check": "prettier --check \"src/**/*.ts\"",
+    "docs": "typedoc",
+    "docs:serve": "npm run docs && npx http-server docs -p 8080 -o"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "devDependencies": {
+    "@babel/preset-env": "^7.28.5",
+    "@babel/preset-typescript": "^7.28.5",
     "@eslint/js": "^9.39.1",
     "@types/chalk": "^0.4.31",
     "@types/commander": "^2.12.0",
@@ -28,11 +32,15 @@
     "@types/ora": "^3.1.0",
     "@typescript-eslint/eslint-plugin": "^8.46.3",
     "@typescript-eslint/parser": "^8.46.3",
+    "better-docs": "^2.7.3",
     "eslint": "^9.39.1",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.4",
+    "jsdoc": "^4.0.5",
+    "jsdoc-babel": "^0.5.0",
     "prettier": "^3.6.2",
     "ts-node": "^10.9.2",
+    "typedoc": "^0.28.14",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.46.3"
   },

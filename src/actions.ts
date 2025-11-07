@@ -625,7 +625,6 @@ export const fullVerification = async () => {
     fmt.info(
       `  ${fmt.infoIcon()} Main solution: ${fmt.primary(mainSolution.name)} ${fmt.dim(`(${mainSolution.type})`)}`
     );
-    console.log();
     await runSingleSolutionOnTests(mainSolution, config);
 
     try {

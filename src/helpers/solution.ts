@@ -244,9 +244,7 @@ function getTestFilesToRun(testsDir: string, testNumber?: number): string[] {
     return [`test${testNumber}.txt`];
   }
 
-  return fs
-    .readdirSync(testsDir)
-    .filter(file => file.startsWith('test') && file.endsWith('.txt'));
+  return getTestFiles(testsDir);
 }
 
 /**
@@ -561,7 +559,6 @@ export async function startTheComparisonProcess(
           testFile,
           mainOutputDir,
           targetOutputDir,
-          targetSolution,
           verdictTracker
         )
       ) {
@@ -714,7 +711,6 @@ function getTestFiles(testsDir: string): string[] {
  * @param {string} testFile - Test filename
  * @param {string} mainOutputDir - Main solution output directory
  * @param {string} targetOutputDir - Target solution output directory
- * @param {Solution} targetSolution - Target solution configuration
  * @param {VerdictTracker} verdictTracker - Verdict tracking object
  * @returns {Promise<boolean>} True if test should be skipped
  *
@@ -734,7 +730,6 @@ async function checkIfShouldSkipRest(
   testFile: string,
   mainOutputDir: string,
   targetOutputDir: string,
-  targetSolution: Solution,
   verdictTracker: VerdictTracker
 ) {
   const mainOutputPath = path.join(mainOutputDir, `output_${testFile}`);
@@ -750,12 +745,7 @@ async function checkIfShouldSkipRest(
   const targetFirstLine = await readFirstLine(targetOutputPath);
 
   validateMainSolutionOutput(mainFirstLine, testFile);
-  validateTargetSolutionOutput(
-    targetFirstLine,
-    testFile,
-    targetSolution,
-    verdictTracker
-  );
+  validateTargetSolutionOutput(targetFirstLine, verdictTracker);
 
   return shouldSkipCheckerComparison(targetFirstLine);
 }
@@ -794,13 +784,7 @@ function validateMainSolutionOutput(firstLine: string, testFile: string) {
  *
  * @private
  * @param {string} firstLine - First line of output file
- * @param {string} testFile - Test filename
- * @param {Solution} targetSolution - Target solution configuration
  * @param {VerdictTracker} verdictTracker - Verdict tracking object
- *
- * @throws {Error} If TLE occurs but solution not marked as TLE type
- * @throws {Error} If MLE occurs but solution not marked as MLE type
- * @throws {Error} If RTE occurs but solution not marked as failed/incorrect
  *
  * @example
  * // For TLE solution
@@ -809,35 +793,18 @@ function validateMainSolutionOutput(firstLine: string, testFile: string) {
  */
 function validateTargetSolutionOutput(
   firstLine: string,
-  testFile: string,
-  targetSolution: Solution,
   verdictTracker: VerdictTracker
 ) {
   if (isTLE(firstLine)) {
     verdictTracker.didTLE = true;
-    if (!isTLEValue(targetSolution.type)) {
-      throw new Error(
-        `Target Solution timed out on test ${testFile} but marked as ${targetSolution.type}`
-      );
-    }
   }
 
   if (isMLE(firstLine)) {
     verdictTracker.didMLE = true;
-    if (!isValidMLEValue(targetSolution.type)) {
-      throw new Error(
-        `Target Solution exceeded memory limit on test ${testFile} but marked as ${targetSolution.type}`
-      );
-    }
   }
 
   if (isRTE(firstLine)) {
     verdictTracker.didRTE = true;
-    if (!isValidRTEValue(targetSolution.type)) {
-      throw new Error(
-        `Target Solution had runtime error on test ${testFile} but marked as ${targetSolution.type}`
-      );
-    }
   }
 }
 
