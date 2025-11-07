@@ -1,0 +1,26 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": ["src"],
+  "entryPointStrategy": "expand",
+  "out": "docs",
+  "readme": "DOCUMENTATION.md",
+  "name": "Polyman Documentation",
+  "includeVersion": true,
+  "sort": ["source-order"],
+  "exclude": ["**/node_modules/**", "**/dist/**"],
+  "excludePrivate": false,
+  "excludeProtected": false,
+  "excludeInternal": false,
+  "excludeExternals": false,
+  "categorizeByGroup": true,
+  "defaultCategory": "Other",
+  "categoryOrder": ["Actions", "Helpers", "Core", "*"],
+  "plugin": [],
+  "githubPages": true,
+  "hideGenerator": false,
+  "searchInComments": true,
+  "navigation": {
+    "includeCategories": true,
+    "includeGroups": true
+  }
+}
