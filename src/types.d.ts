@@ -49,7 +49,7 @@ type Validator = {
   tests?: string;
 };
 
-type ValidatorVerdict = 'VALID' | 'INVALID' | 'valid' | 'invalid';
+type ValidatorVerdict = 'VALID' | 'INVALID' | 'valid' | 'invalid' | 0 | 1;
 type ValidatorTest = {
   stdin: string;
   expectedVerdict: ValidatorVerdict;

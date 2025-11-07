@@ -14,11 +14,12 @@ import {
   readConfigFile,
   readFirstLine,
 } from './utils';
-import { logger } from '../logger';
+import { fmt } from '../formatter';
 import {
   ensureCheckerExists,
   runChecker,
   getExpectedCheckerVerdict,
+  compileChecker,
 } from './checker';
 
 export function validateSolutionsExist(
@@ -59,8 +60,8 @@ export async function runMatchingSolutionsOnTests(
 
   try {
     for (const solution of matchingSolutions) {
-      logger.info(
-        `Running solution: ${logger.highlight(solution.name)} ${logger.dim(`(${solution.type})`)}`
+      fmt.info(
+        `  ${fmt.infoIcon()} Running solution: ${fmt.highlight(solution.name)} ${fmt.dim(`(${solution.type})`)}`
       );
       const compiledPath = await compileSolution(solution.source);
       ensureOutputDirectory(solution.name);
@@ -89,16 +90,16 @@ export async function runMatchingSolutionsOnTests(
         }
       }
       if (throwenErrors.size > 0) {
-        logger.log(
-          `  ${logger.bold('→')} Completed running solution ${logger.highlight(solution.name)}  ${logger.bold('With Failures:')}`
+        fmt.log(
+          `    ${fmt.dim('→')} Completed running solution ${fmt.highlight(solution.name)} ${fmt.bold('With Failures:')}`
         );
         for (const errMsg of throwenErrors) {
-          logger.error(`  ${logger.bold('→')} ${errMsg}`);
+          fmt.error(`      ${fmt.cross()} ${errMsg}`);
         }
         console.log();
       } else {
-        logger.log(
-          `  ${logger.bold('→')} Completed running solution ${logger.highlight(solution.name)}`
+        fmt.log(
+          `    ${fmt.dim('→')} Completed running solution ${fmt.highlight(solution.name)}`
         );
       }
       console.log();
@@ -192,27 +193,27 @@ export async function testSolutionAgainstMainCorrect(solutionName: string) {
     const mainSolution = getMainSolution(solutions);
     const solution = solutions.find(s => s.name === solutionName)!;
 
-    logger.info(
-      `Main solution: ${logger.primary(mainSolution.name)} ${logger.dim(`(${mainSolution.type})`)}`
+    fmt.info(
+      `  ${fmt.infoIcon()} Main solution: ${fmt.primary(mainSolution.name)} ${fmt.dim(`(${mainSolution.type})`)}`
     );
-    logger.info(
-      `Target solution: ${logger.highlight(solutionName)} ${logger.dim(`(${solution.type})`)}`
+    fmt.info(
+      `  ${fmt.infoIcon()} Target solution: ${fmt.highlight(solutionName)} ${fmt.dim(`(${solution.type})`)}`
     );
     console.log();
 
-    logger.log(
-      `  ${logger.dim('→')} Running main solution ${logger.dim('(generating outputs...)')}`
+    fmt.log(
+      `  ${fmt.dim('→')} Running main solution ${fmt.dim('(generating outputs...)')}`
     );
     try {
       await runMatchingSolutionsOnTests([mainSolution], 'all', config);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const newErrorMessage = `Failed to run ${logger.bold('Main Solution')}: \n\t${message}`;
+      const newErrorMessage = `Failed to run ${fmt.bold('Main Solution')}: \n\t${message}`;
       throwError(new Error(newErrorMessage));
     }
 
-    logger.log(
-      `  ${logger.dim('→')} Running target solution ${logger.dim('(generating outputs...)')}`
+    fmt.log(
+      `  ${fmt.dim('→')} Running target solution ${fmt.dim('(generating outputs...)')}`
     );
     try {
       await runMatchingSolutionsOnTests([solution], 'all', config);
@@ -220,8 +221,8 @@ export async function testSolutionAgainstMainCorrect(solutionName: string) {
       // @ts-nocheck
     }
 
-    logger.log(
-      `  ${logger.dim('→')} Comparing with checker ${logger.dim('(validating verdicts...)')}`
+    fmt.log(
+      `  ${fmt.dim('→')} Comparing with checker ${fmt.dim('(validating verdicts...)')}`
     );
     try {
       await startTheComparisonProcess(checker, mainSolution, solution);
@@ -230,7 +231,7 @@ export async function testSolutionAgainstMainCorrect(solutionName: string) {
     }
 
     console.log();
-    logger.successBox(`"${solutionName}" BEHAVES AS EXPECTED!`);
+    fmt.successBox(`"${solutionName}" BEHAVES AS EXPECTED!`);
   } catch (error) {
     throwError(error, `Failed to test solution "${solutionName}"`);
   }
@@ -285,7 +286,7 @@ export async function startTheComparisonProcess(
   targetSolution: Solution
 ) {
   try {
-    const compiledCheckerPath = await compileCPP(checker.source);
+    const compiledCheckerPath = await compileChecker(checker);
     const mainOutputDir = ensureOutputDirectory(mainSolution.name);
     const targetOutputDir = ensureOutputDirectory(targetSolution.name);
     const testsDir = path.resolve(process.cwd(), 'tests');
@@ -454,14 +455,14 @@ function validateExpectedVerdicts(
   if (verdictTracker.didTLE) {
     if (!isTLEValue(targetSolution.type)) {
       throw new Error(
-        `Solution ${logger.highlight(targetSolution.name)} marked as ${targetSolution.type} but had Time Limit Exceeded on some tests`
+        `Solution ${fmt.highlight(targetSolution.name)} marked as ${targetSolution.type} but had Time Limit Exceeded on some tests`
       );
     }
   }
   if (verdictTracker.didMLE) {
     if (!isValidMLEValue(targetSolution.type)) {
       throw new Error(
-        `Solution ${logger.highlight(targetSolution.name)} marked as ${targetSolution.type} but got Memory Limit Exceeded on some tests`
+        `Solution ${fmt.highlight(targetSolution.name)} marked as ${targetSolution.type} but got Memory Limit Exceeded on some tests`
       );
     }
   }
@@ -469,7 +470,7 @@ function validateExpectedVerdicts(
   if (verdictTracker.didRTE) {
     if (!isValidRTEValue(targetSolution.type)) {
       throw new Error(
-        `Solution ${logger.highlight(targetSolution.name)} marked as ${logger.highlight(targetSolution.type)} but got Runtime Error on some tests`
+        `Solution ${fmt.highlight(targetSolution.name)} marked as ${fmt.highlight(targetSolution.type)} but got Runtime Error on some tests`
       );
     }
   }
@@ -477,21 +478,21 @@ function validateExpectedVerdicts(
   if (verdictTracker.didWA) {
     if (!isValidWAValue(targetSolution.type)) {
       throw new Error(
-        `Solution ${logger.highlight(targetSolution.name)} marked as ${logger.highlight(targetSolution.type)} but got Wrong Answer on some tests`
+        `Solution ${fmt.highlight(targetSolution.name)} marked as ${fmt.highlight(targetSolution.type)} but got Wrong Answer on some tests`
       );
     }
   }
   // For solutions specifically marked as TLE (not tle-or-*)
   if (targetSolution.type === 'tle' && !verdictTracker.didTLE) {
     throw new Error(
-      `Target Solution ${logger.highlight(targetSolution.name)} is marked as ${logger.highlight(targetSolution.type)} but did not time out on any test`
+      `Target Solution ${fmt.highlight(targetSolution.name)} is marked as ${fmt.highlight(targetSolution.type)} but did not time out on any test`
     );
   }
 
   // For solutions specifically marked as MLE
   if (targetSolution.type === 'mle' && !verdictTracker.didMLE) {
     throw new Error(
-      `Target Solution ${logger.highlight(targetSolution.name)} is marked as ${logger.highlight(targetSolution.type)} but did not exceed memory limit on any test`
+      `Target Solution ${fmt.highlight(targetSolution.name)} is marked as ${fmt.highlight(targetSolution.type)} but did not exceed memory limit on any test`
     );
   }
 
@@ -504,7 +505,7 @@ function validateExpectedVerdicts(
     !verdictTracker.didWA
   ) {
     throw new Error(
-      `Target Solution ${logger.highlight(targetSolution.name)} is marked as ${targetSolution.type} but passed all tests correctly`
+      `Target Solution ${fmt.highlight(targetSolution.name)} is marked as ${targetSolution.type} but passed all tests correctly`
     );
   }
 }

@@ -1,24 +1,41 @@
 import chalk from 'chalk';
 
-export class Logger {
+export class Formatter {
   success(message: string) {
-    console.log(chalk.green('✓'), chalk.green(message));
+    console.log(chalk.green(message));
   }
 
   error(message: string) {
-    console.log(chalk.red('✖'), chalk.red(message));
+    console.log(chalk.red(message));
   }
 
   warning(message: string) {
-    console.log(chalk.yellow('⚠'), chalk.yellow(message));
+    console.log(chalk.yellow(message));
   }
 
   info(message: string) {
-    console.log(chalk.blue('ℹ'), chalk.white(message));
+    console.log(chalk.white(message));
   }
 
   log(message: string) {
     console.log(chalk.gray(message));
+  }
+
+  // Icon helpers for explicit use
+  checkmark(): string {
+    return chalk.green('✓');
+  }
+
+  cross(): string {
+    return chalk.red('✖');
+  }
+
+  warningIcon(): string {
+    return chalk.yellow('⚠');
+  }
+
+  infoIcon(): string {
+    return chalk.blue('ℹ');
   }
 
   section(title: string) {
@@ -89,4 +106,4 @@ export class Logger {
   }
 }
 
-export const logger = new Logger();
+export const fmt = new Formatter();

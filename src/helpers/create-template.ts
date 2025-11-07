@@ -1,26 +1,26 @@
 import fs from 'fs';
 import path from 'path';
-import { logger } from '../logger';
+import { fmt } from '../formatter';
 
 export function logTemplateCreationSuccess(directory: string) {
   console.log();
-  logger.info(logger.bold('Next steps:'));
+  fmt.info(`  ${fmt.infoIcon()} ${fmt.bold('Next steps:')}`);
   console.log();
-  logger.log(`  ${logger.primary('1.')} cd ${logger.highlight(directory)}`);
-  logger.log(
-    `  ${logger.primary('2.')} Add your solutions, generators, and validator`
+  fmt.log(`    ${fmt.primary('1.')} cd ${fmt.highlight(directory)}`);
+  fmt.log(
+    `    ${fmt.primary('2.')} Add your solutions, generators, and validator`
   );
-  logger.log(
-    `  ${logger.primary('3.')} Edit ${logger.highlight('Config.json')} to configure your problem`
+  fmt.log(
+    `    ${fmt.primary('3.')} Edit ${fmt.highlight('Config.json')} to configure your problem`
   );
-  logger.log(
-    `  ${logger.primary('4.')} Run ${logger.highlight('polyman generate-tests all')} to generate tests`
+  fmt.log(
+    `    ${fmt.primary('4.')} Run ${fmt.highlight('polyman generate-tests all')} to generate tests`
   );
-  logger.log(
-    `  ${logger.primary('5.')} Run ${logger.highlight('polyman validate-tests all')} to validate tests`
+  fmt.log(
+    `    ${fmt.primary('5.')} Run ${fmt.highlight('polyman validate-tests all')} to validate tests`
   );
-  logger.log(
-    `  ${logger.primary('6.')} Run ${logger.highlight('polyman verify')} for full verification`
+  fmt.log(
+    `    ${fmt.primary('6.')} Run ${fmt.highlight('polyman verify')} for full verification`
   );
   console.log();
 }
@@ -41,6 +41,6 @@ export function copyTemplate(srcDir: string, destDir: string) {
 }
 export function handleTemplateCreationError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
-  logger.error(message);
+  fmt.error(`${fmt.cross()} ${message}`);
   process.exit(1);
 }

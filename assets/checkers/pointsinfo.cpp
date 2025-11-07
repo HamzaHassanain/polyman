@@ -1,8 +1,10 @@
+// Description: Example of a checker that provides points info for scoring
 #include "testlib.h"
 
 using namespace std;
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
     setName("example of checker with points_info");
     registerTestlibCmd(argc, argv);
 

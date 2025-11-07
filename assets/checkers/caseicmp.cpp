@@ -1,12 +1,4 @@
-/**
- * Checker to compare output and answer in the form:
- *
- * Case 1: <number>
- * Case 2: <number>
- * ...
- * Case n: <number>
- *
- */
+// Description: Checker that compares int64 outputs with testcase support
 
 #include "testlib.h"
 #include <vector>
@@ -14,10 +6,12 @@
 
 using namespace std;
 
-vector<long long> readStream(InStream &in) {
+vector<long long> readStream(InStream &in)
+{
     vector<long long> result;
 
-    for (int testCase = 1; !in.seekEof(); testCase++) {
+    for (int testCase = 1; !in.seekEof(); testCase++)
+    {
         string caseStr = in.readToken();
         if (caseStr != "Case")
             in.quitf(_pe, "Expected 'Case' but found '%s' [test case %d]", compress(caseStr).c_str(), testCase);
@@ -34,7 +28,8 @@ vector<long long> readStream(InStream &in) {
     return result;
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
     setName("Single int64 checker with testcase-support");
     registerTestlibCmd(argc, argv);
 
@@ -46,13 +41,16 @@ int main(int argc, char *argv[]) {
             quitf(_wa, "Expected %s found %s [test case %d]", vtos(ja[i]).c_str(), vtos(pa[i]).c_str(), i + 1);
 
     if (ja.size() != pa.size())
-        quitf(_pe, "Expected %u test case(s) but found %u", (unsigned int) (ja.size()), (unsigned int) (pa.size()));
+        quitf(_pe, "Expected %u test case(s) but found %u", (unsigned int)(ja.size()), (unsigned int)(pa.size()));
 
-    string message = format("%u case(s):", (unsigned int) (ja.size()));
-    if (ja.size() <= 5) {
-        for (auto elem: ja)
+    string message = format("%u case(s):", (unsigned int)(ja.size()));
+    if (ja.size() <= 5)
+    {
+        for (auto elem : ja)
             message += " " + vtos(elem);
-    } else {
+    }
+    else
+    {
         for (int i = 0; i < 3; i++)
             message += " " + vtos(ja[i]);
         message += " ...";

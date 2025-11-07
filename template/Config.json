@@ -12,35 +12,28 @@
 
   "statements": {
     "english": {
-      "title": "My Problem Template",
-      "legend": true,
-      "input-format": true,
-      "output-format": true,
-      "notes": true
+      "title": "My Problem Template"
     },
 
     "russian": {
-      "title": "Шаблон моей проблемы",
-      "legend": true,
-      "input-format": true,
-      "output-format": true
+      "title": "Шаблон моей проблемы"
     }
   },
 
   "solutions": [
     {
-      "name": "correctcpp",
-      "source": "./Solution.cpp",
-      "type": "correct"
-    },
-    {
-      "name": "maincorrectpy",
-      "source": "./Solution.py",
+      "name": "acc",
+      "source": "./solutions/acc.cpp",
       "type": "main-correct"
     },
     {
-      "name": "tlejeva",
-      "source": "./Solution.java",
+      "name": "acc2",
+      "source": "./solutions/acc2.java",
+      "type": "correct"
+    },
+    {
+      "name": "tle",
+      "source": "./solutions/tle.py",
       "type": "tle"
     }
   ],
@@ -53,19 +46,17 @@
     },
     {
       "name": "MainGenerator",
-      "source": "./Generator.cpp",
+      "source": "./generators/gen.cpp",
       "tests-range": [3, 30]
     }
   ],
 
   "checker": {
     "custom": true,
-    "source": "./Checker.cpp",
-    "tests": "./checker-tests"
+    "source": "./checker/chk.cpp"
   },
 
   "validator": {
-    "source": "./Validator.cpp",
-    "tests": "./validator-tests"
+    "source": "./validator/val.cpp"
   }
 }

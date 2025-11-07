@@ -2,14 +2,16 @@ import fs from 'fs';
 import path from 'path';
 import { executor } from '../executor';
 import { compileCPP, DEFAULT_TIMEOUT, DEFAULT_MEMORY_LIMIT } from './utils';
-import { logger } from '../logger';
+import { fmt } from '../formatter';
 import { Generator } from '../types';
 
 export function ensureGeneratorsExist(
   generators: Generator[] | undefined
 ): asserts generators is Generator[] {
   if (!generators || generators.length === 0) {
-    logger.warning('No test generators defined in the configuration file.');
+    fmt.warning(
+      `${fmt.warningIcon()} No test generators defined in the configuration file.`
+    );
     process.exit(0);
   }
 }
@@ -22,16 +24,16 @@ export async function runMatchingGenerators(
   for (const generator of generators) {
     if (generator.name === 'samples' || generator.name === 'manual') continue;
     if (generatorName === 'all' || generator.name === generatorName) {
-      logger.log(
-        `  ${logger.dim('→')} ${logger.highlight(generator.name)} ${logger.dim('(compiling and running...)')}`
+      fmt.log(
+        `  ${fmt.dim('→')} ${fmt.highlight(generator.name)} ${fmt.dim('(compiling and running...)')}`
       );
       try {
         await runGenerator(generator);
         const [start, end] = generator['tests-range'];
         const totalTests = end - start + 1;
 
-        logger.log(
-          `    ${logger.bold(`${totalTests}/${totalTests} test${totalTests > 1 ? 's' : ''}`)} generated successfully.`
+        fmt.log(
+          `    ${fmt.bold(`${totalTests}/${totalTests} test${totalTests > 1 ? 's' : ''}`)} generated successfully.`
         );
       } catch (error) {
         handleGenerationError(error);
@@ -56,7 +58,7 @@ export function handleGenerationError(
   isCancelationPoint = false
 ) {
   const message = error instanceof Error ? error.message : String(error);
-  logger.error(`${message}`);
+  fmt.error(`  ${fmt.cross()} ${message}`);
   if (isCancelationPoint) process.exit(1);
 }
 

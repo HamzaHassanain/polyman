@@ -1,5 +1,5 @@
 import { spawn, ChildProcess } from 'child_process';
-import { logger } from './logger';
+import { fmt } from './formatter';
 
 export interface ExecutionResult {
   stdout: string;
@@ -84,7 +84,9 @@ export class CommandExecutor {
     const isJava = command.trim().startsWith('java ');
 
     if (process.platform === 'win32') {
-      logger.warning('Memory limits on Windows are not fully supported.');
+      fmt.warning(
+        `${fmt.warningIcon()} Memory limits on Windows are not fully supported.`
+      );
       return command;
     }
 
@@ -155,7 +157,7 @@ export class CommandExecutor {
     result: ExecutionResult,
     collectors: { stdout: string; stderr: string; isResolved: boolean },
     resolve: (value: ExecutionResult) => void,
-    reject: (reason?: any) => void
+    reject: (reason?: unknown) => void
   ) {
     if (collectors.isResolved || child.killed) return;
 
@@ -175,7 +177,9 @@ export class CommandExecutor {
     });
 
     if (!options.silent) {
-      logger.warning(`Process killed after ${options.timeout}ms timeout`);
+      fmt.warning(
+        `${fmt.warningIcon()} Process killed after ${options.timeout}ms timeout`
+      );
     }
 
     if (options.onTimeout) {
@@ -193,7 +197,7 @@ export class CommandExecutor {
     collectors: { stdout: string; stderr: string; isResolved: boolean },
     cancelTimeout: () => void,
     resolve: (value: ExecutionResult) => void,
-    reject: (reason?: any) => void
+    reject: (reason?: unknown) => void
   ) {
     child.on('close', (code, signal) => {
       if (collectors.isResolved) return;
@@ -236,7 +240,7 @@ export class CommandExecutor {
     result: ExecutionResult,
     collectors: { stdout: string; stderr: string },
     resolve: (value: ExecutionResult) => void,
-    reject: (reason?: any) => void
+    reject: (reason?: unknown) => void
   ) {
     Object.assign(result, {
       stdout: collectors.stdout,
@@ -281,14 +285,14 @@ export class CommandExecutor {
     options: ExecutionOptions,
     result: ExecutionResult,
     resolve: (value: ExecutionResult) => void,
-    reject: (reason?: any) => void
+    reject: (reason?: unknown) => void
   ) {
     result.memoryExceeded = true;
     result.success = false;
 
     if (!options.silent) {
-      logger.warning(
-        `Process terminated: memory limit exceeded - Exit code: ${code}, Signal: ${signal}`
+      fmt.warning(
+        `${fmt.warningIcon()} Process terminated: memory limit exceeded - Exit code: ${code}, Signal: ${signal}`
       );
     }
 
@@ -308,7 +312,7 @@ export class CommandExecutor {
     result.success = true;
 
     if (!options.silent && result.stdout) {
-      logger.dim(result.stdout.trim());
+      fmt.dim(result.stdout.trim());
     }
 
     options.onSuccess?.(result);
@@ -319,12 +323,12 @@ export class CommandExecutor {
     options: ExecutionOptions,
     result: ExecutionResult,
     resolve: (value: ExecutionResult) => void,
-    reject: (reason?: any) => void
+    reject: (reason?: unknown) => void
   ) {
     result.success = false;
 
     if (!options.silent && result.stderr) {
-      logger.error(result.stderr.trim());
+      fmt.error(`${fmt.cross()} ${result.stderr.trim()}`);
     }
 
     if (options.onError) {
@@ -344,14 +348,14 @@ export class CommandExecutor {
     options: ExecutionOptions,
     result: ExecutionResult,
     resolve: (value: ExecutionResult) => void,
-    reject: (reason?: any) => void
+    reject: (reason?: unknown) => void
   ) {
     result.success = false;
     result.stderr = err.message;
     result.exitCode = 1;
 
     if (!options.silent) {
-      logger.error(err.message);
+      fmt.error(`${fmt.cross()} ${err.message}`);
     }
 
     if (options.onError) {

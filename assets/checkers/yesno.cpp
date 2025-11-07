@@ -1,3 +1,4 @@
+// Description: Checks for YES/NO answer (case insensitive)
 #include "testlib.h"
 #include <string>
 
@@ -6,7 +7,8 @@ using namespace std;
 const string YES = "YES";
 const string NO = "NO";
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
     setName("%s", (YES + " or " + NO + " (case insensitive)").c_str());
     registerTestlibCmd(argc, argv);
 

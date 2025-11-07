@@ -1,7 +1,7 @@
 import path from 'path';
 import { executor } from '../executor';
 import fs from 'fs';
-import { logger } from '../logger';
+import { fmt } from '../formatter';
 import ConfigFile from '../types';
 
 export const DEFAULT_TIMEOUT = 10000;
@@ -75,7 +75,7 @@ export function isNumeric(value: string): boolean {
 }
 export function logError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
-  logger.error(`${message}`);
+  fmt.error(`  ${fmt.cross()} ${message}`);
 }
 export function logErrorAndExit(error: unknown) {
   logError(error);

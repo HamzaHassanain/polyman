@@ -3,6 +3,7 @@ import { executor } from '../executor';
 import path from 'path';
 import fs from 'fs';
 import {
+  logErrorAndExit,
   compileCPP,
   readConfigFile,
   throwError,
@@ -10,7 +11,7 @@ import {
   removeDirectoryRecursively,
 } from './utils';
 import { DEFAULT_TIMEOUT, DEFAULT_MEMORY_LIMIT } from './utils';
-import { logger } from '../logger';
+import { fmt } from '../formatter';
 
 export async function runChecker(
   execCommand: string,
@@ -31,19 +32,15 @@ export async function runChecker(
         }
       },
       onTimeout: () => {
-        logger.error(
-          `${logger.bold(
-            'Checker Unexpectedly Exceeded Time Limit!'
-          )} (${DEFAULT_TIMEOUT}ms)`
+        fmt.error(
+          `${fmt.cross()} ${fmt.bold('Checker Unexpectedly Exceeded Time Limit!')} (${DEFAULT_TIMEOUT}ms)`
         );
         executor.cleanup();
         process.exit(1);
       },
       onMemoryExceeded: () => {
-        logger.error(
-          ` ${logger.bold(
-            'Checker Unexpectedly Exceeded Memory Limit!'
-          )} (${DEFAULT_MEMORY_LIMIT} MB)`
+        fmt.error(
+          `${fmt.cross()} ${fmt.bold('Checker Unexpectedly Exceeded Memory Limit!')} (${DEFAULT_MEMORY_LIMIT} MB)`
         );
         executor.cleanup();
         process.exit(1);
@@ -113,7 +110,7 @@ export async function runCheckerTests(checker: Checker) {
   let someFailed = false;
   try {
     const checkerTests = await parseCheckerTests();
-    const compiledPath = await compileCPP(checker.source);
+    const compiledPath = await compileChecker(checker);
 
     const testsDir = path.resolve(process.cwd(), 'checker_tests');
 
@@ -132,8 +129,8 @@ export async function runCheckerTests(checker: Checker) {
         );
       } catch (error) {
         someFailed = true;
-        logger.error(
-          `Checker Test ${index + 1} failed:\n\t${(error as Error).message}, expected to be ${verdict}`
+        fmt.error(
+          `  ${fmt.cross()} Checker Test ${index + 1} failed:\n\t${(error as Error).message}, expected to be ${verdict}`
         );
       }
     }
@@ -148,7 +145,11 @@ export async function runCheckerTests(checker: Checker) {
 
 function parseCheckerTests(): Promise<CheckerTest[]> {
   return new Promise((resolve, reject) => {
-    const testsFilePath = path.resolve(process.cwd(), 'checker_tests.json');
+    const testsFilePath = path.resolve(
+      process.cwd(),
+      'checker',
+      'checker_tests.json'
+    );
     fs.readFile(testsFilePath, 'utf-8', (err, data) => {
       if (err) {
         return reject(new Error('Failed to read checker tests file.'));
@@ -165,6 +166,25 @@ function parseCheckerTests(): Promise<CheckerTest[]> {
       }
     });
   });
+}
+
+export async function compileChecker(checker: Checker) {
+  try {
+    const checkerSource = checker.custom
+      ? checker.source
+      : path.resolve(
+          __dirname,
+          '..',
+          'assets',
+          'checkers',
+          `${checker.source}`
+        );
+    const compiledPath = await compileCPP(checkerSource);
+    return compiledPath;
+  } catch (error) {
+    logErrorAndExit(error);
+    return ''; // to satisfy TypeScript
+  }
 }
 
 export function getExpectedCheckerVerdict(

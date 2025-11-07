@@ -12,7 +12,7 @@ import {
   removeDirectoryRecursively,
 } from './utils';
 import { DEFAULT_TIMEOUT, DEFAULT_MEMORY_LIMIT } from './utils';
-import { logger } from '../logger';
+import { fmt } from '../formatter';
 
 export async function validateSingleTest(
   validator: Validator,
@@ -73,23 +73,23 @@ async function runValidator(
       silent: true,
       onError: result => {
         didCatchInvalid = true;
-        if (expectedVerdict === 'VALID')
+        if (
+          expectedVerdict === 'VALID' ||
+          expectedVerdict === 1 ||
+          expectedVerdict === 'valid'
+        )
           throw new Error(result.stderr || 'Validator execution failed');
       },
       onTimeout: () => {
-        logger.error(
-          `${logger.bold(
-            'Validator Unexpectedly Exceeded Time Limit!'
-          )} (${DEFAULT_TIMEOUT}ms)`
+        fmt.error(
+          `${fmt.cross()} ${fmt.bold('Validator Unexpectedly Exceeded Time Limit!')} (${DEFAULT_TIMEOUT}ms)`
         );
         executor.cleanup();
         process.exit(1);
       },
       onMemoryExceeded: () => {
-        logger.error(
-          ` ${logger.bold(
-            'Validator Unexpectedly Exceeded Memory Limit!'
-          )} (${DEFAULT_MEMORY_LIMIT} MB)`
+        fmt.error(
+          `${fmt.cross()} ${fmt.bold('Validator Unexpectedly Exceeded Memory Limit!')} (${DEFAULT_MEMORY_LIMIT} MB)`
         );
         executor.cleanup();
         process.exit(1);
@@ -99,7 +99,12 @@ async function runValidator(
     undefined
   );
 
-  if (expectedVerdict === 'INVALID' && !didCatchInvalid) {
+  if (
+    (expectedVerdict === 'INVALID' ||
+      expectedVerdict === 0 ||
+      expectedVerdict === 'invalid') &&
+    !didCatchInvalid
+  ) {
     throw new Error('Validator did not detect invalid test');
   }
 }
@@ -154,8 +159,8 @@ export async function runValidatorTests(validator: Validator) {
         await runValidator(compiledPath, testFileDir, expectedVerdict);
       } catch (error) {
         someFailed = true;
-        logger.error(
-          `Validator Test ${index + 1} failed:\n\t${(error as Error).message} expected to be ${expectedVerdict}`
+        fmt.error(
+          `  ${fmt.cross()} Validator Test ${index + 1} failed:\n\t${(error as Error).message} expected to be ${expectedVerdict}`
         );
       }
     }
@@ -170,7 +175,11 @@ export async function runValidatorTests(validator: Validator) {
 
 function parseValidatorTests(): Promise<ValidatorTest[]> {
   return new Promise((resolve, reject) => {
-    const testsFilePath = path.resolve(process.cwd(), 'validator_tests.json');
+    const testsFilePath = path.resolve(
+      process.cwd(),
+      'validator',
+      'validator_tests.json'
+    );
     fs.readFile(testsFilePath, 'utf-8', (err, data) => {
       if (err) {
         return reject(new Error('Failed to read validator tests file.'));

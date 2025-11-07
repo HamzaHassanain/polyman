@@ -3,6 +3,8 @@ import { Command } from 'commander';
 
 import {
   createTemplate,
+  downloadTestlib,
+  listAvailableCheckers,
   generateTests,
   validateTests,
   solveTests,
@@ -23,6 +25,15 @@ program
   .command('new <directory>')
   .description('Create a new problem in the specified directory')
   .action(createTemplate);
+program
+  .command('download-testlib')
+  .description('download testlib.h in the current directory')
+  .action(downloadTestlib);
+
+program
+  .command('list-checkers')
+  .description('List available checkers')
+  .action(listAvailableCheckers);
 
 program
   .command('run-generator <generator-name>')
