@@ -1,3 +1,10 @@
+/**
+ * @fileoverview Action functions for CLI commands.
+ * Implements high-level workflows for problem template creation, test generation,
+ * validation, solution execution, and full problem verification.
+ * Each action corresponds to a CLI command and orchestrates multiple helper functions.
+ */
+
 import {
   ensureValidatorExists,
   validateAllTests,
@@ -35,6 +42,21 @@ import { fmt } from './formatter';
 import path from 'path';
 import fs from 'fs';
 
+/**
+ * Creates a new problem template directory with all necessary files.
+ * Copies template files including Config.json, Solution.cpp, Checker.cpp,
+ * Generator.cpp, Validator.cpp, and directory structure.
+ *
+ * @param {string} directory - Name of directory to create
+ *
+ * @throws {Error} If directory creation fails
+ * @throws {Error} If template copying fails
+ *
+ * @example
+ * // From CLI: polyman new my-problem
+ * createTemplate('my-problem');
+ * // Creates: my-problem/ with full template structure
+ */
 export const createTemplate = (directory: string) => {
   fmt.section('📁 CREATE NEW PROBLEM TEMPLATE');
 
@@ -67,6 +89,23 @@ export const createTemplate = (directory: string) => {
   }
 };
 
+/**
+ * Lists all available standard checker programs from assets/checkers directory.
+ * Displays checker names and descriptions extracted from file comments.
+ * Helps users choose appropriate checkers for their Config.json.
+ *
+ * @throws {Error} If checkers directory doesn't exist
+ * @throws {Error} If reading checker files fails
+ *
+ * @example
+ * // From CLI: polyman list-checkers
+ * listAvailableCheckers();
+ * // Displays:
+ * //   1. acmp.cpp       → Almost-correct mode checker
+ * //   2. fcmp.cpp       → Floating-point comparison
+ * //   3. ncmp.cpp       → Number comparison
+ * //   ... etc
+ */
 export const listAvailableCheckers = () => {
   fmt.section('📋 AVAILABLE CHECKERS');
 
@@ -130,6 +169,22 @@ export const listAvailableCheckers = () => {
   }
 };
 
+/**
+ * Downloads testlib.h from the official GitHub repository.
+ * Saves the file to the current working directory and provides
+ * platform-specific installation instructions for system-wide usage.
+ *
+ * @returns {Promise<void>} Resolves when download and save complete
+ *
+ * @throws {Error} If download from GitHub fails
+ * @throws {Error} If file write fails
+ *
+ * @example
+ * // From CLI: polyman download-testlib
+ * await downloadTestlib();
+ * // Downloads testlib.h to current directory
+ * // Shows installation instructions for /usr/include or /usr/local/include
+ */
 export const downloadTestlib = async () => {
   fmt.section('📥 DOWNLOAD TESTLIB.H');
 
@@ -194,6 +249,29 @@ export const downloadTestlib = async () => {
   }
 };
 
+/**
+ * Generates test cases using specified generator or all generators.
+ * Compiles generator programs and executes them to create test files.
+ * Test files are saved to tests/ directory with names from generator configuration.
+ *
+ * @param {string} generatorName - Name of generator to run, or 'all' for all generators
+ * @returns {Promise<void>} Resolves when all tests are generated
+ *
+ * @throws {Error} If Config.json is invalid or missing generators
+ * @throws {Error} If generator compilation fails
+ * @throws {Error} If generator execution fails
+ * @throws {Error} If no generator matches the name
+ *
+ * @example
+ * // From CLI: polyman run-generator gen-random
+ * await generateTests('gen-random');
+ * // Runs single generator
+ *
+ * @example
+ * // From CLI: polyman run-generator all
+ * await generateTests('all');
+ * // Runs all generators in Config.json
+ */
 export const generateTests = async (generatorName: string) => {
   fmt.section('⚙️  TEST GENERATION');
 
@@ -228,6 +306,29 @@ export const generateTests = async (generatorName: string) => {
   }
 };
 
+/**
+ * Validates test input files using the validator program.
+ * Can validate a single test by number or all tests.
+ * Ensures test inputs conform to problem constraints.
+ *
+ * @param {string} arg - Test number or 'all' to validate all tests
+ * @returns {Promise<void>} Resolves when validation completes
+ *
+ * @throws {Error} If Config.json is invalid or missing validator
+ * @throws {Error} If validator compilation fails
+ * @throws {Error} If validator rejects any test
+ * @throws {Error} If arg is neither 'all' nor a valid number
+ *
+ * @example
+ * // From CLI: polyman run-validator 5
+ * await validateTests('5');
+ * // Validates only test5.txt
+ *
+ * @example
+ * // From CLI: polyman run-validator all
+ * await validateTests('all');
+ * // Validates all tests in tests/ directory
+ */
 export const validateTests = async (arg: string) => {
   fmt.section('✅ TEST VALIDATION');
 
@@ -269,6 +370,32 @@ export const validateTests = async (arg: string) => {
     process.exit(1);
   }
 };
+
+/**
+ * Runs solution programs on test inputs to generate outputs.
+ * Executes solution with time and memory limits from Config.json.
+ * Saves outputs to solutions-outputs/<solution-name>/ directory.
+ *
+ * @param {string} solutionName - Name of solution to run, or 'all' for all solutions
+ * @param {string} arg - Test number or 'all' to run on all tests
+ * @returns {Promise<void>} Resolves when execution completes
+ *
+ * @throws {Error} If Config.json is invalid or missing solutions
+ * @throws {Error} If no solution matches the name
+ * @throws {Error} If solution compilation fails
+ * @throws {Error} If arg is neither 'all' nor a valid number
+ * @throws {Error} If solution execution fails unexpectedly
+ *
+ * @example
+ * // From CLI: polyman run-solution main all
+ * await solveTests('main', 'all');
+ * // Runs main solution on all tests
+ *
+ * @example
+ * // From CLI: polyman run-solution wa-solution 3
+ * await solveTests('wa-solution', '3');
+ * // Runs wa-solution on test3.txt only
+ */
 export const solveTests = async (solutionName: string, arg: string) => {
   fmt.section(`🚀 RUNNING SOLUTION: ${solutionName.toUpperCase()}`);
 
@@ -327,6 +454,37 @@ export const solveTests = async (solutionName: string, arg: string) => {
     process.exit(1);
   }
 };
+
+/**
+ * Tests validator, checker, or solution programs.
+ * For validator/checker: Runs self-tests from their test configuration.
+ * For solutions: Tests against main-correct solution using checker.
+ *
+ * @param {string} what - 'validator', 'checker', or solution name to test
+ * @returns {Promise<void>} Resolves when testing completes
+ *
+ * @throws {Error} If Config.json is invalid
+ * @throws {Error} If validator/checker tests fail
+ * @throws {Error} If solution doesn't exist
+ * @throws {Error} If main-correct solution doesn't exist
+ * @throws {Error} If solution behavior doesn't match expected type
+ *
+ * @example
+ * // From CLI: polyman test validator
+ * await testWhat('validator');
+ * // Runs validator self-tests from validator_tests.json
+ *
+ * @example
+ * // From CLI: polyman test checker
+ * await testWhat('checker');
+ * // Runs checker self-tests from checker_tests.json
+ *
+ * @example
+ * // From CLI: polyman test wa-solution
+ * await testWhat('wa-solution');
+ * // Runs wa-solution and main solution, compares with checker
+ * // Validates that wa-solution gets WA on at least one test
+ */
 export const testWhat = async (what: string) => {
   fmt.section(`🔍 TESTING: ${what.toUpperCase()}`);
 
@@ -388,6 +546,39 @@ export const testWhat = async (what: string) => {
     process.exit(1);
   }
 };
+
+/**
+ * Performs complete problem verification workflow.
+ * Executes all steps: test generation, validator testing, test validation,
+ * checker testing, solution execution, and solution verification.
+ * This is the main command for validating a complete Polygon problem package.
+ *
+ * Verification steps:
+ * 1. Generate all tests using generators
+ * 2. Run validator self-tests
+ * 3. Validate all generated tests
+ * 4. Run checker self-tests
+ * 5. Execute all solutions on all tests
+ * 6. Verify each solution behaves according to its type (TLE, WA, etc.)
+ *
+ * @returns {Promise<void>} Resolves when full verification completes
+ *
+ * @throws {Error} If Config.json is invalid
+ * @throws {Error} If any verification step fails
+ * @throws {Error} If generators, validator, checker, or solutions are missing
+ * @throws {Error} If main-correct solution doesn't exist
+ * @throws {Error} If any solution behaves unexpectedly
+ *
+ * @example
+ * // From CLI: polyman verify
+ * await fullVerification();
+ * // Runs complete verification workflow:
+ * // - Generates tests
+ * // - Validates tests
+ * // - Tests checker
+ * // - Runs all solutions
+ * // - Verifies all solutions against main-correct
+ */
 export const fullVerification = async () => {
   fmt.section('🏆 POLYGON PROBLEM VERIFICATION');
 
