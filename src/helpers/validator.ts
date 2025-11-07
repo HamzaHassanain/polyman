@@ -47,7 +47,8 @@ export async function validateSingleTest(
     try {
       await runValidator(compiledPath, testFilePath, 'VALID');
     } catch (error) {
-      logErrorAndThrow(error);
+      const message = `Test ${testFilePath} failed validation:\n\t${error instanceof Error ? error.message : 'Unknown error'}`;
+      logErrorAndThrow(new Error(message));
     }
   } catch (error) {
     throwError(error, 'Failed to compile validator');
@@ -85,7 +86,8 @@ export async function validateAllTests(validator: Validator) {
         await runValidator(compiledPath, testFileDir, 'VALID');
       } catch (error) {
         someFailed = true;
-        logError(error);
+        const message = `Test ${testFile} failed validation:\n\t${error instanceof Error ? error.message : 'Unknown error'}`;
+        logError(new Error(message));
       }
     }
   } catch (error) {

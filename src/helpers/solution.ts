@@ -80,8 +80,91 @@ export function findMatchingSolutions(
 }
 
 /**
+ * Runs a single solution on test files.
+ * Compiles the solution and executes it on all tests or a specific test.
+ * Creates output files in solutions-outputs/<solution-name>/ directory.
+ *
+ * @param {Solution} solution - Solution configuration
+ * @param {ConfigFile} config - Configuration containing time/memory limits
+ * @param {number} [testNumber] - Optional specific test number to run on
+ *
+ * @throws {Error} If solution compilation fails
+ * @throws {Error} If solution fails on any test with TLE, MLE, or RTE
+ *
+ * @example
+ * const solution = config.solutions.find(s => s.name === 'main')!;
+ * await runSingleSolutionOnTests(solution, config);
+ *
+ * @example
+ * // Run on specific test
+ * await runSingleSolutionOnTests(solution, config, 5);
+ */
+export async function runSingleSolutionOnTests(
+  solution: Solution,
+  config: ConfigFile,
+  testNumber?: number
+) {
+  fmt.info(
+    `  ${fmt.infoIcon()} Running solution: ${fmt.highlight(solution.name)} ${fmt.dim(`(${solution.type})`)}`
+  );
+  const thrownErrors = new Set<string>();
+
+  try {
+    const compiledPath = await compileSolution(solution.source);
+    ensureOutputDirectory(solution.name);
+
+    const testsDir = path.resolve(process.cwd(), 'tests');
+    const testFiles = getTestFilesToRun(testsDir, testNumber);
+
+    for (const testFile of testFiles) {
+      if (thrownErrors.size > 0) {
+        break;
+      }
+      try {
+        await runSolution(
+          solution,
+          compiledPath,
+          config['time-limit'],
+          config['memory-limit'],
+          testFile
+        );
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message + ` (test: ${testFile})`
+            : String(error);
+        thrownErrors.add(message);
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    thrownErrors.add(
+      `Failed to compile solution ${solution.name}:\n\t${message}`
+    );
+  }
+
+  if (thrownErrors.size > 0) {
+    fmt.log(
+      `    ${fmt.dim('→')} Completed running solution ${fmt.highlight(solution.name)} ${fmt.bold('With Failures:')}`
+    );
+    for (const errMsg of thrownErrors) {
+      fmt.error(`      ${fmt.cross()} ${errMsg}`);
+    }
+    console.log();
+    throw new Error(
+      `Solution ${fmt.highlight(solution.name)} failed on tests: \t\n${Array.from(thrownErrors).join('\n')}`
+    );
+  } else {
+    fmt.log(
+      `    ${fmt.dim('→')} Completed running solution ${fmt.highlight(solution.name)}`
+    );
+  }
+  console.log();
+}
+
+/**
  * Runs matching solutions on test files.
- * Compiles solutions and executes them on all tests or a specific test.
+ * Finds solutions by name and executes each one on all tests or a specific test.
  * Creates output files in solutions-outputs/<solution-name>/ directory.
  *
  * @param {Solution[]} solutions - Array of solution configurations
@@ -92,6 +175,7 @@ export function findMatchingSolutions(
  * @throws {Error} If no solutions match the name
  * @throws {Error} If solution compilation fails
  * @throws {Error} If solution execution fails unexpectedly
+ * @throws {Error} If solution fails on any test with TLE, MLE, or RTE
  *
  * @example
  * // From actions.ts solveTests - run on all tests
@@ -100,6 +184,10 @@ export function findMatchingSolutions(
  * @example
  * // Run on specific test
  * await runMatchingSolutionsOnTests(config.solutions, 'wa-solution', config, 5);
+ *
+ * @example
+ * // Run all solutions
+ * await runMatchingSolutionsOnTests(config.solutions, 'all', config);
  */
 export async function runMatchingSolutionsOnTests(
   solutions: Solution[],
@@ -113,54 +201,23 @@ export async function runMatchingSolutionsOnTests(
     throw new Error(`No solutions matched the name "${solutionName}"`);
   }
 
-  try {
-    for (const solution of matchingSolutions) {
-      fmt.info(
-        `  ${fmt.infoIcon()} Running solution: ${fmt.highlight(solution.name)} ${fmt.dim(`(${solution.type})`)}`
-      );
-      const compiledPath = await compileSolution(solution.source);
-      ensureOutputDirectory(solution.name);
+  const failedSolutionsErrorMessages = new Set<string>();
 
-      const testsDir = path.resolve(process.cwd(), 'tests');
-      const testFiles = getTestFilesToRun(testsDir, testNumber);
-      const throwenErrors = new Set<string>();
-      for (const testFile of testFiles) {
-        if (throwenErrors.size > 0) {
-          break;
-        }
-        try {
-          await runSolution(
-            solution,
-            compiledPath,
-            config['time-limit'],
-            config['memory-limit'],
-            testFile
-          );
-        } catch (error) {
-          const message =
-            error instanceof Error
-              ? error.message + ` (test: ${testFile})`
-              : String(error);
-          throwenErrors.add(message);
-        }
-      }
-      if (throwenErrors.size > 0) {
-        fmt.log(
-          `    ${fmt.dim('→')} Completed running solution ${fmt.highlight(solution.name)} ${fmt.bold('With Failures:')}`
-        );
-        for (const errMsg of throwenErrors) {
-          fmt.error(`      ${fmt.cross()} ${errMsg}`);
-        }
-        console.log();
-      } else {
-        fmt.log(
-          `    ${fmt.dim('→')} Completed running solution ${fmt.highlight(solution.name)}`
-        );
-      }
-      console.log();
+  for (const solution of matchingSolutions) {
+    try {
+      await runSingleSolutionOnTests(solution, config, testNumber);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      failedSolutionsErrorMessages.add(message);
     }
-  } catch (error) {
-    throwError(error, 'Failed to run solutions on tests');
+  }
+
+  if (failedSolutionsErrorMessages.size > 0) {
+    throw new Error(
+      `${fmt.bold('Some solutions failed:')}\n\n${Array.from(
+        failedSolutionsErrorMessages
+      ).join('\n\n')}`
+    );
   }
 }
 
@@ -351,7 +408,7 @@ export async function testSolutionAgainstMainCorrect(solutionName: string) {
       `  ${fmt.dim('→')} Running main solution ${fmt.dim('(generating outputs...)')}`
     );
     try {
-      await runMatchingSolutionsOnTests([mainSolution], 'all', config);
+      await runSingleSolutionOnTests(mainSolution, config);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const newErrorMessage = `Failed to run ${fmt.bold('Main Solution')}: \n\t${message}`;
@@ -362,7 +419,7 @@ export async function testSolutionAgainstMainCorrect(solutionName: string) {
       `  ${fmt.dim('→')} Running target solution ${fmt.dim('(generating outputs...)')}`
     );
     try {
-      await runMatchingSolutionsOnTests([solution], 'all', config);
+      await runSingleSolutionOnTests(solution, config);
     } catch {
       // @ts-nocheck
     }
@@ -375,9 +432,6 @@ export async function testSolutionAgainstMainCorrect(solutionName: string) {
     } catch (error) {
       throwError(error, 'Comparison with checker failed');
     }
-
-    console.log();
-    fmt.successBox(`"${solutionName}" BEHAVES AS EXPECTED!`);
   } catch (error) {
     throwError(error, `Failed to test solution "${solutionName}"`);
   }
@@ -503,7 +557,7 @@ export async function startTheComparisonProcess(
 
     for (const testFile of testFiles) {
       if (
-        await checkIfShouldSkip(
+        await checkIfShouldSkipRest(
           testFile,
           mainOutputDir,
           targetOutputDir,
@@ -511,12 +565,14 @@ export async function startTheComparisonProcess(
           verdictTracker
         )
       ) {
-        continue;
+        break;
       }
+
       const inputFilePath = path.join(testsDir, testFile);
       const outputFilePath = path.join(targetOutputDir, `output_${testFile}`);
       const answerFilePath = path.join(mainOutputDir, `output_${testFile}`);
       const expectedVerdict = getExpectedCheckerVerdict(targetSolution.type);
+
       try {
         await runChecker(
           compiledCheckerPath,
@@ -525,12 +581,13 @@ export async function startTheComparisonProcess(
           answerFilePath,
           expectedVerdict
         );
+
         // expected verdict is correct and the checker did not throw
-        if (expectedVerdict !== 'OK') {
+        if (expectedVerdict.toUpperCase() !== 'OK') {
           verdictTracker.didWA = true;
         }
       } catch {
-        if (expectedVerdict === 'OK') {
+        if (expectedVerdict.toUpperCase() === 'OK') {
           verdictTracker.didWA = true;
         }
       }
@@ -626,7 +683,7 @@ function writeMemoryOutputAndThrow(outputPath: string, memoryLimit: number) {
 
 /**
  * Gets all test files from tests directory.
- * Returns only files starting with 'test' prefix.
+ * Returns only files starting with 'test' prefix in sorted order by test number.
  *
  * @private
  * @param {string} testsDir - Path to tests directory
@@ -637,13 +694,21 @@ function writeMemoryOutputAndThrow(outputPath: string, memoryLimit: number) {
  * // Returns: ['test1.txt', 'test2.txt', 'test3.txt', ...]
  */
 function getTestFiles(testsDir: string): string[] {
-  return fs.readdirSync(testsDir).filter(file => file.startsWith('test'));
+  return fs
+    .readdirSync(testsDir)
+    .filter(file => file.startsWith('test'))
+    .sort((a, b) => {
+      const numA = parseInt(a.replace('test', '').replace('.txt', ''));
+      const numB = parseInt(b.replace('test', '').replace('.txt', ''));
+      return numA - numB;
+    });
 }
 
 /**
- * Checks if test should be skipped during checker comparison.
+ * Checks if tests should be skipped during checker comparison.
  * Skips if output file doesn't exist or if output indicates TLE/MLE/RTE.
  * Validates both main and target solution outputs for errors.
+ * Skipping Tests mean no checker comparison is needed.
  *
  * @private
  * @param {string} testFile - Test filename
@@ -657,7 +722,7 @@ function getTestFiles(testsDir: string): string[] {
  * @throws {Error} If target solution has unexpected errors
  *
  * @example
- * const shouldSkip = await checkIfShouldSkip(
+ * const shouldSkip = await checkIfShouldSkipRest(
  *   'test1.txt',
  *   '/path/to/main',
  *   '/path/to/wa-solution',
@@ -665,7 +730,7 @@ function getTestFiles(testsDir: string): string[] {
  *   tracker
  * );
  */
-async function checkIfShouldSkip(
+async function checkIfShouldSkipRest(
   testFile: string,
   mainOutputDir: string,
   targetOutputDir: string,
@@ -853,21 +918,23 @@ function validateExpectedVerdicts(
       );
     }
   }
-  // For solutions specifically marked as TLE (not tle-or-*)
   if (targetSolution.type === 'tle' && !verdictTracker.didTLE) {
     throw new Error(
       `Target Solution ${fmt.highlight(targetSolution.name)} is marked as ${fmt.highlight(targetSolution.type)} but did not time out on any test`
     );
   }
 
-  // For solutions specifically marked as MLE
   if (targetSolution.type === 'mle' && !verdictTracker.didMLE) {
     throw new Error(
       `Target Solution ${fmt.highlight(targetSolution.name)} is marked as ${fmt.highlight(targetSolution.type)} but did not exceed memory limit on any test`
     );
   }
 
-  // For solutions marked as incorrect or failed, they should have gotten at least one error
+  if (targetSolution.type === 'wa' && !verdictTracker.didWA) {
+    throw new Error(
+      `Target Solution ${fmt.highlight(targetSolution.name)} is marked as ${fmt.highlight(targetSolution.type)} but passed all tests correctly`
+    );
+  }
   if (
     (targetSolution.type === 'incorrect' || targetSolution.type === 'failed') &&
     !verdictTracker.didTLE &&

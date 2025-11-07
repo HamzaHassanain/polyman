@@ -29,6 +29,7 @@ import {
   getMainSolution,
   startTheComparisonProcess,
   runMatchingSolutionsOnTests,
+  runSingleSolutionOnTests,
 } from './helpers/solution';
 
 import { testCheckerItself } from './helpers/checker';
@@ -507,7 +508,6 @@ export const testWhat = async (what: string) => {
 
         fmt.successBox('CHECKER TESTS PASSED!');
         break;
-
       default: {
         // Testing a solution against main-correct
         fmt.step(stepNum++, 'Validating Configuration');
@@ -617,11 +617,7 @@ export const fullVerification = async () => {
     fmt.info(
       `  ${fmt.infoIcon()} Found ${fmt.highlight(config.solutions.length.toString())} solution(s)`
     );
-    await runMatchingSolutionsOnTests(config.solutions, 'all', config);
-    fmt.stepComplete('All solutions ran successfully');
 
-    // Validate Solutions Against Main Correct
-    fmt.step(stepNum++, 'Verifying Solutions Against Main Correct');
     const mainSolution = getMainSolution(config.solutions);
     const otherSolutions = config.solutions.filter(
       s => s.name !== mainSolution.name
@@ -629,6 +625,18 @@ export const fullVerification = async () => {
     fmt.info(
       `  ${fmt.infoIcon()} Main solution: ${fmt.primary(mainSolution.name)} ${fmt.dim(`(${mainSolution.type})`)}`
     );
+    console.log();
+    await runSingleSolutionOnTests(mainSolution, config);
+
+    try {
+      await runMatchingSolutionsOnTests(otherSolutions, 'all', config);
+      fmt.stepComplete('All solutions ran on all tests');
+    } catch {
+      fmt.stepComplete('Some solutions failed on tests (may be expected)');
+    }
+
+    // Validate Solutions Against Main Correct
+    fmt.step(stepNum++, 'Verifying Solutions Against Main Correct');
 
     for (const solution of otherSolutions) {
       fmt.log(

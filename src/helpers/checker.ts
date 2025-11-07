@@ -48,6 +48,7 @@ export async function runChecker(
   answerFilePath: string,
   expectedVerdict: CheckerVerdict
 ) {
+  let didCatchInvalid = false;
   await executor.execute(
     `${execCommand} ${inputFilePath} ${outputFilePath} ${answerFilePath}`,
     {
@@ -58,6 +59,7 @@ export async function runChecker(
         if (expectedVerdict.toUpperCase() === 'OK') {
           throw new Error(`Expected OK but got WA`);
         }
+        didCatchInvalid = true;
       },
       onTimeout: () => {
         fmt.error(
@@ -77,8 +79,9 @@ export async function runChecker(
   );
 
   if (
-    expectedVerdict.toUpperCase() === 'WA' ||
-    expectedVerdict.toUpperCase() === 'PE'
+    (expectedVerdict.toUpperCase() === 'WA' ||
+      expectedVerdict.toUpperCase() === 'PE') &&
+    !didCatchInvalid
   ) {
     throw new Error(`Expected ${expectedVerdict} but got OK`);
   }
@@ -150,6 +153,7 @@ async function makeCheckerTests() {
   const checkerTests = await parseCheckerTests();
 
   ensureDirectoryExists('checker_tests');
+
   for (const [index, test] of checkerTests.entries()) {
     const inputPath = path.resolve(
       process.cwd(),
@@ -289,7 +293,7 @@ export async function compileChecker(checker: Checker) {
       ? checker.source
       : path.resolve(
           __dirname,
-          '..',
+          '../..',
           'assets',
           'checkers',
           `${checker.source}`

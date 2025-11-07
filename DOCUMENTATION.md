@@ -299,6 +299,7 @@ Solution compilation, execution, and verification.
 
 - `validateSolutionsExist(solutions)` - Validate solutions configuration
 - `findMatchingSolutions(solutions, solutionName)` - Find solutions by name
+- `runSingleSolutionOnTests(solution, config, testNumber?)` - Run single solution on tests
 - `runMatchingSolutionsOnTests(solutions, solutionName, config, testNumber?)` - Run solutions on tests
 - `testSolutionAgainstMainCorrect(solutionName)` - Test solution against main-correct
 - `ensureMainSolutionExists(solutions)` - Validate main-correct exists
@@ -453,7 +454,7 @@ All source files in the Polyman project now have comprehensive JSDoc documentati
 ### 📊 Documentation Statistics:
 
 - **Total Files**: 12
-- **Total Functions/Methods**: 88+
+- **Total Functions/Methods**: 89+
 - **Total Private Helper Functions**: 35+
 - **Total Types/Interfaces**: 12+
 - **Total CLI Commands**: 8
