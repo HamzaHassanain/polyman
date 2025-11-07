@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="logo.png" alt="Polyman Logo" width="150"/>
+<img src="logo.png" alt="Polyman Logo" width="200"/>
 
 # Polyman
 
