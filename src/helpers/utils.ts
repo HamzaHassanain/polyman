@@ -103,3 +103,26 @@ export function removeDirectoryRecursively(dirName: string) {
     fs.rmSync(dirPath, { recursive: true, force: true });
   }
 }
+export function readFirstLine(filePath: string): Promise<string> {
+  // use file stream
+
+  const fileStream = fs.createReadStream(filePath, { encoding: 'utf-8' });
+  return new Promise<string>((resolve, reject) => {
+    let data = '';
+    fileStream.on('data', chunk => {
+      data += String(chunk);
+      const lines = data.split(/\r?\n/);
+      if (lines.length > 1) {
+        fileStream.close();
+        resolve(lines[0]);
+      }
+    });
+    fileStream.on('end', () => {
+      const lines = data.split(/\r?\n/);
+      resolve(lines[0] || '');
+    });
+    fileStream.on('error', err => {
+      reject(err);
+    });
+  });
+}

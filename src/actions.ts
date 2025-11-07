@@ -3,7 +3,6 @@ import {
   validateAllTests,
   validateSingleTest,
   testValidatorItself,
-  runValidatorTests,
 } from './helpers/validator';
 
 import {
@@ -19,18 +18,13 @@ import {
 import {
   validateSolutionsExist,
   testSolutionAgainstMainCorrect,
-  // runSolutionsOnAllTests,
   ensureMainSolutionExists,
   getMainSolution,
-  compareResultsWithChecker,
+  startTheComparisonProcess,
   runMatchingSolutionsOnTests,
 } from './helpers/solution';
 
-import {
-  testCheckerItself,
-  ensureCheckerExists,
-  runCheckerTests,
-} from './helpers/checker';
+import { testCheckerItself } from './helpers/checker';
 
 import { readConfigFile, isNumeric, logErrorAndExit } from './helpers/utils';
 
@@ -166,8 +160,7 @@ export const fullVerification = async () => {
 
     // Validate Tests - Validator Self-Test
     logger.step(stepNum++, 'Testing Validator');
-    ensureValidatorExists(config.validator);
-    await runValidatorTests(config.validator);
+    await testValidatorItself();
     logger.stepComplete('Validator tests passed');
 
     // Validate Generated Tests
@@ -177,8 +170,7 @@ export const fullVerification = async () => {
 
     // Checker Self-Test
     logger.step(stepNum++, 'Testing Checker');
-    ensureCheckerExists(config.checker);
-    await runCheckerTests(config.checker);
+    await testCheckerItself();
     logger.stepComplete('Checker tests passed');
 
     // Run Solutions
@@ -205,7 +197,7 @@ export const fullVerification = async () => {
       logger.log(
         `  ${logger.dim('→')} Checking ${logger.highlight(solution.name)} ${logger.dim(`(${solution.type})`)}`
       );
-      await compareResultsWithChecker(config.checker, mainSolution, solution);
+      await startTheComparisonProcess(config.checker, mainSolution, solution);
       logger.success(`    ✓ Behaves as expected`);
     }
     logger.stepComplete('All solutions verified');

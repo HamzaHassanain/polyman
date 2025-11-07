@@ -1,4 +1,4 @@
-import { Checker, CheckerTest, CheckerVerdict } from '../types';
+import { Checker, CheckerTest, CheckerVerdict, SolutionType } from '../types';
 import { executor } from '../executor';
 import path from 'path';
 import fs from 'fs';
@@ -12,7 +12,7 @@ import {
 import { DEFAULT_TIMEOUT, DEFAULT_MEMORY_LIMIT } from './utils';
 import { logger } from '../logger';
 
-async function runChecker(
+export async function runChecker(
   execCommand: string,
   inputFilePath: string,
   outputFilePath: string,
@@ -27,9 +27,7 @@ async function runChecker(
       silent: true,
       onError: () => {
         if (expectedVerdict.toUpperCase() === 'OK') {
-          throw new Error(
-            `Checker execution failed: expected OK but got WA/PE`
-          );
+          throw new Error(`Expected OK but got WA`);
         }
       },
       onTimeout: () => {
@@ -57,9 +55,7 @@ async function runChecker(
     expectedVerdict.toUpperCase() === 'WA' ||
     expectedVerdict.toUpperCase() === 'PE'
   ) {
-    throw new Error(
-      `Checker execution failed: expected ${expectedVerdict} but got OK`
-    );
+    throw new Error(`Expected ${expectedVerdict} but got OK`);
   }
 }
 
@@ -169,4 +165,22 @@ function parseCheckerTests(): Promise<CheckerTest[]> {
       }
     });
   });
+}
+
+export function getExpectedCheckerVerdict(
+  solutionType: SolutionType
+): CheckerVerdict {
+  switch (solutionType) {
+    case 'main-correct':
+    case 'correct':
+      return 'OK';
+    case 'incorrect':
+    case 'failed':
+    case 'wa':
+      return 'WA';
+    case 'pe':
+      return 'PE';
+    default:
+      return 'OK';
+  }
 }

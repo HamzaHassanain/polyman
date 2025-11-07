@@ -64,6 +64,7 @@ async function runValidator(
   testFileDir: string,
   expectedVerdict: ValidatorVerdict
 ) {
+  let didCatchInvalid = false;
   await executor.executeWithRedirect(
     execCommand,
     {
@@ -71,6 +72,7 @@ async function runValidator(
       memoryLimitMB: DEFAULT_MEMORY_LIMIT,
       silent: true,
       onError: result => {
+        didCatchInvalid = true;
         if (expectedVerdict === 'VALID')
           throw new Error(result.stderr || 'Validator execution failed');
       },
@@ -97,7 +99,7 @@ async function runValidator(
     undefined
   );
 
-  if (expectedVerdict === 'INVALID') {
+  if (expectedVerdict === 'INVALID' && !didCatchInvalid) {
     throw new Error('Validator did not detect invalid test');
   }
 }
@@ -153,7 +155,7 @@ export async function runValidatorTests(validator: Validator) {
       } catch (error) {
         someFailed = true;
         logger.error(
-          `Validator Test ${index + 1} failed:\n\t${(error as Error).message}, expected to be ${expectedVerdict}`
+          `Validator Test ${index + 1} failed:\n\t${(error as Error).message} expected to be ${expectedVerdict}`
         );
       }
     }

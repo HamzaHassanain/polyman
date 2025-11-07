@@ -1,11 +1,25 @@
-import ConfigFile, { Checker, Solution } from '../types';
+import ConfigFile, {
+  Checker,
+  Solution,
+  SolutionType,
+  VerdictTracker,
+} from '../types';
 import { executor } from '../executor';
 import fs from 'fs';
 import path from 'path';
-import { throwError, DEFAULT_MEMORY_LIMIT, DEFAULT_TIMEOUT } from './utils';
-import { compileCPP, compileJava, readConfigFile } from './utils';
+import { throwError } from './utils';
+import {
+  compileCPP,
+  compileJava,
+  readConfigFile,
+  readFirstLine,
+} from './utils';
 import { logger } from '../logger';
-import { ensureCheckerExists } from './checker';
+import {
+  ensureCheckerExists,
+  runChecker,
+  getExpectedCheckerVerdict,
+} from './checker';
 
 export function validateSolutionsExist(
   solutions: Solution[] | undefined
@@ -53,8 +67,11 @@ export async function runMatchingSolutionsOnTests(
 
       const testsDir = path.resolve(process.cwd(), 'tests');
       const testFiles = getTestFilesToRun(testsDir, testNumber);
-
+      const throwenErrors = new Set<string>();
       for (const testFile of testFiles) {
+        if (throwenErrors.size > 0) {
+          break;
+        }
         try {
           await runSolution(
             solution,
@@ -64,13 +81,26 @@ export async function runMatchingSolutionsOnTests(
             testFile
           );
         } catch (error) {
-          throwError(error, `Failed on test file ${testFile}`);
+          const message =
+            error instanceof Error
+              ? error.message + ` (test: ${testFile})`
+              : String(error);
+          throwenErrors.add(message);
         }
       }
-
-      logger.log(
-        `  ${logger.bold('→')} Completed running solution ${logger.highlight(solution.name)}`
-      );
+      if (throwenErrors.size > 0) {
+        logger.log(
+          `  ${logger.bold('→')} Completed running solution ${logger.highlight(solution.name)}  ${logger.bold('With Failures:')}`
+        );
+        for (const errMsg of throwenErrors) {
+          logger.error(`  ${logger.bold('→')} ${errMsg}`);
+        }
+        console.log();
+      } else {
+        logger.log(
+          `  ${logger.bold('→')} Completed running solution ${logger.highlight(solution.name)}`
+        );
+      }
       console.log();
     }
   } catch (error) {
@@ -99,7 +129,7 @@ async function runSolution(
     process.cwd(),
     'solutions-outputs',
     solution.name,
-    path.basename(inputFile).replace('test', 'output_')
+    `output_${inputFile}`
   );
   const inputFilePath = path.resolve(process.cwd(), 'tests', inputFile);
   await executor.executeWithRedirect(
@@ -148,54 +178,7 @@ async function compileSolution(sourcePath: string): Promise<string> {
       throw new Error(`Unsupported solution file extension: ${ext}`);
   }
 }
-// export async function runSolutionsOnSingleTest(
-//   solutions: Solution[],
-//   config: ConfigFile,
-//   testNumber: number
-// ) {
-//   for (const solution of solutions) {
-//     await runSolution(
-//       solution,
-//       config['time-limit'],
-//       config['memory-limit'],
-//       testNumber,
-//       testNumber
-//     );
-//   }
-// }
-// export async function runSolutionsOnGeneratorTests(
-//   solutions: Solution[],
-//   config: ConfigFile,
-//   generatorName: string
-// ) {
-//   const generator = config.generators?.find(g => g.name === generatorName);
 
-//   if (!generator) {
-//     throw new Error(
-//       `No generator named "${generatorName}" found in the configuration file.`
-//     );
-//   }
-
-//   const [start, end] = generator['tests-range'];
-
-//   for (const solution of solutions) {
-//     await runSolution(
-//       solution,
-//       config['time-limit'],
-//       config['memory-limit'],
-//       start,
-//       end
-//     );
-//   }
-// }
-// export function handleSolutionError(
-//   error: unknown,
-//   isCancelationPoint = false
-// ) {
-//   const message = error instanceof Error ? error.message : String(error);
-//   logger.error(`${message}`);
-//   if (isCancelationPoint) process.exit(1);
-// }
 export async function testSolutionAgainstMainCorrect(solutionName: string) {
   try {
     const config = readConfigFile();
@@ -241,7 +224,7 @@ export async function testSolutionAgainstMainCorrect(solutionName: string) {
       `  ${logger.dim('→')} Comparing with checker ${logger.dim('(validating verdicts...)')}`
     );
     try {
-      await compareResultsWithChecker(checker, mainSolution, solution);
+      await startTheComparisonProcess(checker, mainSolution, solution);
     } catch (error) {
       throwError(error, 'Comparison with checker failed');
     }
@@ -296,7 +279,7 @@ export function getMainSolution(solutions: Solution[]): Solution {
   // tell ts that this line is never reached
   throw new Error('Main correct solution not found.');
 }
-export async function compareResultsWithChecker(
+export async function startTheComparisonProcess(
   checker: Checker,
   mainSolution: Solution,
   targetSolution: Solution
@@ -310,31 +293,54 @@ export async function compareResultsWithChecker(
 
     const verdictTracker = createVerdictTracker();
 
-    for (const [index, testFile] of testFiles.entries()) {
-      await compareTestOutputs(
-        testFile,
-        index + 1,
-        compiledCheckerPath,
-        testsDir,
-        mainOutputDir,
-        targetOutputDir,
-        targetSolution,
-        verdictTracker
-      );
+    for (const testFile of testFiles) {
+      if (
+        await checkIfShouldSkip(
+          testFile,
+          mainOutputDir,
+          targetOutputDir,
+          targetSolution,
+          verdictTracker
+        )
+      ) {
+        continue;
+      }
+      const inputFilePath = path.join(testsDir, testFile);
+      const outputFilePath = path.join(targetOutputDir, `output_${testFile}`);
+      const answerFilePath = path.join(mainOutputDir, `output_${testFile}`);
+      const expectedVerdict = getExpectedCheckerVerdict(targetSolution.type);
+      try {
+        await runChecker(
+          compiledCheckerPath,
+          inputFilePath,
+          outputFilePath,
+          answerFilePath,
+          expectedVerdict
+        );
+        // expected verdict is correct and the checker did not throw
+        if (expectedVerdict !== 'OK') {
+          verdictTracker.didWA = true;
+        }
+      } catch {
+        if (expectedVerdict === 'OK') {
+          verdictTracker.didWA = true;
+        }
+      }
     }
 
     validateExpectedVerdicts(targetSolution, verdictTracker);
   } catch (error) {
-    handleComparisonError(error);
+    throwError(error, 'Error during solution comparison process');
   } finally {
     executor.cleanup();
   }
 }
-function createVerdictTracker() {
+function createVerdictTracker(): VerdictTracker {
   return {
     didTLE: false,
     didMLE: false,
     didRTE: false,
+    didPE: false,
     didWA: false,
   };
 }
@@ -357,18 +363,22 @@ function writeMemoryOutputAndThrow(outputPath: string, memoryLimit: number) {
 function getTestFiles(testsDir: string): string[] {
   return fs.readdirSync(testsDir).filter(file => file.startsWith('test'));
 }
-async function compareTestOutputs(
+
+async function checkIfShouldSkip(
   testFile: string,
-  testNumber: number,
-  compiledCheckerPath: string,
-  testsDir: string,
   mainOutputDir: string,
   targetOutputDir: string,
   targetSolution: Solution,
-  verdictTracker: ReturnType<typeof createVerdictTracker>
+  verdictTracker: VerdictTracker
 ) {
   const mainOutputPath = path.join(mainOutputDir, `output_${testFile}`);
   const targetOutputPath = path.join(targetOutputDir, `output_${testFile}`);
+
+  // if target ouput file does not exist, it means the solution failed to run on this test, either TLE, MLE, RTE
+  // So, the verdictTracker must have caught that already
+  if (!fs.existsSync(targetOutputPath)) {
+    return true;
+  }
 
   const mainFirstLine = await readFirstLine(mainOutputPath);
   const targetFirstLine = await readFirstLine(targetOutputPath);
@@ -381,20 +391,7 @@ async function compareTestOutputs(
     verdictTracker
   );
 
-  if (shouldSkipCheckerComparison(targetFirstLine)) {
-    return;
-  }
-
-  await runCheckerComparison(
-    compiledCheckerPath,
-    testsDir,
-    testFile,
-    targetOutputPath,
-    mainOutputPath,
-    targetSolution,
-    verdictTracker,
-    testNumber
-  );
+  return shouldSkipCheckerComparison(targetFirstLine);
 }
 
 function validateMainSolutionOutput(firstLine: string, testFile: string) {
@@ -413,7 +410,7 @@ function validateTargetSolutionOutput(
   firstLine: string,
   testFile: string,
   targetSolution: Solution,
-  verdictTracker: ReturnType<typeof createVerdictTracker>
+  verdictTracker: VerdictTracker
 ) {
   if (isTLE(firstLine)) {
     verdictTracker.didTLE = true;
@@ -450,70 +447,51 @@ function shouldSkipCheckerComparison(firstLine: string): boolean {
   return false;
 }
 
-async function runCheckerComparison(
-  compiledCheckerPath: string,
-  testsDir: string,
-  testFile: string,
-  targetOutputPath: string,
-  mainOutputPath: string,
-  targetSolution: Solution,
-  verdictTracker: ReturnType<typeof createVerdictTracker>,
-  _testNumber: number
-) {
-  const inputPath = path.join(testsDir, testFile);
-  const result = await executor.execute(
-    `${compiledCheckerPath} ${inputPath} ${targetOutputPath} ${mainOutputPath}`,
-    {
-      timeout: DEFAULT_TIMEOUT,
-      memoryLimitMB: DEFAULT_MEMORY_LIMIT,
-      silent: true,
-      onError: () => {},
-      onTimeout: () => {
-        logger.error(
-          `${logger.bold('Checker Unexpectedly Exceeded Time Limit!')} (${DEFAULT_TIMEOUT}ms), on test ${testFile}`
-        );
-        executor.cleanup();
-        process.exit(1);
-      },
-      onMemoryExceeded: () => {
-        logger.error(
-          `${logger.bold('Checker Unexpectedly Exceeded Memory Limit!')} (${DEFAULT_MEMORY_LIMIT} MB), on test ${testFile}`
-        );
-        executor.cleanup();
-        process.exit(1);
-      },
-    }
-  );
-
-  const expectedVerdict = getExpectedCheckerVerdict(targetSolution.type);
-  if (result.exitCode !== 0 && expectedVerdict !== 'OK') {
-    verdictTracker.didWA = true;
-    if (!isValidWAValue(targetSolution.type)) {
-      throw new Error(
-        `Target Solution got wrong answer on test ${testFile} but marked as ${targetSolution.type}\n\t${logger.bold(
-          result.stderr ? result.stderr : ''
-        )}`
-      );
-    }
-    return;
-  }
-}
-
 function validateExpectedVerdicts(
   targetSolution: Solution,
-  verdictTracker: ReturnType<typeof createVerdictTracker>
+  verdictTracker: VerdictTracker
 ) {
+  if (verdictTracker.didTLE) {
+    if (!isTLEValue(targetSolution.type)) {
+      throw new Error(
+        `Solution ${logger.highlight(targetSolution.name)} marked as ${targetSolution.type} but had Time Limit Exceeded on some tests`
+      );
+    }
+  }
+  if (verdictTracker.didMLE) {
+    if (!isValidMLEValue(targetSolution.type)) {
+      throw new Error(
+        `Solution ${logger.highlight(targetSolution.name)} marked as ${targetSolution.type} but got Memory Limit Exceeded on some tests`
+      );
+    }
+  }
+
+  if (verdictTracker.didRTE) {
+    if (!isValidRTEValue(targetSolution.type)) {
+      throw new Error(
+        `Solution ${logger.highlight(targetSolution.name)} marked as ${logger.highlight(targetSolution.type)} but got Runtime Error on some tests`
+      );
+    }
+  }
+
+  if (verdictTracker.didWA) {
+    if (!isValidWAValue(targetSolution.type)) {
+      throw new Error(
+        `Solution ${logger.highlight(targetSolution.name)} marked as ${logger.highlight(targetSolution.type)} but got Wrong Answer on some tests`
+      );
+    }
+  }
   // For solutions specifically marked as TLE (not tle-or-*)
   if (targetSolution.type === 'tle' && !verdictTracker.didTLE) {
     throw new Error(
-      'Target Solution is marked as TLE but did not time out on any test'
+      `Target Solution ${logger.highlight(targetSolution.name)} is marked as ${logger.highlight(targetSolution.type)} but did not time out on any test`
     );
   }
 
   // For solutions specifically marked as MLE
   if (targetSolution.type === 'mle' && !verdictTracker.didMLE) {
     throw new Error(
-      'Target Solution is marked as MLE but did not exceed memory limit on any test'
+      `Target Solution ${logger.highlight(targetSolution.name)} is marked as ${logger.highlight(targetSolution.type)} but did not exceed memory limit on any test`
     );
   }
 
@@ -526,37 +504,9 @@ function validateExpectedVerdicts(
     !verdictTracker.didWA
   ) {
     throw new Error(
-      `Target Solution is marked as ${targetSolution.type} but passed all tests correctly`
+      `Target Solution ${logger.highlight(targetSolution.name)} is marked as ${targetSolution.type} but passed all tests correctly`
     );
   }
-}
-
-function handleComparisonError(error: unknown) {
-  throw error instanceof Error ? error : new Error(String(error));
-}
-
-function readFirstLine(filePath: string): Promise<string> {
-  // use file stream
-
-  const fileStream = fs.createReadStream(filePath, { encoding: 'utf-8' });
-  return new Promise<string>((resolve, reject) => {
-    let data = '';
-    fileStream.on('data', chunk => {
-      data += String(chunk);
-      const lines = data.split(/\r?\n/);
-      if (lines.length > 1) {
-        fileStream.close();
-        resolve(lines[0]);
-      }
-    });
-    fileStream.on('end', () => {
-      const lines = data.split(/\r?\n/);
-      resolve(lines[0] || '');
-    });
-    fileStream.on('error', err => {
-      reject(err);
-    });
-  });
 }
 
 function isTLE(firstLine: string): boolean {
@@ -571,7 +521,7 @@ function isRTE(firstLine: string): boolean {
   return firstLine.startsWith('Runtime Error');
 }
 
-function isTLEValue(solutionType: string): boolean {
+function isTLEValue(solutionType: SolutionType): boolean {
   const validTypes = [
     'tle',
     'tle-or-correct',
@@ -582,31 +532,17 @@ function isTLEValue(solutionType: string): boolean {
   return validTypes.includes(solutionType);
 }
 
-function isValidMLEValue(solutionType: string): boolean {
+function isValidMLEValue(solutionType: SolutionType): boolean {
   const validTypes = ['mle', 'tle-or-mle', 'incorrect', 'failed'];
   return validTypes.includes(solutionType);
 }
 
-function isValidRTEValue(solutionType: string): boolean {
+function isValidRTEValue(solutionType: SolutionType): boolean {
   const validTypes = ['incorrect', 'failed'];
   return validTypes.includes(solutionType);
 }
-function isValidWAValue(solutionType: string): boolean {
-  const validTypes = ['incorrect', 'wa', 'failed'];
+
+function isValidWAValue(solutionType: SolutionType): boolean {
+  const validTypes = ['incorrect', 'failed', 'wa'];
   return validTypes.includes(solutionType);
-}
-function getExpectedCheckerVerdict(solutionType: string): string {
-  switch (solutionType) {
-    case 'main-correct':
-    case 'correct':
-      return 'OK';
-    case 'incorrect':
-    case 'failed':
-    case 'wa':
-      return 'WA';
-    case 'pe':
-      return 'PE';
-    default:
-      return 'NA';
-  }
 }

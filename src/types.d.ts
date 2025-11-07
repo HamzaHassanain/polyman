@@ -7,6 +7,7 @@ type SolutionType =
   | 'tle-or-correct'
   | 'tle-or-mle'
   | 'mle'
+  | 'wa'
   | 'failed'
   | 'pe';
 
@@ -29,7 +30,13 @@ type Checker = {
 };
 
 type CheckerVerdict = 'OK' | 'WA' | 'ok' | 'wa' | 'PE' | 'pe';
-
+type VerdictTracker = {
+  didWA: boolean;
+  didPE: boolean;
+  didTLE: boolean;
+  didMLE: boolean;
+  didRTE: boolean;
+};
 type CheckerTest = {
   stdin: string;
   stdout: string;
@@ -89,5 +96,6 @@ export {
   CheckerTest,
   ValidatorVerdict,
   CheckerVerdict,
+  VerdictTracker,
 };
 export default ConfigFile;
