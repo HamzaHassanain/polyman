@@ -1,0 +1,28 @@
+{
+  "source": {
+    "include": ["src"],
+    "includePattern": ".+\\.ts(doc|x)?$",
+    "excludePattern": "(node_modules/|dist/)"
+  },
+  "plugins": ["plugins/markdown"],
+  "opts": {
+    "template": "node_modules/docdash",
+    "encoding": "utf8",
+    "destination": "./docs",
+    "recurse": true,
+    "readme": "DOCUMENTATION.md",
+    "verbose": true
+  },
+  "templates": {
+    "cleverLinks": true,
+    "monospaceLinks": false,
+    "default": {
+      "outputSourceFiles": true,
+      "includeDate": false
+    }
+  },
+  "metadata": {
+    "title": "Polyman Documentation",
+    "description": "CLI tool for Codeforces problem setters to create and manage competitive programming problems"
+  }
+}
