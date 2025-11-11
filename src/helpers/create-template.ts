@@ -33,10 +33,10 @@ export function logTemplateCreationSuccess(directory: string) {
     `    ${fmt.primary('3.')} Edit ${fmt.highlight('Config.json')} to configure your problem`
   );
   fmt.log(
-    `    ${fmt.primary('4.')} Run ${fmt.highlight('polyman generate-tests all')} to generate tests`
+    `    ${fmt.primary('4.')} Run ${fmt.highlight('polyman run-generator all')} to generate tests`
   );
   fmt.log(
-    `    ${fmt.primary('5.')} Run ${fmt.highlight('polyman validate-tests all')} to validate tests`
+    `    ${fmt.primary('5.')} Run ${fmt.highlight('polyman run-validator all')} to validate tests`
   );
   fmt.log(
     `    ${fmt.primary('6.')} Run ${fmt.highlight('polyman verify')} for full verification`

@@ -46,7 +46,7 @@
 ### Install from npm
 
 ```bash
-npm install -g polyman
+npm install -g polyman-cli
 ```
 
 ### Install from Source
@@ -109,7 +109,7 @@ polyman verify
   "memory-limit": 256,
   "tags": ["math", "implementation"],
 
-  "tags": ["difficulty"],
+  "tags": ["difficulty", "math", "greedy"],
 
   "statements": {
     "english": {
@@ -159,7 +159,7 @@ polyman verify
 #### Required Fields
 
 - **`name`** (string): Problem identifier
-- **`tag`** (string): Difficulty tag
+- **`tags`** (array): Problem tags
 - **`time-limit`** (number): Time limit in milliseconds
 - **`memory-limit`** (number): Memory limit in MB
 - **`solutions`** (array): Solution configurations

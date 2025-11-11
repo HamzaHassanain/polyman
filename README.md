@@ -38,6 +38,38 @@ Polyman is a CLI tool that will allow codeforces problem setters to never get ou
 - **Full Verification** - Complete workflow in one command
 - **Multi-Language** - Support for C++, Python, and Java
 - **Detailed Reports** - Colorful terminal output with verdicts
+- **🆕 Polygon SDK** - TypeScript SDK for Polygon API automation
+
+## Polygon SDK
+
+Polyman now includes a comprehensive TypeScript SDK for the Codeforces Polygon API, allowing you to programmatically interact with Polygon in your own applications.
+
+```typescript
+import { PolygonSDK } from 'polyman-cli/polygon';
+
+const sdk = new PolygonSDK({
+  apiKey: process.env.POLYGON_API_KEY!,
+  apiSecret: process.env.POLYGON_API_SECRET!,
+});
+
+// List problems
+const problems = await sdk.listProblems();
+
+// Get problem info
+const info = await sdk.getProblemInfo(12345);
+
+// Upload solution
+await sdk.saveSolution(12345, 'main.cpp', code, 'MA');
+```
+
+**[📚 Full Polygon SDK Documentation](POLYGON_SDK.md)**
+
+The SDK provides:
+
+- 54+ API methods covering all Polygon functionality
+- Full TypeScript type safety
+- Automatic authentication and signature generation
+- Comprehensive documentation and examples
 
 ## Installation
 

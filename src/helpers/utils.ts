@@ -15,6 +15,16 @@ export const DEFAULT_TIMEOUT = 10000;
 /** Default memory limit in megabytes */
 export const DEFAULT_MEMORY_LIMIT = 1024;
 
+// ENV is win or unix
+export const ENV = process.platform === 'win32' ? 'win' : 'unix';
+
+export const SECRET_KEY_LOCATION =
+  ENV === 'win'
+    ? '%USERPROFILE%\\.polyman\\secret_key'
+    : '~/.polyman/secret_key';
+export const API_KEY_LOCATION =
+  ENV === 'win' ? '%USERPROFILE%\\.polyman\\api_key' : '~/.polyman/api_key';
+
 /**
  * Compiles a C++ source file using g++.
  * Uses -O2 optimization and C++23 standard.
@@ -105,6 +115,29 @@ export function filterTestsByRange(
       !isNaN(testNumber) && testNumber >= testBegin && testNumber <= testEnd
     );
   });
+}
+
+/**
+ * Gets all test files from tests directory.
+ * Returns only files starting with 'test' prefix in sorted order by test number.
+ *
+ * @private
+ * @param {string} testsDir - Path to tests directory
+ * @returns {string[]} Array of test filenames
+ *
+ * @example
+ * getTestFiles('/path/to/tests')
+ * // Returns: ['test1.txt', 'test2.txt', 'test3.txt', ...]
+ */
+export function getTestFiles(testsDir: string): string[] {
+  return fs
+    .readdirSync(testsDir)
+    .filter(file => file.startsWith('test'))
+    .sort((a, b) => {
+      const numA = parseInt(a.replace('test', '').replace('.txt', ''));
+      const numB = parseInt(b.replace('test', '').replace('.txt', ''));
+      return numA - numB;
+    });
 }
 
 /**
