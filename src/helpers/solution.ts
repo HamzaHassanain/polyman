@@ -5,10 +5,9 @@
  */
 
 import ConfigFile, {
-  Checker,
-  Solution,
-  SolutionType,
+  LocalSolution,
   VerdictTracker,
+  LocalTestset,
 } from '../types';
 import { executor } from '../executor';
 import fs from 'fs';
@@ -19,20 +18,23 @@ import {
   compileJava,
   readConfigFile,
   readFirstLine,
+  getTestFiles,
+  getCompiledCommandToRun,
 } from './utils';
 import { fmt } from '../formatter';
 import {
   ensureCheckerExists,
   runChecker,
   getExpectedCheckerVerdict,
-  compileChecker,
 } from './checker';
+import type { LocalChecker } from '../types';
+import { getGeneratorCommands } from './testset';
 
 /**
  * Ensures solutions are defined in configuration.
  * Type assertion function that throws if no solutions exist.
  *
- * @param {Solution[] | undefined} solutions - Solutions array to validate
+ * @param {LocalSolution[] | undefined} solutions - Solutions array to validate
  *
  * @throws {Error} If no solutions are defined
  *
@@ -42,8 +44,8 @@ import {
  * // Now TypeScript knows solutions is defined and non-empty
  */
 export function validateSolutionsExist(
-  solutions: Solution[] | undefined
-): asserts solutions is Solution[] {
+  solutions: LocalSolution[] | undefined
+): asserts solutions is LocalSolution[] {
   if (!solutions || solutions.length === 0) {
     throw new Error('No solutions defined in the configuration file.');
   }
@@ -52,9 +54,9 @@ export function validateSolutionsExist(
 /**
  * Finds solutions matching a given name or returns all solutions.
  *
- * @param {Solution[]} solutions - Array of solution configurations
+ * @param {LocalSolution[]} solutions - Array of solution configurations
  * @param {string} solutionName - Name of solution to find, or 'all' for all solutions
- * @returns {Solution[]} Array of matching solutions
+ * @returns {LocalSolution[]} Array of matching solutions
  *
  * @throws {Error} If no solutions match the name
  *
@@ -63,9 +65,9 @@ export function validateSolutionsExist(
  * // Returns: [{ name: 'main', source: 'Solution.cpp', type: 'main-correct' }]
  */
 export function findMatchingSolutions(
-  solutions: Solution[],
+  solutions: LocalSolution[],
   solutionName: string
-): Solution[] {
+): LocalSolution[] {
   const matching = solutions.filter(
     s => solutionName === 'all' || s.name === solutionName
   );
@@ -80,184 +82,17 @@ export function findMatchingSolutions(
 }
 
 /**
- * Runs a single solution on test files.
- * Compiles the solution and executes it on all tests or a specific test.
- * Creates output files in solutions-outputs/<solution-name>/ directory.
- *
- * @param {Solution} solution - Solution configuration
- * @param {ConfigFile} config - Configuration containing time/memory limits
- * @param {number} [testNumber] - Optional specific test number to run on
- *
- * @throws {Error} If solution compilation fails
- * @throws {Error} If solution fails on any test with TLE, MLE, or RTE
- *
- * @example
- * const solution = config.solutions.find(s => s.name === 'main')!;
- * await runSingleSolutionOnTests(solution, config);
- *
- * @example
- * // Run on specific test
- * await runSingleSolutionOnTests(solution, config, 5);
- */
-export async function runSingleSolutionOnTests(
-  solution: Solution,
-  config: ConfigFile,
-  testNumber?: number
-) {
-  fmt.info(
-    `  ${fmt.infoIcon()} Running solution: ${fmt.highlight(solution.name)} ${fmt.dim(`(${solution.type})`)}`
-  );
-  const thrownErrors = new Set<string>();
-
-  try {
-    const compiledPath = await compileSolution(solution.source);
-    ensureOutputDirectory(solution.name);
-
-    const testsDir = path.resolve(process.cwd(), 'tests');
-    const testFiles = getTestFilesToRun(testsDir, testNumber);
-
-    for (const testFile of testFiles) {
-      if (thrownErrors.size > 0) {
-        break;
-      }
-      try {
-        await runSolution(
-          solution,
-          compiledPath,
-          config['time-limit'],
-          config['memory-limit'],
-          testFile
-        );
-      } catch (error) {
-        const message =
-          error instanceof Error
-            ? error.message + ` (test: ${testFile})`
-            : String(error);
-        thrownErrors.add(message);
-      }
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    thrownErrors.add(
-      `Failed to compile solution ${solution.name}:\n\t${message}`
-    );
-  }
-
-  if (thrownErrors.size > 0) {
-    fmt.log(
-      `    ${fmt.dim('→')} Completed running solution ${fmt.highlight(solution.name)} ${fmt.bold('With Failures:')}`
-    );
-    for (const errMsg of thrownErrors) {
-      fmt.error(`      ${fmt.cross()} ${errMsg}`);
-    }
-    console.log();
-    throw new Error(
-      `Solution ${fmt.highlight(solution.name)} failed on tests: \t\n${Array.from(thrownErrors).join('\n')}`
-    );
-  } else {
-    fmt.log(
-      `    ${fmt.dim('→')} Completed running solution ${fmt.highlight(solution.name)}`
-    );
-  }
-  console.log();
-}
-
-/**
- * Runs matching solutions on test files.
- * Finds solutions by name and executes each one on all tests or a specific test.
- * Creates output files in solutions-outputs/<solution-name>/ directory.
- *
- * @param {Solution[]} solutions - Array of solution configurations
- * @param {string} solutionName - Name of solution to run, or 'all' for all solutions
- * @param {ConfigFile} config - Configuration containing time/memory limits
- * @param {number} [testNumber] - Optional specific test number to run on
- *
- * @throws {Error} If no solutions match the name
- * @throws {Error} If solution compilation fails
- * @throws {Error} If solution execution fails unexpectedly
- * @throws {Error} If solution fails on any test with TLE, MLE, or RTE
- *
- * @example
- * // From actions.ts solveTests - run on all tests
- * await runMatchingSolutionsOnTests(config.solutions, 'main', config);
- *
- * @example
- * // Run on specific test
- * await runMatchingSolutionsOnTests(config.solutions, 'wa-solution', config, 5);
- *
- * @example
- * // Run all solutions
- * await runMatchingSolutionsOnTests(config.solutions, 'all', config);
- */
-export async function runMatchingSolutionsOnTests(
-  solutions: Solution[],
-  solutionName: string,
-  config: ConfigFile,
-  testNumber?: number
-) {
-  const matchingSolutions = findMatchingSolutions(solutions, solutionName);
-
-  if (matchingSolutions.length === 0) {
-    throw new Error(`No solutions matched the name "${solutionName}"`);
-  }
-
-  const failedSolutionsErrorMessages = new Set<string>();
-
-  for (const solution of matchingSolutions) {
-    try {
-      await runSingleSolutionOnTests(solution, config, testNumber);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      failedSolutionsErrorMessages.add(message);
-    }
-  }
-
-  if (failedSolutionsErrorMessages.size > 0) {
-    throw new Error(
-      `${fmt.bold('Some solutions failed:')}\n\n${Array.from(
-        failedSolutionsErrorMessages
-      ).join('\n\n')}`
-    );
-  }
-}
-
-/**
- * Gets array of test files to run based on test number.
- * If testNumber is provided, returns single test file.
- * Otherwise returns all test*.txt files from tests directory.
- *
- * @private
- * @param {string} testsDir - Path to tests directory
- * @param {number} [testNumber] - Optional specific test number
- * @returns {string[]} Array of test filenames
- *
- * @example
- * getTestFilesToRun('/path/to/tests', 5)
- * // Returns: ['test5.txt']
- *
- * @example
- * getTestFilesToRun('/path/to/tests')
- * // Returns: ['test1.txt', 'test2.txt', ...]
- */
-function getTestFilesToRun(testsDir: string, testNumber?: number): string[] {
-  if (testNumber !== undefined) {
-    return [`test${testNumber}.txt`];
-  }
-
-  return getTestFiles(testsDir);
-}
-
-/**
  * Runs a compiled solution on a test input file.
  * Executes solution with time/memory limits, handles output files, and error scenarios.
  * Creates output file with either solution output or error message (TLE, MLE, RTE).
  *
  * @private
- * @param {Solution} solution - Solution configuration
+ * @param {LocalSolution} solution - Solution configuration
  * @param {string} compiledPath - Path to compiled executable or interpreter command
  * @param {number} timeout - Time limit in milliseconds
  * @param {number} memoryLimitMB - Memory limit in megabytes
  * @param {string} inputFile - Name of test input file
+ * @param {string} testsetName - Name of testset containing the test
  *
  * @throws {Error} If runtime error occurs
  * @throws {Error} If time limit exceeded
@@ -265,27 +100,35 @@ function getTestFilesToRun(testsDir: string, testNumber?: number): string[] {
  *
  * @example
  * await runSolution(
- *   { name: 'main', source: 'Solution.cpp', type: 'main-correct' },
+ *   { name: 'main', source: 'Solution.cpp', tag: 'MA' },
  *   './Solution',
  *   2000,
  *   256,
- *   'test1.txt'
+ *   'test1.txt',
+ *   'testsets'
  * );
  */
 async function runSolution(
-  solution: Solution,
+  solution: LocalSolution,
   compiledPath: string,
   timeout: number,
   memoryLimitMB: number,
-  inputFile: string
+  inputFile: string,
+  testsetName: string
 ) {
   const outputFilePath = path.resolve(
     process.cwd(),
     'solutions-outputs',
     solution.name,
+    testsetName,
     `output_${inputFile}`
   );
-  const inputFilePath = path.resolve(process.cwd(), 'tests', inputFile);
+  const inputFilePath = path.resolve(
+    process.cwd(),
+    'testsets',
+    testsetName,
+    inputFile
+  );
   await executor.executeWithRedirect(
     compiledPath,
     {
@@ -308,23 +151,33 @@ async function runSolution(
 }
 /**
  * Creates output directory for solution if it doesn't exist.
- * Directory structure: solutions-outputs/<solution-name>/
+ * Directory structure: solutions-outputs/<solution-name>/[testset-name/]
  *
  * @private
  * @param {string} solutionName - Name of solution
+ * @param {string} [testsetName] - Optional testset name for subdirectory
  * @returns {string} Absolute path to created output directory
  *
  * @example
  * const dir = ensureOutputDirectory('main');
  * // Returns: '/path/to/project/solutions-outputs/main'
- * // Creates directory if needed
+ *
+ * @example
+ * const dir = ensureOutputDirectory('main', 'testsets');
+ * // Returns: '/path/to/project/solutions-outputs/main/tests'
  */
-function ensureOutputDirectory(solutionName: string): string {
-  const outputDir = path.resolve(
-    process.cwd(),
-    'solutions-outputs',
-    solutionName
-  );
+function ensureOutputDirectory(
+  solutionName: string,
+  testsetName?: string
+): string {
+  const outputDir = testsetName
+    ? path.resolve(
+        process.cwd(),
+        'solutions-outputs',
+        solutionName,
+        testsetName
+      )
+    : path.resolve(process.cwd(), 'solutions-outputs', solutionName);
   if (!fs.existsSync(outputDir)) {
     fs.mkdirSync(outputDir, { recursive: true });
   }
@@ -334,40 +187,317 @@ function ensureOutputDirectory(solutionName: string): string {
 /**
  * Compiles a solution based on file extension.
  * Supports C++ (.cpp), Python (.py), and Java (.java).
+ * For interpreted languages, returns the interpreter command.
  *
- * @private
  * @param {string} sourcePath - Path to solution source file
- * @returns {Promise<string>} Command to execute the solution
+ * @returns {Promise<void>} Resolves when compilation completes
  *
+ * @throws {Error} If compilation fails
  * @throws {Error} If file extension is not supported
  *
  * @example
  * await compileSolution('Solution.cpp')
- * // Returns: '/path/to/Solution' (compiled executable)
+ * // Compiles to ./Solution executable
  *
  * @example
  * await compileSolution('Solution.py')
- * // Returns: 'python3 Solution.py' (interpreter command)
+ * // No compilation needed (interpreted)
  */
-async function compileSolution(sourcePath: string): Promise<string> {
+export async function compileSolution(sourcePath: string): Promise<void> {
   const ext = path.extname(sourcePath);
 
   switch (ext) {
     case '.cpp':
-      return await compileCPP(sourcePath);
+      await compileCPP(sourcePath);
+      break;
     case '.py':
-      return `python3 ${sourcePath}`;
+      // No compilation needed for Python
+      break;
     case '.java':
-      return await compileJava(sourcePath);
+      await compileJava(sourcePath);
+      break;
     default:
       throw new Error(`Unsupported solution file extension: ${ext}`);
   }
 }
 
 /**
+ * Compiles all matching solutions.
+ * Compiles each solution based on file extension.
+ *
+ * @param {LocalSolution[]} solutions - Array of solutions to compile
+ * @returns {Promise<void>} Resolves when all compilations complete
+ *
+ * @throws {Error} If any compilation fails
+ *
+ * @example
+ * await compileAllSolutions(config.solutions);
+ * // Compiles all solutions in parallel
+ */
+export async function compileAllSolutions(
+  solutions: LocalSolution[]
+): Promise<void> {
+  await Promise.all(solutions.map(s => compileSolution(s.source)));
+}
+
+/**
+ * Runs a single solution on a single test within a testset.
+ * Executes it on the specified test using pre-compiled executable.
+ * Note: Solution must be compiled before calling this function.
+ *
+ * @param {LocalSolution} solution - Solution configuration
+ * @param {ConfigFile} config - Configuration containing time/memory limits
+ * @param {string} testsetName - Name of testset containing the test
+ * @param {number} testIndex - Test index (1-based)
+ *
+ * @throws {Error} If solution execution fails
+ *
+ * @example
+ * await runSolutionOnSingleTest(solution, config, 'testsets', 5);
+ */
+export async function runSolutionOnSingleTest(
+  solution: LocalSolution,
+  config: ConfigFile,
+  testsetName: string,
+  testIndex: number
+) {
+  fmt.info(
+    `  ${fmt.infoIcon()} Running solution: ${fmt.highlight(solution.name)} on test ${testIndex} in ${fmt.highlight(testsetName)}`
+  );
+
+  try {
+    const compiledPath = getCompiledCommandToRun(solution);
+    ensureOutputDirectory(solution.name, testsetName);
+
+    const testFile = `test${testIndex}.txt`;
+
+    await runSolution(
+      solution,
+      compiledPath,
+      config.timeLimit,
+      config.memoryLimit,
+      testFile,
+      testsetName
+    );
+
+    fmt.log(`    ${fmt.dim('→')} Test ${testIndex} completed successfully`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Solution ${fmt.highlight(solution.name)} failed on test ${testIndex}: ${message}`
+    );
+  }
+}
+
+/**
+ * Runs a single solution on an entire testset.
+ * Executes it on all tests in the testset using pre-compiled executable.
+ * Note: Solution must be compiled before calling this function.
+ *
+ * @param {LocalSolution} solution - Solution configuration
+ * @param {ConfigFile} config - Configuration containing time/memory limits
+ * @param {string} testsetName - Name of testset to run on
+ *
+ * @throws {Error} If solution fails on any test
+ *
+ * @example
+ * await runSolutionOnTestset(solution, config, 'testsets');
+ */
+export async function runSolutionOnTestset(
+  solution: LocalSolution,
+  config: ConfigFile,
+  testsetName: string
+) {
+  fmt.info(
+    `  ${fmt.infoIcon()} Running solution: ${fmt.highlight(solution.name)} on testset ${fmt.highlight(testsetName)}`
+  );
+  const thrownErrors = new Set<string>();
+
+  try {
+    const compiledPath = getCompiledCommandToRun(solution);
+    ensureOutputDirectory(solution.name, testsetName);
+
+    const testsDir = path.resolve(process.cwd(), 'testsets', testsetName);
+    const testFiles = getTestFiles(testsDir);
+
+    for (const testFile of testFiles) {
+      if (thrownErrors.size > 0) {
+        break;
+      }
+      try {
+        await runSolution(
+          solution,
+          compiledPath,
+          config.timeLimit,
+          config.memoryLimit,
+          testFile,
+          testsetName
+        );
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message + ` (${testsetName}/${testFile})`
+            : String(error);
+        thrownErrors.add(message);
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    thrownErrors.add(
+      `Failed to get compiled solution ${solution.name}:\n\t${message}`
+    );
+  }
+
+  if (thrownErrors.size > 0) {
+    fmt.log(
+      `    ${fmt.dim('→')} Completed testset ${fmt.highlight(testsetName)} ${fmt.bold('With Failures:')}`
+    );
+    for (const errMsg of thrownErrors) {
+      fmt.error(`      ${fmt.cross()} ${errMsg}`);
+    }
+    console.log();
+    throw new Error(
+      `Solution ${fmt.highlight(solution.name)} failed on testset ${testsetName}:\n${Array.from(thrownErrors).join('\n')}`
+    );
+  } else {
+    fmt.log(
+      `    ${fmt.dim('→')} Completed testset ${fmt.highlight(testsetName)}`
+    );
+  }
+  console.log();
+}
+
+/**
+ * Runs a single solution on a specific group within a testset.
+ * Executes it on all tests in the group using pre-compiled executable.
+ * Note: Solution must be compiled before calling this function.
+ *
+ * @param {LocalSolution} solution - Solution configuration
+ * @param {ConfigFile} config - Configuration containing time/memory limits
+ * @param {LocalTestset} testset - Testset configuration
+ * @param {string} groupName - Name of group to run on
+ *
+ * @throws {Error} If solution fails on any test in the group
+ *
+ * @example
+ * await runSolutionOnGroup(solution, config, testset, 'samples');
+ */
+export async function runSolutionOnGroup(
+  solution: LocalSolution,
+  config: ConfigFile,
+  testset: LocalTestset,
+  groupName: string
+) {
+  fmt.info(
+    `  ${fmt.infoIcon()} Running solution: ${fmt.highlight(solution.name)} on group ${fmt.highlight(groupName)} in ${fmt.highlight(testset.name)}`
+  );
+  const thrownErrors = new Set<string>();
+
+  try {
+    const compiledPath = getCompiledCommandToRun(solution);
+    ensureOutputDirectory(solution.name, testset.name);
+
+    const commands = getGeneratorCommands(testset);
+    const groupCommands = commands.filter(cmd => cmd.group === groupName);
+
+    if (groupCommands.length === 0) {
+      throw new Error(
+        `No tests found for group "${groupName}" in testset "${testset.name}"`
+      );
+    }
+
+    let testIndex = 1;
+    for (const cmd of commands) {
+      if (cmd.group === groupName) {
+        const testFile = `test${testIndex}.txt`;
+        try {
+          await runSolution(
+            solution,
+            compiledPath,
+            config.timeLimit,
+            config.memoryLimit,
+            testFile,
+            testset.name
+          );
+        } catch (error) {
+          const message =
+            error instanceof Error
+              ? error.message + ` (test: ${testFile})`
+              : String(error);
+          thrownErrors.add(message);
+        }
+      }
+      testIndex++;
+      if (thrownErrors.size > 0) {
+        break;
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    thrownErrors.add(
+      `Failed to get compiled solution ${solution.name}:\n\t${message}`
+    );
+  }
+
+  if (thrownErrors.size > 0) {
+    fmt.log(
+      `    ${fmt.dim('→')} Completed group ${fmt.highlight(groupName)} ${fmt.bold('With Failures:')}`
+    );
+    for (const errMsg of thrownErrors) {
+      fmt.error(`      ${fmt.cross()} ${errMsg}`);
+    }
+    console.log();
+    throw new Error(
+      `Solution ${fmt.highlight(solution.name)} failed on group ${groupName}:\n${Array.from(thrownErrors).join('\n')}`
+    );
+  } else {
+    fmt.log(`    ${fmt.dim('→')} Completed group ${fmt.highlight(groupName)}`);
+  }
+  console.log();
+}
+
+/**
+ * Runs a single solution on all testsets.
+ * Compiles the solution and executes it on every test in every testset.
+ *
+ * @param {LocalSolution} solution - Solution configuration
+ * @param {ConfigFile} config - Configuration containing time/memory limits
+ * @param {LocalTestset[]} testsets - Array of testset configurations
+ *
+ * @throws {Error} If solution compilation fails
+ * @throws {Error} If solution fails on any test
+ *
+ * @example
+ * await runSolutionOnAllTestsets(solution, config, config.testsets);
+ */
+export async function runSolutionOnAllTestsets(
+  solution: LocalSolution,
+  config: ConfigFile,
+  testsets: LocalTestset[]
+) {
+  const failedTestsets = new Set<string>();
+
+  for (const testset of testsets) {
+    try {
+      await runSolutionOnTestset(solution, config, testset.name);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      failedTestsets.add(message);
+    }
+  }
+
+  if (failedTestsets.size > 0) {
+    throw new Error(
+      `Solution ${fmt.highlight(solution.name)} failed on some testsets:\n${Array.from(failedTestsets).join('\n\n')}`
+    );
+  }
+}
+
+/**
  * Tests a solution against the main correct solution using the checker.
- * Runs both solutions on all tests, then compares outputs with the checker.
+ * Runs both solutions on all testsets, then compares outputs with the checker.
  * Validates that the solution behaves according to its expected type (TLE, WA, etc.).
+ * Note: Solutions and checker must be compiled before calling this function.
  *
  * @param {string} solutionName - Name of solution to test
  *
@@ -386,6 +516,11 @@ export async function testSolutionAgainstMainCorrect(solutionName: string) {
     const config = readConfigFile();
     const solutions = config.solutions;
     const checker = config.checker;
+    const testsets = config.testsets || [];
+
+    if (testsets.length === 0) {
+      throw new Error('No testsets defined in configuration');
+    }
 
     ensureMainSolutionExists(solutions);
     ensureSolutionExists(solutions, solutionName);
@@ -395,10 +530,10 @@ export async function testSolutionAgainstMainCorrect(solutionName: string) {
     const solution = solutions.find(s => s.name === solutionName)!;
 
     fmt.info(
-      `  ${fmt.infoIcon()} Main solution: ${fmt.primary(mainSolution.name)} ${fmt.dim(`(${mainSolution.type})`)}`
+      `  ${fmt.infoIcon()} Main solution: ${fmt.primary(mainSolution.name)} ${fmt.dim(`(${mainSolution.tag})`)}`
     );
     fmt.info(
-      `  ${fmt.infoIcon()} Target solution: ${fmt.highlight(solutionName)} ${fmt.dim(`(${solution.type})`)}`
+      `  ${fmt.infoIcon()} Target solution: ${fmt.highlight(solutionName)} ${fmt.dim(`(${solution.tag})`)}`
     );
     console.log();
 
@@ -406,7 +541,7 @@ export async function testSolutionAgainstMainCorrect(solutionName: string) {
       `  ${fmt.dim('→')} Running main solution ${fmt.dim('(generating outputs...)')}`
     );
     try {
-      await runSingleSolutionOnTests(mainSolution, config);
+      await runSolutionOnAllTestsets(mainSolution, config, testsets);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const newErrorMessage = `Failed to run ${fmt.bold('Main Solution')}: \n\t${message}`;
@@ -417,7 +552,7 @@ export async function testSolutionAgainstMainCorrect(solutionName: string) {
       `  ${fmt.dim('→')} Running target solution ${fmt.dim('(generating outputs...)')}`
     );
     try {
-      await runSingleSolutionOnTests(solution, config);
+      await runSolutionOnAllTestsets(solution, config, testsets);
     } catch {
       // @ts-nocheck
     }
@@ -426,7 +561,12 @@ export async function testSolutionAgainstMainCorrect(solutionName: string) {
       `  ${fmt.dim('→')} Comparing with checker ${fmt.dim('(validating verdicts...)')}`
     );
     try {
-      await startTheComparisonProcess(checker, mainSolution, solution);
+      await startTheComparisonProcess(
+        checker,
+        mainSolution,
+        solution,
+        testsets
+      );
     } catch (error) {
       throwError(error, 'Comparison with checker failed');
     }
@@ -437,32 +577,32 @@ export async function testSolutionAgainstMainCorrect(solutionName: string) {
 
 /**
  * Ensures a main-correct solution exists in the configuration.
- * Type assertion function that throws if no main-correct solution found.
+ * Type assertion function that throws if no MA (main correct) solution found.
  *
- * @param {Solution[] | undefined} solutions - Solutions array to validate
+ * @param {LocalSolution[] | undefined} solutions - Solutions array to validate
  *
  * @throws {Error} If no solutions are defined
- * @throws {Error} If no main-correct solution exists
+ * @throws {Error} If no MA (main correct) solution exists
  *
  * @example
  * const config = readConfigFile();
  * ensureMainSolutionExists(config.solutions);
  */
 export function ensureMainSolutionExists(
-  solutions: Solution[] | undefined
-): asserts solutions is Solution[] {
+  solutions: LocalSolution[] | undefined
+): asserts solutions is LocalSolution[] {
   if (!solutions || solutions.length === 0) {
     throw new Error('No solutions defined in the configuration file.');
   }
 
   for (const solution of solutions) {
-    if (solution.type === 'main-correct') {
+    if (solution.tag === 'MA') {
       return;
     }
   }
 
   throw new Error(
-    'No solution with type "main-correct" found in the configuration file.'
+    'No solution with tag "MA" (main correct) found in the configuration file.'
   );
 }
 
@@ -470,7 +610,7 @@ export function ensureMainSolutionExists(
  * Ensures a specific solution exists in the configuration.
  * Type assertion function that throws if solution not found.
  *
- * @param {Solution[] | undefined} solutions - Solutions array to validate
+ * @param {LocalSolution[] | undefined} solutions - Solutions array to validate
  * @param {string} solutionName - Name of solution to find
  *
  * @throws {Error} If no solutions are defined
@@ -480,9 +620,9 @@ export function ensureMainSolutionExists(
  * ensureSolutionExists(config.solutions, 'wa-solution');
  */
 export function ensureSolutionExists(
-  solutions: Solution[] | undefined,
+  solutions: LocalSolution[] | undefined,
   solutionName: string
-): asserts solutions is Solution[] {
+): asserts solutions is LocalSolution[] {
   if (!solutions || solutions.length === 0) {
     throw new Error('No solutions defined in the configuration file.');
   }
@@ -497,37 +637,38 @@ export function ensureSolutionExists(
 }
 
 /**
- * Gets the main-correct solution from solutions array.
+ * Gets the MA (main correct) solution from solutions array.
  *
- * @param {Solution[]} solutions - Array of solution configurations
- * @returns {Solution} The main-correct solution
+ * @param {LocalSolution[]} solutions - Array of solution configurations
+ * @returns {LocalSolution} The MA (main correct) solution
  *
- * @throws {Error} If no main-correct solution found (should never happen if ensureMainSolutionExists called first)
+ * @throws {Error} If no MA solution found (should never happen if ensureMainSolutionExists called first)
  *
  * @example
  * const mainSolution = getMainSolution(config.solutions);
- * // Returns: { name: 'main', source: 'Solution.cpp', type: 'main-correct' }
+ * // Returns: { name: 'main', source: 'Solution.cpp', tag: 'MA' }
  */
-export function getMainSolution(solutions: Solution[]): Solution {
+export function getMainSolution(solutions: LocalSolution[]): LocalSolution {
   for (const solution of solutions) {
-    if (solution.type === 'main-correct') {
+    if (solution.tag === 'MA') {
       return solution;
     }
   }
   // tell ts that this line is never reached
-  throw new Error('Main correct solution not found.');
+  throw new Error('Main correct solution (tag "MA") not found.');
 }
 
 /**
  * Compares target solution outputs against main solution using checker.
- * Runs checker on all test cases and tracks verdicts (WA, TLE, MLE, RTE).
- * Validates that verdicts match the target solution's expected type.
+ * Runs checker on all test cases in all testsets and tracks verdicts (WA, TLE, MLE, RTE).
+ * Validates that verdicts match the target solution's expected tag.
+ * Note: Checker must be compiled before calling this function.
  *
- * @param {Checker} checker - Checker configuration
- * @param {Solution} mainSolution - Main correct solution
- * @param {Solution} targetSolution - Solution to validate
+ * @param {LocalChecker} checker - Checker configuration
+ * @param {LocalSolution} mainSolution - Main correct solution
+ * @param {LocalSolution} targetSolution - Solution to validate
+ * @param {LocalTestset[]} testsets - Array of testsets to check
  *
- * @throws {Error} If checker compilation fails
  * @throws {Error} If verdict validation fails
  * @throws {Error} If main solution has unexpected errors
  *
@@ -536,56 +677,66 @@ export function getMainSolution(solutions: Solution[]): Solution {
  * await startTheComparisonProcess(
  *   config.checker,
  *   mainSolution,
- *   waSolution
+ *   waSolution,
+ *   config.testsets
  * );
  */
 export async function startTheComparisonProcess(
-  checker: Checker,
-  mainSolution: Solution,
-  targetSolution: Solution
+  checker: LocalChecker,
+  mainSolution: LocalSolution,
+  targetSolution: LocalSolution,
+  testsets: LocalTestset[]
 ) {
   try {
-    const compiledCheckerPath = await compileChecker(checker);
-    const mainOutputDir = ensureOutputDirectory(mainSolution.name);
-    const targetOutputDir = ensureOutputDirectory(targetSolution.name);
-    const testsDir = path.resolve(process.cwd(), 'tests');
-    const testFiles = getTestFiles(testsDir);
-
+    const compiledCheckerPath = getCompiledCommandToRun(checker);
     const verdictTracker = createVerdictTracker();
 
-    for (const testFile of testFiles) {
-      if (
-        await checkIfShouldSkipRest(
-          testFile,
-          mainOutputDir,
-          targetOutputDir,
-          verdictTracker
-        )
-      ) {
-        break;
-      }
+    for (const testset of testsets) {
+      const mainOutputDir = ensureOutputDirectory(
+        mainSolution.name,
+        testset.name
+      );
+      const targetOutputDir = ensureOutputDirectory(
+        targetSolution.name,
+        testset.name
+      );
+      const testsDir = path.resolve(process.cwd(), 'testsets', testset.name);
+      const testFiles = getTestFiles(testsDir);
 
-      const inputFilePath = path.join(testsDir, testFile);
-      const outputFilePath = path.join(targetOutputDir, `output_${testFile}`);
-      const answerFilePath = path.join(mainOutputDir, `output_${testFile}`);
-      const expectedVerdict = getExpectedCheckerVerdict(targetSolution.type);
-
-      try {
-        await runChecker(
-          compiledCheckerPath,
-          inputFilePath,
-          outputFilePath,
-          answerFilePath,
-          expectedVerdict
-        );
-
-        // expected verdict is correct and the checker did not throw
-        if (expectedVerdict.toUpperCase() !== 'OK') {
-          verdictTracker.didWA = true;
+      for (const testFile of testFiles) {
+        if (
+          await checkIfShouldSkipRest(
+            testFile,
+            mainOutputDir,
+            targetOutputDir,
+            verdictTracker
+          )
+        ) {
+          break;
         }
-      } catch {
-        if (expectedVerdict.toUpperCase() === 'OK') {
-          verdictTracker.didWA = true;
+
+        const inputFilePath = path.join(testsDir, testFile);
+        const outputFilePath = path.join(targetOutputDir, `output_${testFile}`);
+        const answerFilePath = path.join(mainOutputDir, `output_${testFile}`);
+        const expectedVerdict = getExpectedCheckerVerdict(targetSolution.tag);
+
+        try {
+          await runChecker(
+            compiledCheckerPath,
+            inputFilePath,
+            outputFilePath,
+            answerFilePath,
+            expectedVerdict
+          );
+
+          // expected verdict is correct and the checker did not throw
+          if (expectedVerdict.toUpperCase() !== 'OK') {
+            verdictTracker.didWA = true;
+          }
+        } catch {
+          if (expectedVerdict.toUpperCase() === 'OK') {
+            verdictTracker.didWA = true;
+          }
         }
       }
     }
@@ -679,29 +830,6 @@ function writeMemoryOutputAndThrow(outputPath: string, memoryLimit: number) {
 }
 
 /**
- * Gets all test files from tests directory.
- * Returns only files starting with 'test' prefix in sorted order by test number.
- *
- * @private
- * @param {string} testsDir - Path to tests directory
- * @returns {string[]} Array of test filenames
- *
- * @example
- * getTestFiles('/path/to/tests')
- * // Returns: ['test1.txt', 'test2.txt', 'test3.txt', ...]
- */
-function getTestFiles(testsDir: string): string[] {
-  return fs
-    .readdirSync(testsDir)
-    .filter(file => file.startsWith('test'))
-    .sort((a, b) => {
-      const numA = parseInt(a.replace('test', '').replace('.txt', ''));
-      const numB = parseInt(b.replace('test', '').replace('.txt', ''));
-      return numA - numB;
-    });
-}
-
-/**
  * Checks if tests should be skipped during checker comparison.
  * Skips if output file doesn't exist or if output indicates TLE/MLE/RTE.
  * Validates both main and target solution outputs for errors.
@@ -779,16 +907,16 @@ function validateMainSolutionOutput(firstLine: string, testFile: string) {
 }
 
 /**
- * Validates target solution output against expected solution type.
- * Updates verdict tracker and throws if behavior doesn't match type.
+ * Validates target solution output against expected solution tag.
+ * Updates verdict tracker and throws if behavior doesn't match tag.
  *
  * @private
  * @param {string} firstLine - First line of output file
  * @param {VerdictTracker} verdictTracker - Verdict tracking object
  *
  * @example
- * // For TLE solution
- * validateTargetSolutionOutput('Time Limit Exceeded', 'test1.txt', tleSolution, tracker);
+ * // For TL solution
+ * validateTargetSolutionOutput('Time Limit Exceeded', tracker);
  * // Updates tracker.didTLE = true
  */
 function validateTargetSolutionOutput(
@@ -828,89 +956,89 @@ function shouldSkipCheckerComparison(firstLine: string): boolean {
 }
 
 /**
- * Validates that observed verdicts match expected solution type.
- * Ensures solutions behave according to their declared type (TLE, MLE, WA, etc.).
+ * Validates that observed verdicts match expected solution tag.
+ * Ensures solutions behave according to their declared tag (TL, ML, WA, RJ, etc.).
  *
  * @private
- * @param {Solution} targetSolution - Target solution configuration
+ * @param {LocalSolution} targetSolution - Target solution configuration
  * @param {VerdictTracker} verdictTracker - Verdict tracking object
  *
- * @throws {Error} If TLE observed but solution not marked as TLE type
- * @throws {Error} If MLE observed but solution not marked as MLE type
- * @throws {Error} If RTE observed but solution not marked as failed/incorrect
- * @throws {Error} If WA observed but solution not marked as incorrect/wa
- * @throws {Error} If no errors but solution marked as incorrect/failed
- * @throws {Error} If TLE solution didn't timeout on any test
- * @throws {Error} If MLE solution didn't exceed memory on any test
+ * @throws {Error} If TLE observed but solution not marked with TL/TO tag
+ * @throws {Error} If MLE observed but solution not marked with ML tag
+ * @throws {Error} If RTE observed but solution not marked with RE/RJ tag
+ * @throws {Error} If WA observed but solution not marked with WA/RJ tag
+ * @throws {Error} If no errors but solution marked as RJ
+ * @throws {Error} If TL solution didn't timeout on any test
+ * @throws {Error} If ML solution didn't exceed memory on any test
  *
  * @example
- * // For TLE solution that timed out
- * validateExpectedVerdicts(tleSolution, { didTLE: true, ... }); // OK
+ * // For TL solution that timed out
+ * validateExpectedVerdicts(tlSolution, { didTLE: true, ... }); // OK
  *
  * @example
- * // For TLE solution that didn't timeout
- * validateExpectedVerdicts(tleSolution, { didTLE: false, ... }); // Throws
+ * // For TL solution that didn't timeout
+ * validateExpectedVerdicts(tlSolution, { didTLE: false, ... }); // Throws
  */
 function validateExpectedVerdicts(
-  targetSolution: Solution,
+  targetSolution: LocalSolution,
   verdictTracker: VerdictTracker
 ) {
   if (verdictTracker.didTLE) {
-    if (!isTLEValue(targetSolution.type)) {
+    if (!isTLTag(targetSolution.tag)) {
       throw new Error(
-        `Solution ${fmt.highlight(targetSolution.name)} marked as ${targetSolution.type} but had Time Limit Exceeded on some tests`
+        `Solution ${fmt.highlight(targetSolution.name)} marked as ${fmt.highlight(targetSolution.tag)} but got ${fmt.bold('Time Limit Exceeded')} on some tests`
       );
     }
   }
   if (verdictTracker.didMLE) {
-    if (!isValidMLEValue(targetSolution.type)) {
+    if (!isMLTag(targetSolution.tag)) {
       throw new Error(
-        `Solution ${fmt.highlight(targetSolution.name)} marked as ${targetSolution.type} but got Memory Limit Exceeded on some tests`
+        `Solution ${fmt.highlight(targetSolution.name)} marked as ${fmt.highlight(targetSolution.tag)} but got ${fmt.bold('Memory Limit Exceeded')} on some tests`
       );
     }
   }
 
   if (verdictTracker.didRTE) {
-    if (!isValidRTEValue(targetSolution.type)) {
+    if (!isRTETag(targetSolution.tag)) {
       throw new Error(
-        `Solution ${fmt.highlight(targetSolution.name)} marked as ${fmt.highlight(targetSolution.type)} but got Runtime Error on some tests`
+        `Solution ${fmt.highlight(targetSolution.name)} marked as ${fmt.highlight(targetSolution.tag)} but got ${fmt.bold('Runtime Error')} on some tests`
       );
     }
   }
 
   if (verdictTracker.didWA) {
-    if (!isValidWAValue(targetSolution.type)) {
+    if (!isWATag(targetSolution.tag)) {
       throw new Error(
-        `Solution ${fmt.highlight(targetSolution.name)} marked as ${fmt.highlight(targetSolution.type)} but got Wrong Answer on some tests`
+        `Solution ${fmt.highlight(targetSolution.name)} marked as ${fmt.highlight(targetSolution.tag)} but got ${fmt.bold('Wrong Answer')} on some tests`
       );
     }
   }
-  if (targetSolution.type === 'tle' && !verdictTracker.didTLE) {
+  if (targetSolution.tag === 'TL' && !verdictTracker.didTLE) {
     throw new Error(
-      `Target Solution ${fmt.highlight(targetSolution.name)} is marked as ${fmt.highlight(targetSolution.type)} but did not time out on any test`
+      `Solution ${fmt.highlight(targetSolution.name)} marked as ${fmt.highlight(targetSolution.tag)} but did not get ${fmt.bold('Time Limit Exceeded')} on any test`
     );
   }
 
-  if (targetSolution.type === 'mle' && !verdictTracker.didMLE) {
+  if (targetSolution.tag === 'ML' && !verdictTracker.didMLE) {
     throw new Error(
-      `Target Solution ${fmt.highlight(targetSolution.name)} is marked as ${fmt.highlight(targetSolution.type)} but did not exceed memory limit on any test`
+      `Solution ${fmt.highlight(targetSolution.name)} marked as ${fmt.highlight(targetSolution.tag)} but did not get ${fmt.bold('Memory Limit Exceeded')} on any test`
     );
   }
 
-  if (targetSolution.type === 'wa' && !verdictTracker.didWA) {
+  if (targetSolution.tag === 'WA' && !verdictTracker.didWA) {
     throw new Error(
-      `Target Solution ${fmt.highlight(targetSolution.name)} is marked as ${fmt.highlight(targetSolution.type)} but passed all tests correctly`
+      `Solution ${fmt.highlight(targetSolution.name)} marked as ${fmt.highlight(targetSolution.tag)} but did not get ${fmt.bold('Wrong Answer')} on any test`
     );
   }
   if (
-    (targetSolution.type === 'incorrect' || targetSolution.type === 'failed') &&
+    targetSolution.tag === 'RJ' &&
     !verdictTracker.didTLE &&
     !verdictTracker.didMLE &&
     !verdictTracker.didRTE &&
     !verdictTracker.didWA
   ) {
     throw new Error(
-      `Target Solution ${fmt.highlight(targetSolution.name)} is marked as ${targetSolution.type} but passed all tests correctly`
+      `Solution ${fmt.highlight(targetSolution.name)} marked as ${fmt.highlight(targetSolution.tag)} but passed all tests correctly`
     );
   }
 }
@@ -961,75 +1089,75 @@ function isRTE(firstLine: string): boolean {
 }
 
 /**
- * Checks if solution type allows TLE verdict.
+ * Checks if solution tag allows TLE verdict.
  *
  * @private
- * @param {SolutionType} solutionType - Solution type to check
- * @returns {boolean} True if TLE is valid for this type
+ * @param {import('../types').SolutionTag} tag - Solution tag to check
+ * @returns {boolean} True if TLE is valid for this tag
  *
  * @example
- * isTLEValue('tle') // returns true
- * isTLEValue('tle-or-correct') // returns true
- * isTLEValue('main-correct') // returns false
+ * isTLTag('TL') // returns true
+ * isTLTag('TO') // returns true (TLE or OK)
+ * isTLTag('MA') // returns false
  */
-function isTLEValue(solutionType: SolutionType): boolean {
-  const validTypes = [
-    'tle',
-    'tle-or-correct',
-    'tle-or-mle',
-    'incorrect',
-    'failed',
-  ];
-  return validTypes.includes(solutionType);
+function isTLTag(tag: import('../types').SolutionTag): boolean {
+  // TL: Time Limit Exceeded
+  // TO: Time Limit or Accepted (may TLE but correct)
+  // RJ: Rejected (any error including TLE)
+  return tag === 'TL' || tag === 'TO' || tag === 'RJ';
 }
 
 /**
- * Checks if solution type allows MLE verdict.
+ * Checks if solution tag allows MLE verdict.
  *
  * @private
- * @param {SolutionType} solutionType - Solution type to check
- * @returns {boolean} True if MLE is valid for this type
+ * @param {import('../types').SolutionTag} tag - Solution tag to check
+ * @returns {boolean} True if MLE is valid for this tag
  *
  * @example
- * isValidMLEValue('mle') // returns true
- * isValidMLEValue('tle-or-mle') // returns true
- * isValidMLEValue('wa') // returns false
+ * isMLTag('ML') // returns true
+ * isMLTag('RJ') // returns true (any rejection)
+ * isMLTag('WA') // returns false
  */
-function isValidMLEValue(solutionType: SolutionType): boolean {
-  const validTypes = ['mle', 'tle-or-mle', 'incorrect', 'failed'];
-  return validTypes.includes(solutionType);
+function isMLTag(tag: import('../types').SolutionTag): boolean {
+  // ML: Memory Limit Exceeded
+  // RJ: Rejected (any error including MLE)
+  return tag === 'ML' || tag === 'RJ';
 }
 
 /**
- * Checks if solution type allows RTE verdict.
+ * Checks if solution tag allows RTE verdict.
  *
  * @private
- * @param {SolutionType} solutionType - Solution type to check
- * @returns {boolean} True if RTE is valid for this type
+ * @param {import('../types').SolutionTag} tag - Solution tag to check
+ * @returns {boolean} True if RTE is valid for this tag
  *
  * @example
- * isValidRTEValue('incorrect') // returns true
- * isValidRTEValue('failed') // returns true
- * isValidRTEValue('main-correct') // returns false
+ * isRTETag('RE') // returns true
+ * isRTETag('RJ') // returns true (any rejection)
+ * isRTETag('MA') // returns false
  */
-function isValidRTEValue(solutionType: SolutionType): boolean {
-  const validTypes = ['incorrect', 'failed'];
-  return validTypes.includes(solutionType);
+function isRTETag(tag: import('../types').SolutionTag): boolean {
+  // RE: Runtime Error
+  // RJ: Rejected (any error including RTE)
+  return tag === 'RE' || tag === 'RJ';
 }
 
 /**
- * Checks if solution type allows WA verdict.
+ * Checks if solution tag allows WA verdict.
  *
  * @private
- * @param {SolutionType} solutionType - Solution type to check
- * @returns {boolean} True if WA is valid for this type
+ * @param {import('../types').SolutionTag} tag - Solution tag to check
+ * @returns {boolean} True if WA is valid for this tag
  *
  * @example
- * isValidWAValue('wa') // returns true
- * isValidWAValue('incorrect') // returns true
- * isValidWAValue('main-correct') // returns false
+ * isWATag('WA') // returns true
+ * isWATag('RJ') // returns true (any rejection)
+ * isWATag('MA') // returns false
  */
-function isValidWAValue(solutionType: SolutionType): boolean {
-  const validTypes = ['incorrect', 'failed', 'wa'];
-  return validTypes.includes(solutionType);
+function isWATag(tag: import('../types').SolutionTag): boolean {
+  // WA: Wrong Answer
+  // PE: Presentation Error (also wrong)
+  // RJ: Rejected (any error including WA)
+  return tag === 'WA' || tag === 'PE' || tag === 'RJ';
 }

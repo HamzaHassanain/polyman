@@ -4,17 +4,22 @@
  * and test checkers against their own test suites.
  */
 
-import { Checker, CheckerTest, CheckerVerdict, SolutionType } from '../types';
+import type {
+  LocalChecker,
+  CheckerTest,
+  CheckerVerdict,
+  SolutionTag,
+} from '../types';
 import { executor } from '../executor';
 import path from 'path';
 import fs from 'fs';
 import {
-  logErrorAndExit,
   compileCPP,
   readConfigFile,
   throwError,
   ensureDirectoryExists,
   removeDirectoryRecursively,
+  getCompiledCommandToRun,
 } from './utils';
 import { DEFAULT_TIMEOUT, DEFAULT_MEMORY_LIMIT } from './utils';
 import { fmt } from '../formatter';
@@ -91,7 +96,7 @@ export async function runChecker(
  * Ensures a checker is defined in the configuration.
  * Type assertion function that throws if checker is undefined.
  *
- * @param {Checker | undefined} checker - Checker configuration to validate
+ * @param {LocalChecker | undefined} checker - Checker configuration to validate
  *
  * @throws {Error} If no checker is defined in configuration
  *
@@ -101,8 +106,8 @@ export async function runChecker(
  * // Now TypeScript knows checker is defined
  */
 export function ensureCheckerExists(
-  checker: Checker | undefined
-): asserts checker is Checker {
+  checker: LocalChecker | undefined
+): asserts checker is LocalChecker {
   if (!checker) {
     throw new Error('No checker defined in the configuration file.');
   }
@@ -124,9 +129,24 @@ export function ensureCheckerExists(
 export async function testCheckerItself() {
   try {
     const config = readConfigFile();
-    ensureCheckerExists(config.checker);
 
-    await makeCheckerTests();
+    if (config.checker.isStandard) {
+      fmt.warning(
+        `   ⚠️  Using standard checker: ${fmt.highlight(config.checker.source)}`
+      );
+      fmt.info(
+        `   ${fmt.bold('Note:')} Standard checkers are assumed to be correct and are not tested against custom test suites.`
+      );
+      return;
+    }
+
+    if (!config.checker.testsFilePath) {
+      throw new Error(
+        'Checker tests file path is not specified in the configuration.'
+      );
+    }
+
+    await makeCheckerTests(config.checker.testsFilePath);
     await runCheckerTests(config.checker);
   } catch (error) {
     throwError(error, 'Failed to test checker');
@@ -149,8 +169,8 @@ export async function testCheckerItself() {
  * // checker_tests/test1_output.txt
  * // checker_tests/test1_answer.txt
  */
-async function makeCheckerTests() {
-  const checkerTests = await parseCheckerTests();
+async function makeCheckerTests(testsFilePath: string) {
+  const checkerTests = await parseCheckerTests(testsFilePath);
 
   ensureDirectoryExists('checker_tests');
 
@@ -171,18 +191,18 @@ async function makeCheckerTests() {
       `test${index + 1}_answer.txt`
     );
 
-    fs.writeFileSync(inputPath, test.stdin);
-    fs.writeFileSync(outputPath, test.stdout);
+    fs.writeFileSync(inputPath, test.input);
+    fs.writeFileSync(outputPath, test.output);
     fs.writeFileSync(answerPath, test.answer);
   }
 }
 
 /**
  * Runs all checker self-tests and validates results.
- * Compiles the checker and runs it against all test cases.
+ * Uses pre-compiled checker via getCompiledCommandToRun.
  * Fails fast - throws on first test failure.
  *
- * @param {Checker} checker - Checker configuration
+ * @param {LocalChecker} checker - Checker configuration
  *
  * @throws {Error} If checker compilation fails
  * @throws {Error} If any test fails
@@ -191,15 +211,15 @@ async function makeCheckerTests() {
  * const config = readConfigFile();
  * await runCheckerTests(config.checker);
  */
-export async function runCheckerTests(checker: Checker) {
+export async function runCheckerTests(checker: LocalChecker) {
   let someFailed = false;
   try {
-    const checkerTests = await parseCheckerTests();
-    const compiledPath = await compileChecker(checker);
+    const checkerTests = await parseCheckerTests(checker.testsFilePath!);
+    const compiledPath = getCompiledCommandToRun(checker);
 
     const testsDir = path.resolve(process.cwd(), 'checker_tests');
 
-    for (const [index, { verdict }] of checkerTests.entries()) {
+    for (const [index, test] of checkerTests.entries()) {
       const inputFilePath = path.join(testsDir, `test${index + 1}_input.txt`);
       const outputFilePath = path.join(testsDir, `test${index + 1}_output.txt`);
       const answerFilePath = path.join(testsDir, `test${index + 1}_answer.txt`);
@@ -210,17 +230,17 @@ export async function runCheckerTests(checker: Checker) {
           inputFilePath,
           outputFilePath,
           answerFilePath,
-          verdict
+          test.expectedVerdict
         );
       } catch (error) {
         someFailed = true;
         fmt.error(
-          `  ${fmt.cross()} Checker Test ${index + 1} failed:\n\t${(error as Error).message}, expected to be ${verdict}`
+          `  ${fmt.cross()} Checker Test ${index + 1} failed:\n\t${(error as Error).message}, expected to be ${test.expectedVerdict}`
         );
       }
     }
   } catch (error) {
-    throwError(error, 'Failed to compile checker');
+    throwError(error, 'Failed to run checker tests');
   } finally {
     executor.cleanup();
   }
@@ -234,25 +254,27 @@ export async function runCheckerTests(checker: Checker) {
  *
  * @private
  * @returns {Promise<CheckerTest[]>} Array of checker test cases
- *
+ * @param {string} testsFilePath The path to the tests JSON file
  * @throws {Error} If file doesn't exist or has invalid JSON
  *
  * @example
- * // Expects file structure:
+ * // Expects file structure (Polygon format):
  * // {
  * //   "tests": [
- * //     { "stdin": "5", "stdout": "25", "answer": "25", "verdict": "OK" }
+ * //     {
+ * //       "index": 1,
+ * //       "input": "5",
+ * //       "output": "25",
+ * //       "answer": "25",
+ * //       "expectedVerdict": "OK"
+ * //     }
  * //   ]
  * // }
  */
-function parseCheckerTests(): Promise<CheckerTest[]> {
+function parseCheckerTests(testsFilePath: string): Promise<CheckerTest[]> {
   return new Promise((resolve, reject) => {
-    const testsFilePath = path.resolve(
-      process.cwd(),
-      'checker',
-      'checker_tests.json'
-    );
-    fs.readFile(testsFilePath, 'utf-8', (err, data) => {
+    const absouluteTestsFilePath = path.resolve(process.cwd(), testsFilePath);
+    fs.readFile(absouluteTestsFilePath, 'utf-8', (err, data) => {
       if (err) {
         return reject(new Error('Failed to read checker tests file.'));
       }
@@ -273,65 +295,69 @@ function parseCheckerTests(): Promise<CheckerTest[]> {
 /**
  * Compiles a checker program.
  * Handles both custom checkers and standard testlib checkers.
+ * Wrapper around compileCPP with consistent error handling.
  *
- * @param {Checker} checker - Checker configuration
+ * @param {LocalChecker} checker - Checker configuration
  * @returns {Promise<string>} Path to compiled checker executable
  *
- * @throws {Error} If compilation fails (exits process)
+ * @throws {Error} If compilation fails
  *
  * @example
  * // Custom checker
- * const path = await compileChecker({ custom: true, source: 'Checker.cpp' });
+ * const path = await compileChecker({ name: 'checker', source: 'checker/Checker.cpp', isStandard: false });
  *
  * @example
  * // Standard checker
- * const path = await compileChecker({ custom: false, source: 'wcmp.cpp' });
+ * const path = await compileChecker({ name: 'wcmp', source: 'wcmp.cpp', isStandard: true });
  */
-export async function compileChecker(checker: Checker) {
+export async function compileChecker(checker: LocalChecker): Promise<void> {
   try {
-    const checkerSource = checker.custom
-      ? checker.source
-      : path.resolve(
+    const checkerSource = checker.isStandard
+      ? path.resolve(
           __dirname,
           '../..',
           'assets',
           'checkers',
           `${checker.source}`
-        );
-    const compiledPath = await compileCPP(checkerSource);
-    return compiledPath;
+        )
+      : checker.source;
+    await compileCPP(checkerSource);
   } catch (error) {
-    logErrorAndExit(error);
-    return ''; // to satisfy TypeScript
+    throw error instanceof Error
+      ? error
+      : new Error('Failed to compile checker');
   }
 }
 
 /**
- * Determines expected checker verdict based on solution type.
- * Maps solution types to their expected checker verdicts.
+ * Determines expected checker verdict based on solution tag (Polygon format).
+ * Maps Polygon solution tags to their expected checker verdicts.
  *
- * @param {SolutionType} solutionType - Type of solution being tested
- * @returns {CheckerVerdict} Expected verdict for this solution type
+ * @param {SolutionTag} tag - Polygon solution tag
+ * @returns {CheckerVerdict} Expected verdict for this solution tag
  *
  * @example
- * getExpectedCheckerVerdict('main-correct');  // Returns: 'OK'
- * getExpectedCheckerVerdict('wa');            // Returns: 'WA'
- * getExpectedCheckerVerdict('pe');            // Returns: 'PE'
- * getExpectedCheckerVerdict('tle');           // Returns: 'OK' (TLE handled elsewhere)
+ * getExpectedCheckerVerdict('MA');  // Returns: 'OK' (Main Accepted)
+ * getExpectedCheckerVerdict('OK');  // Returns: 'OK' (Alternative correct)
+ * getExpectedCheckerVerdict('WA');  // Returns: 'WRONG_ANSWER'
+ * getExpectedCheckerVerdict('PE');  // Returns: 'PRESENTATION_ERROR'
+ * getExpectedCheckerVerdict('TL');  // Returns: 'OK' (TLE handled elsewhere)
+ * getExpectedCheckerVerdict('RJ');  // Returns: 'WRONG_ANSWER' (Rejected)
  */
-export function getExpectedCheckerVerdict(
-  solutionType: SolutionType
-): CheckerVerdict {
-  switch (solutionType) {
-    case 'main-correct':
-    case 'correct':
+export function getExpectedCheckerVerdict(tag: SolutionTag): CheckerVerdict {
+  switch (tag) {
+    case 'MA': // Main Accepted
+    case 'OK': // Alternative correct solution
+    case 'TL': // Time Limit (checker doesn't validate this)
+    case 'TO': // Time Limit or OK (checker validates OK part)
+    case 'ML': // Memory Limit (checker doesn't validate this)
+    case 'RE': // Runtime Error (checker doesn't validate this)
       return 'OK';
-    case 'incorrect':
-    case 'failed':
-    case 'wa':
-      return 'WA';
-    case 'pe':
-      return 'PE';
+    case 'WA': // Wrong Answer
+    case 'RJ': // Rejected (any error)
+      return 'WRONG_ANSWER';
+    case 'PE': // Presentation Error
+      return 'PRESENTATION_ERROR';
     default:
       return 'OK';
   }

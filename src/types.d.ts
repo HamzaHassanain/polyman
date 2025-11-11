@@ -1,257 +1,689 @@
 /**
- * Supported programming languages for solutions.
- * @typedef {'cpp' | 'python' | 'java'} SolutionLang
+ * @fileoverview Polygon-compatible type definitions for problem management.
+ * All types match Codeforces Polygon API v1 structures exactly.
  */
-type SolutionLang = 'cpp' | 'python' | 'java';
+
+// ==================== Access & Problem Metadata ====================
 
 /**
- * Solution types representing expected behavior.
- * - `main-correct`: The reference solution that is always correct
- * - `correct`: An alternative correct solution
- * - `incorrect`: A solution that should fail
- * - `tle`: Time Limit Exceeded
- * - `tle-or-correct`: May exceed time limit but produces correct output
- * - `tle-or-mle`: May exceed time or memory limit
- * - `mle`: Memory Limit Exceeded
- * - `wa`: Wrong Answer
- * - `failed`: Solution that fails to compile or run
- * - `pe`: Presentation Error
- * @typedef SolutionType
+ * User's access level to a problem.
+ * @typedef {'READ' | 'WRITE' | 'OWNER'} AccessType
  */
-type SolutionType =
-  | 'main-correct'
-  | 'correct'
-  | 'incorrect'
-  | 'tle'
-  | 'tle-or-correct'
-  | 'tle-or-mle'
-  | 'mle'
-  | 'wa'
-  | 'failed'
-  | 'pe';
+type AccessType = 'READ' | 'WRITE' | 'OWNER';
 
 /**
- * Represents a solution program for the problem.
- * @typedef {Object} Solution
- * @property {string} name - Unique identifier for the solution
- * @property {string} source - Path to the solution source file
- * @property {SolutionType} type - Expected behavior of this solution
- * @example
- * {
- *   name: "main",
- *   source: "solutions/main.cpp",
- *   type: "main-correct"
- * }
+ * Represents a Polygon problem with metadata and access information.
+ * @interface Problem
+ * @property {number} id - Unique problem identifier
+ * @property {string} owner - Username of problem owner
+ * @property {string} name - Problem name/title
+ * @property {boolean} deleted - Whether problem is deleted
+ * @property {boolean} favourite - Whether problem is in user's favorites
+ * @property {AccessType} accessType - User's access level
+ * @property {number} revision - Current problem revision number
+ * @property {number} [latestPackage] - Latest revision with available package
+ * @property {boolean} modified - Whether problem has uncommitted changes
  */
-type Solution = {
+interface Problem {
+  id: number;
+  owner: string;
+  name: string;
+  deleted: boolean;
+  favourite: boolean;
+  accessType: AccessType;
+  revision: number;
+  latestPackage?: number;
+  modified: boolean;
+}
+
+/**
+ * Problem configuration and constraints information.
+ * @interface ProblemInfo
+ * @property {string} inputFile - Input file name (e.g., 'stdin' or custom file)
+ * @property {string} outputFile - Output file name (e.g., 'stdout' or custom file)
+ * @property {boolean} interactive - Whether problem is interactive
+ * @property {number} timeLimit - Time limit in milliseconds
+ * @property {number} memoryLimit - Memory limit in megabytes
+ */
+interface ProblemInfo {
+  inputFile: string;
+  outputFile: string;
+  interactive: boolean;
+  timeLimit: number;
+  memoryLimit: number;
+}
+
+// ==================== Statements ====================
+
+/**
+ * Problem statement in a specific language.
+ * @interface Statement
+ * @property {string} encoding - Text encoding (e.g., 'UTF-8')
+ * @property {string} name - Problem title in this language
+ * @property {string} legend - Problem description/story
+ * @property {string} input - Input format specification
+ * @property {string} output - Output format specification
+ * @property {string} [scoring] - Scoring details (for partial scoring problems)
+ * @property {string} [interaction] - Interaction protocol (for interactive problems)
+ * @property {string} [notes] - Additional notes or examples
+ * @property {string} [tutorial] - Editorial/solution explanation
+ */
+interface Statement {
+  encoding: string;
+  name: string;
+  legend: string;
+  input: string;
+  output: string;
+  scoring?: string;
+  interaction?: string;
+  notes?: string;
+  tutorial?: string;
+}
+
+// ==================== Files ====================
+
+/**
+ * C++ compiler types supported by Polygon.
+ * @typedef CppSourceType
+ */
+type CppSourceType =
+  | 'cpp.g++11'
+  | 'cpp.g++14'
+  | 'cpp.g++17'
+  | 'cpp.g++20'
+  | 'cpp.ms2017'
+  | 'cpp.ms2019'
+  | 'cpp.clang++17'
+  | 'cpp.clang++20';
+
+/**
+ * Java compiler types supported by Polygon.
+ * @typedef JavaSourceType
+ */
+type JavaSourceType = 'java.8' | 'java.11' | 'java.17' | 'java.21';
+
+/**
+ * Python interpreter types supported by Polygon.
+ * @typedef PythonSourceType
+ */
+type PythonSourceType =
+  | 'python.2'
+  | 'python.3'
+  | 'python.pypy2'
+  | 'python.pypy3';
+
+/**
+ * All supported source types for solutions.
+ * Solutions can be written in C++, Java, or Python.
+ * @typedef SolutionSourceType
+ */
+type SolutionSourceType = CppSourceType | JavaSourceType | PythonSourceType;
+
+/**
+ * Source types for generators, validators, and checkers.
+ * These must be C++ only as they use testlib.h.
+ * @typedef TestlibSourceType
+ */
+type TestlibSourceType = CppSourceType;
+
+/**
+ * Advanced properties for resource files (e.g., IOI-style graders).
+ * @interface ResourceAdvancedProperties
+ * @property {string} forTypes - File types pattern (e.g., 'cpp.*', 'java.11')
+ * @property {boolean} main - Reserved field, currently always false
+ * @property {('COMPILE' | 'RUN')[]} stages - When resource is used
+ * @property {('VALIDATOR' | 'INTERACTOR' | 'CHECKER' | 'SOLUTION')[]} assets - What can use this resource
+ */
+interface ResourceAdvancedProperties {
+  forTypes: string;
+  main: boolean;
+  stages: ('COMPILE' | 'RUN')[];
+  assets: ('VALIDATOR' | 'INTERACTOR' | 'CHECKER' | 'SOLUTION')[];
+}
+
+/**
+ * Represents a file in the problem package.
+ * @interface File
+ * @property {string} name - File name with extension
+ * @property {number} modificationTimeSeconds - Last modification time (Unix timestamp)
+ * @property {number} length - File size in bytes
+ * @property {string} [sourceType] - Source language/compiler (e.g., 'cpp.g++17')
+ * @property {ResourceAdvancedProperties} [resourceAdvancedProperties] - Advanced resource settings
+ */
+interface File {
+  name: string;
+  modificationTimeSeconds: number;
+  length: number;
+  sourceType?: string;
+  resourceAdvancedProperties?: ResourceAdvancedProperties;
+}
+
+/**
+ * Response containing all problem files organized by type.
+ * @interface FilesResponse
+ * @property {File[]} resourceFiles - Resource files (e.g., images, graders)
+ * @property {File[]} sourceFiles - Source code files (generators, validators, etc.)
+ * @property {File[]} auxFiles - Auxiliary files
+ */
+interface FilesResponse {
+  resourceFiles: File[];
+  sourceFiles: File[];
+  auxFiles: File[];
+}
+
+// ==================== Solutions ====================
+
+/**
+ * Solution tag representing expected behavior (Polygon format).
+ * - `MA`: Main correct solution (reference solution)
+ * - `OK`: Alternative correct solution
+ * - `RJ`: Should be rejected
+ * - `TL`: Time Limit Exceeded
+ * - `TO`: Time Limit or Accepted (may TLE but correct)
+ * - `WA`: Wrong Answer
+ * - `PE`: Presentation Error
+ * - `ML`: Memory Limit Exceeded
+ * - `RE`: Runtime Error
+ * @typedef SolutionTag
+ */
+type SolutionTag = 'MA' | 'OK' | 'RJ' | 'TL' | 'TO' | 'WA' | 'PE' | 'ML' | 'RE';
+
+/**
+ * Represents a problem solution with its expected behavior tag.
+ * @interface Solution
+ * @property {string} name - Solution file name
+ * @property {number} modificationTimeSeconds - Last modification time (Unix timestamp)
+ * @property {number} length - File size in bytes
+ * @property {string} sourceType - Language/compiler (e.g., 'cpp.g++17')
+ * @property {SolutionTag} tag - Expected behavior
+ */
+interface Solution {
+  name: string;
+  modificationTimeSeconds: number;
+  length: number;
+  sourceType: string;
+  tag: SolutionTag;
+}
+
+// ==================== Tests ====================
+
+/**
+ * Represents a test case for the problem.
+ * @interface Test
+ * @property {number} index - Test number (1-indexed)
+ * @property {boolean} manual - True if manually created, false if generated
+ * @property {string} [input] - Test input data (absent for generated tests)
+ * @property {string} [description] - Human-readable test description
+ * @property {boolean} useInStatements - Whether test appears in problem statement
+ * @property {string} [scriptLine] - Generator command (absent for manual tests)
+ * @property {string} [group] - Test group name
+ * @property {number} [points] - Points for this test (if points are enabled)
+ * @property {string} [inputForStatement] - Input to show in statement
+ * @property {string} [outputForStatement] - Output to show in statement
+ * @property {boolean} [verifyInputOutputForStatements] - Verify statement I/O
+ */
+interface Test {
+  index: number;
+  manual: boolean;
+  input?: string;
+  description?: string;
+  useInStatements: boolean;
+  scriptLine?: string;
+  group?: string;
+  points?: number;
+  inputForStatement?: string;
+  outputForStatement?: string;
+  verifyInputOutputForStatements?: boolean;
+}
+
+/**
+ * Points policy for test groups.
+ * @typedef PointsPolicy
+ */
+type PointsPolicy = 'COMPLETE_GROUP' | 'EACH_TEST';
+
+/**
+ * Feedback policy for test groups.
+ * @typedef FeedbackPolicy
+ */
+type FeedbackPolicy = 'NONE' | 'POINTS' | 'ICPC' | 'COMPLETE';
+
+/**
+ * Configuration for a group of tests with scoring and feedback policies.
+ * @interface TestGroup
+ * @property {string} name - Test group identifier
+ * @property {PointsPolicy} pointsPolicy - How points are awarded
+ * @property {FeedbackPolicy} feedbackPolicy - Feedback level
+ * @property {string[]} dependencies - Other groups that must pass first
+ */
+interface TestGroup {
+  name: string;
+  pointsPolicy: PointsPolicy;
+  feedbackPolicy: FeedbackPolicy;
+  dependencies: string[];
+}
+
+// ==================== Checker & Validator ====================
+
+/**
+ * Checker verdict.
+ * @typedef CheckerVerdict
+ */
+type CheckerVerdict = 'OK' | 'WRONG_ANSWER' | 'PRESENTATION_ERROR' | 'CRASHED';
+
+/**
+ * Test case for checker self-testing.
+ * @interface CheckerTest
+ * @property {number} index - Test index
+ * @property {string} input - Test input
+ * @property {string} output - Contestant output to check
+ * @property {string} answer - Correct answer
+ * @property {CheckerVerdict} expectedVerdict - Expected checker verdict
+ */
+interface CheckerTest {
+  index: number;
+  input: string;
+  output: string;
+  answer: string;
+  expectedVerdict: CheckerVerdict;
+}
+
+/**
+ * Validator verdict.
+ * @typedef ValidatorVerdict
+ */
+type ValidatorVerdict = 'VALID' | 'INVALID';
+
+/**
+ * Test case for validator self-testing.
+ * @interface ValidatorTest
+ * @property {number} index - Test index
+ * @property {string} input - Input to validate
+ * @property {ValidatorVerdict} expectedVerdict - Expected validation result
+ * @property {string} [testset] - Testset name
+ * @property {string} [group] - Test group name
+ */
+interface ValidatorTest {
+  index: number;
+  input: string;
+  expectedVerdict: ValidatorVerdict;
+  testset?: string;
+  group?: string;
+}
+
+// ==================== Packages ====================
+
+/**
+ * Package build state.
+ * @typedef PackageState
+ */
+type PackageState = 'PENDING' | 'RUNNING' | 'READY' | 'FAILED';
+
+/**
+ * Package type.
+ * @typedef PackageType
+ */
+type PackageType = 'standard' | 'linux' | 'windows';
+
+/**
+ * Represents a downloadable problem package.
+ * @interface Package
+ * @property {number} id - Package identifier
+ * @property {number} revision - Problem revision when package was built
+ * @property {number} creationTimeSeconds - Package creation time (Unix timestamp)
+ * @property {PackageState} state - Build status
+ * @property {string} comment - Additional information about package
+ * @property {PackageType} type - Package type
+ */
+interface Package {
+  id: number;
+  revision: number;
+  creationTimeSeconds: number;
+  state: PackageState;
+  comment: string;
+  type: PackageType;
+}
+
+// ==================== Configuration File ====================
+
+/**
+ * Local configuration file structure for managing Polygon problems.
+ * This extends Polygon API types with local workspace information.
+ *
+ * @interface ConfigFile
+ * @property {number} [problemId] - Polygon problem ID (if already created)
+ * @property {string} name - Problem name/identifier
+ * @property {string} [owner] - Problem owner username
+ * @property {number} [revision] - Current revision number
+ * @property {number} timeLimit - Time limit in milliseconds
+ * @property {number} memoryLimit - Memory limit in megabytes
+ * @property {string} inputFile - Input file name
+ * @property {string} outputFile - Output file name
+ * @property {boolean} interactive - Whether problem is interactive
+ * @property {string[]} [tags] - Problem tags/categories
+ * @property {string} [description] - General problem description
+ * @property {string} [tutorial] - General tutorial text
+ * @property {Object} statements - Problem statements by language
+ * @property {LocalSolution[]} solutions - Solution configurations
+ * @property {LocalGenerator[]} [generators] - Generator configurations
+ * @property {LocalChecker} checker - Checker configuration
+ * @property {LocalValidator} validator - Validator configuration
+ * @property {LocalTestset[]} [testsets] - Testset configurations
+ */
+interface ConfigFile {
+  // Polygon metadata
+  problemId?: number; // Must be set by the script whenever possible
+  name: string;
+  owner?: string;
+  revision?: number;
+
+  // Problem info
+  timeLimit: number;
+  memoryLimit: number;
+  inputFile: string;
+  outputFile: string;
+  interactive: boolean;
+
+  // Tags and descriptions
+  tags?: string[];
+  description?: string;
+  tutorial?: string;
+
+  // Statements
+  statements: {
+    [language: string]: Statement;
+  };
+
+  // Solutions
+  solutions: LocalSolution[];
+
+  // Generators
+  generators?: LocalGenerator[];
+
+  // Checker
+  checker: LocalChecker;
+
+  // Validator
+  validator: LocalValidator;
+
+  // Testsets
+  testsets?: LocalTestset[];
+}
+
+// ==================== Local Helper Types ====================
+
+/**
+ * Local solution configuration (references local files).
+ * @interface LocalSolution
+ * @property {string} name - Solution name/identifier
+ * @property {string} source - Path to solution source file
+ * @property {SolutionTag} tag - Expected behavior tag
+ * @property {SolutionSourceType} [sourceType] - Language/compiler (C++, Java, or Python)
+ */
+interface LocalSolution {
   name: string;
   source: string;
-  type: SolutionType;
-};
+  tag: SolutionTag;
+  sourceType?: SolutionSourceType;
+}
 
 /**
- * Test generator configuration.
- * @typedef {Object} Generator
- * @property {string} name - Name of the generator
- * @property {string} [source] - Path to generator source file (optional for script-based)
- * @property {[number, number]} tests-range - Range of test numbers [start, end] inclusive
+ * Local generator configuration.
+ * Generators are treated as source files that can be invoked by test generation scripts.
+ *
+ * @interface LocalGenerator
+ * @property {string} name - Generator name/identifier
+ * @property {string} source - Path to generator source file (must be C++)
+ * @property {TestlibSourceType} [sourceType] - C++ compiler version (generators must use testlib.h)
+ *
  * @example
  * {
- *   name: "gen-random",
- *   source: "generators/random.cpp",
- *   "tests-range": [1, 10]
+ *   name: 'gen-random',
+ *   source: './generators/random.cpp',
+ *   sourceType: 'cpp.g++17'
  * }
  */
-type Generator = {
+interface LocalGenerator {
   name: string;
-  source?: string;
-  'tests-range': [number, number];
-};
-
-/**
- * Checker (output validator) configuration.
- * @typedef {Object} Checker
- * @property {boolean} custom - Whether this is a custom checker or a standard testlib checker
- * @property {string} source - Path to checker source or name of standard checker (e.g., "wcmp.cpp")
- * @property {string} [tests] - Path to checker self-test file (optional)
- * @example
- * // Standard checker
- * { custom: false, source: "wcmp.cpp" }
- * @example
- * // Custom checker
- * { custom: true, source: "Checker.cpp", tests: "checker_tests.json" }
- */
-type Checker = {
-  custom: boolean;
   source: string;
-  tests?: string;
-};
+  sourceType?: TestlibSourceType;
+}
 
 /**
- * Checker output verdict.
- * - `OK`/`ok`: Answer is correct
- * - `WA`/`wa`: Wrong Answer
- * - `PE`/`pe`: Presentation Error
- * @typedef {'OK' | 'WA' | 'ok' | 'wa' | 'PE' | 'pe'} CheckerVerdict
+ * Local checker configuration.
+ * @interface LocalChecker
+ * @property {string} name - Checker name
+ * @property {string} source - Path to checker source or standard checker name (must be C++)
+ * @property {boolean} [isStandard] - True if using standard testlib checker
+ * @property {string} [testsFilePath] - Path to checker tests JSON file
+ * @property {TestlibSourceType} [sourceType] - C++ compiler version (checkers must use testlib.h)
  */
-type CheckerVerdict = 'OK' | 'WA' | 'ok' | 'wa' | 'PE' | 'pe';
+interface LocalChecker {
+  name: string;
+  source: string;
+  isStandard?: boolean;
+  testsFilePath?: string;
+  sourceType?: TestlibSourceType;
+}
+
+/**
+ * Local validator configuration.
+ * @interface LocalValidator
+ * @property {string} name - Validator name
+ * @property {string} source - Path to validator source file (must be C++)
+ * @property {TestlibSourceType} [sourceType] - C++ compiler version (validators must use testlib.h)
+ * @property {string} [testsFilePath] - Path to validator tests JSON file
+ */
+interface LocalValidator {
+  name: string;
+  source: string;
+  sourceType?: TestlibSourceType;
+  testsFilePath?: string;
+}
+
+/**
+ * Test generation script command.
+ * Represents a single command in a test generation script.
+ *
+ * @interface GeneratorScriptCommand
+ * @property {'generator-single' | 'manual' | "generator-range"} type - Command type
+ * @property {string} [generator] - Generator name (for type='generator')
+ * @property {string[]} [args] - Arguments to pass to generator
+ * @property {number} [number] - Test number (for type='generator-single' or 'manual')
+ * @property {string} [manualFile] - Path to manual test file (for type='manual')
+ * @property {string} [group] - Test group assignment
+ * @property {number} [points] - Points for this test
+ *
+ * @example
+ * // Generator command
+ * {
+ *   type: 'generator',
+ *   generator: 'gen-random',
+ *   args: ['10', '100']
+ * }
+ *
+ * @example
+ * // Manual test
+ * {
+ *   type: 'manual',
+ *   manualFile: './tests/manual/sample1.txt',
+ *   group: 'samples'
+ * }
+ */
+interface GeneratorScriptCommand {
+  type: 'generator-single' | 'manual' | 'generator-range';
+  generator?: string;
+  number?: number;
+  index?: number;
+  manualFile?: string;
+  group?: string;
+  points?: number;
+  range?: [number, number];
+}
+
+/**
+ * Test generation script configuration.
+ * Defines how tests are generated using generators and manual test files.
+ *
+ * @interface GeneratorScript
+ * @property {GeneratorScriptCommand[]} [commands] - Array of generation commands
+ * @property {string} [script] - Inline script definition (Polygon format)
+ * @property {string} [scriptFile] - Path to external script file
+ * @example
+ * // Using structured commands
+ * {
+ *   commands: [
+ *     { type: 'manual', manualFile: './tests/sample1.txt', group: 'samples' },
+ *     { type: 'manual', manualFile: './tests/sample2.txt', group: 'samples' },
+ *     { type: 'generator', generator: 'gen-random', args: ['1'] },
+ *     { type: 'generator', generator: 'gen-random', args: ['2'] },
+ *     { type: 'generator', generator: 'gen-large', args: ['1000', '10000'] }
+ *   ]
+ * }
+ *
+ * @example
+ * // Using Polygon-format script
+ * {
+ *   script: 'gen 1 > $\ngen 2 > $\ngen 10 20 > $'
+ * }
+ *
+ * @example
+ * // Using external script file
+ * {
+ *   scriptFile: './tests/generation-script.txt'
+ * }
+ */
+interface GeneratorScript {
+  commands?: GeneratorScriptCommand[];
+  script?: string;
+  scriptFile?: string;
+}
+
+/**
+ * Local testset configuration.
+ * Polygon-compatible testset with script-based test generation.
+ *
+ * @interface LocalTestset
+ * @property {string} name - Testset name (usually 'tests')
+ * @property {GeneratorScript} [generatorScript] - Test generation script configuration
+ * @property {boolean} [groupsEnabled] - Whether test groups are enabled
+ * @property {boolean} [pointsEnabled] - Whether point scoring is enabled
+ * @property {LocalTestGroup[]} [groups] - Test group configurations
+ *
+ * @example
+ * // Complete testset with generation script
+ * {
+ *   name: 'tests',
+ *   generatorScript: {
+ *     commands: [
+ *       { type: 'manual', manualFile: './tests/sample.txt', group: 'samples' },
+ *       { type: 'generator', generator: 'gen-random', args: ['10'] }
+ *     ]
+ *   },
+ *   groupsEnabled: true,
+ *   groups: [
+ *     { name: 'samples', pointsPolicy: 'EACH_TEST', feedbackPolicy: 'COMPLETE' }
+ *   ]
+ * }
+ *
+ * @example
+ * // Using Polygon-format script
+ * {
+ *   name: 'tests',
+ *   generatorScript: {
+ *     script: 'gen 1 > $\ngen 2 > $\ngen-large 100 1000 > $'
+ *   }
+ * }
+ */
+interface LocalTestset {
+  name: string;
+  generatorScript?: GeneratorScript;
+  groupsEnabled?: boolean;
+  pointsEnabled?: boolean;
+  groups?: LocalTestGroup[];
+}
+
+/**
+ * Local test group configuration.
+ * @interface LocalTestGroup
+ * @property {string} name - Group name
+ * @property {PointsPolicy} pointsPolicy - Points policy
+ * @property {FeedbackPolicy} feedbackPolicy - Feedback policy
+ * @property {string[]} [dependencies] - Dependent group names
+ */
+interface LocalTestGroup {
+  name: string;
+  pointsPolicy?: PointsPolicy;
+  feedbackPolicy?: FeedbackPolicy;
+  dependencies?: string[];
+}
+
+// ==================== Verdict Tracking ====================
 
 /**
  * Tracks different types of verdicts encountered during solution testing.
- * Used to verify solutions behave as expected.
- * @typedef {Object} VerdictTracker
+ * @interface VerdictTracker
  * @property {boolean} didWA - Wrong Answer encountered
  * @property {boolean} didPE - Presentation Error encountered
  * @property {boolean} didTLE - Time Limit Exceeded encountered
  * @property {boolean} didMLE - Memory Limit Exceeded encountered
  * @property {boolean} didRTE - Runtime Error encountered
  */
-type VerdictTracker = {
+interface VerdictTracker {
   didWA: boolean;
   didPE: boolean;
   didTLE: boolean;
   didMLE: boolean;
   didRTE: boolean;
-};
-
-/**
- * A single test case for checker self-testing.
- * @typedef {Object} CheckerTest
- * @property {string} stdin - Input data
- * @property {string} stdout - Program output to validate
- * @property {string} answer - Expected correct answer (jury's answer)
- * @property {CheckerVerdict} verdict - Expected verdict from checker
- * @example
- * {
- *   stdin: "5",
- *   stdout: "25",
- *   answer: "25",
- *   verdict: "OK"
- * }
- */
-type CheckerTest = {
-  stdin: string;
-  stdout: string;
-  answer: string;
-  verdict: CheckerVerdict;
-};
-
-/**
- * Input validator configuration.
- * @typedef {Object} Validator
- * @property {string} source - Path to validator source file
- * @property {string} [tests] - Path to validator self-test file (optional)
- * @example
- * {
- *   source: "Validator.cpp",
- *   tests: "validator_tests.json"
- * }
- */
-type Validator = {
-  source: string;
-  tests?: string;
-};
-
-/**
- * Validator verdict indicating input validity.
- * @typedef {'VALID' | 'INVALID' | 'valid' | 'invalid' | 0 | 1} ValidatorVerdict
- */
-type ValidatorVerdict = 'VALID' | 'INVALID' | 'valid' | 'invalid' | 0 | 1;
-
-/**
- * A single test case for validator self-testing.
- * @typedef {Object} ValidatorTest
- * @property {string} stdin - Test input to validate
- * @property {ValidatorVerdict} expectedVerdict - Expected validation result
- * @example
- * {
- *   stdin: "1 2 3",
- *   expectedVerdict: "VALID"
- * }
- */
-type ValidatorTest = {
-  stdin: string;
-  expectedVerdict: ValidatorVerdict;
-};
-
-/**
- * Main configuration file structure for a Codeforces Polygon problem.
- * This interface defines the complete problem specification including metadata,
- * constraints, test generation, validation, and solution checking.
- *
- * @interface ConfigFile
- * @property {string} name - Problem name/identifier
- * @property {string} [version] - Version number (optional)
- * @property {string} [description] - Brief problem description (optional)
- * @property {number} time-limit - Time limit in milliseconds
- * @property {number} memory-limit - Memory limit in megabytes
- * @property {string[]} [tags] - Problem tags/categories (optional)
- * @property {Object} statements - Problem statements in different languages
- * @property {Solution[]} solutions - Array of solution programs
- * @property {Generator[]} [generators] - Test generators (optional)
- * @property {Checker} checker - Output validator/checker
- * @property {Validator} validator - Input validator
- *
- * @example
- * {
- *   "name": "A+B Problem",
- *   "tag": "aplusb",
- *   "time-limit": 1000,
- *   "memory-limit": 256,
- *   "statements": {
- *     "english": {
- *       "title": "A+B Problem",
- *       "legend": true
- *     }
- *   },
- *   "solutions": [
- *     { "name": "main", "source": "Solution.cpp", "type": "main-correct" }
- *   ],
- *   "checker": { "custom": false, "source": "ncmp.cpp" },
- *   "validator": { "source": "Validator.cpp" }
- * }
- */
-interface ConfigFile {
-  name: string;
-
-  version?: string;
-  description?: string;
-
-  'time-limit': number;
-  'memory-limit': number;
-
-  tags?: string[];
-
-  statements: {
-    [language: string]: {
-      title: string;
-      legend: boolean;
-      'input-format'?: boolean;
-      'output-format'?: boolean;
-      notes?: boolean;
-    };
-  };
-
-  solutions: Solution[];
-
-  generators?: Generator[];
-
-  checker: Checker;
-
-  validator: Validator;
 }
 
+// ==================== Exports ====================
+
 export {
+  // Access & Problems
+  AccessType,
+  Problem,
+  ProblemInfo,
+  // Statements
+  Statement,
+  // Files
+  ResourceAdvancedProperties,
+  File,
+  FilesResponse,
+  // Source Types
+  CppSourceType,
+  JavaSourceType,
+  PythonSourceType,
+  SolutionSourceType,
+  TestlibSourceType,
+  // Solutions
+  SolutionTag,
   Solution,
-  Generator,
-  Checker,
-  Validator,
-  SolutionLang,
-  SolutionType,
-  ValidatorTest,
+  // Tests
+  Test,
+  TestGroup,
+  PointsPolicy,
+  FeedbackPolicy,
+  // Checker & Validator
+  CheckerVerdict,
   CheckerTest,
   ValidatorVerdict,
-  CheckerVerdict,
+  ValidatorTest,
+  // Packages
+  PackageState,
+  PackageType,
+  Package,
+  // Local types
+  LocalSolution,
+  LocalGenerator,
+  LocalChecker,
+  LocalValidator,
+  LocalTestset,
+  LocalTestGroup,
+  GeneratorScript,
+  GeneratorScriptCommand,
+  // Utilities
   VerdictTracker,
 };
+
 export default ConfigFile;

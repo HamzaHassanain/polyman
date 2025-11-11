@@ -1,61 +1,121 @@
 {
   "name": "my-problem-template",
-  "version": "1.0.0",
+  "description": "A template for creating a problem on Codeforces Polygon.",
 
-  "description": "A template for solving createing a problem on codeforces polygon.",
-
-  "time-limit": 1000,
-  "memory-limit": 256,
+  "timeLimit": 1000,
+  "memoryLimit": 256,
+  "inputFile": "stdin",
+  "outputFile": "stdout",
+  "interactive": false,
 
   "tags": ["implementation", "math"],
 
   "statements": {
     "english": {
-      "title": "My Problem Template"
+      "encoding": "UTF-8",
+      "name": "My Problem Template",
+      "legend": "./statements/english/legend.tex",
+      "input": "./statements/english/input-format.tex",
+      "output": "./statements/english/output-format.tex",
+      "notes": "./statements/english/notes.tex"
     },
-
     "russian": {
-      "title": "Шаблон моей проблемы"
+      "encoding": "UTF-8",
+      "name": "Шаблон моей проблемы",
+      "legend": "./statements/russian/legend.tex",
+      "input": "./statements/russian/input-format.tex",
+      "output": "./statements/russian/output-format.tex",
+      "notes": "./statements/russian/notes.tex"
     }
   },
 
   "solutions": [
     {
-      "name": "acc",
+      "name": "main",
       "source": "./solutions/acc.cpp",
-      "type": "main-correct"
+      "tag": "MA",
+      "sourceType": "cpp.g++17"
     },
     {
-      "name": "acc2",
+      "name": "correct2",
       "source": "./solutions/acc2.java",
-      "type": "correct"
+      "tag": "OK",
+      "sourceType": "java.11"
     },
     {
-      "name": "tle",
+      "name": "tle_solution",
       "source": "./solutions/tle.py",
-      "type": "tle"
+      "tag": "TL",
+      "sourceType": "python.3"
     }
   ],
 
   "generators": [
     {
-      "name": "samples",
-      "source": "NA",
-      "tests-range": [1, 2]
-    },
-    {
-      "name": "MainGenerator",
-      "source": "./generators/gen.cpp",
-      "tests-range": [3, 30]
+      "name": "gen-random",
+      "source": "./generators/gen.cpp"
     }
   ],
 
   "checker": {
-    "custom": true,
-    "source": "./checker/chk.cpp"
+    "name": "custom_checker",
+    "source": "./checker/chk.cpp",
+    "testsFilePath": "./checker/checker_tests.json",
+    "isStandard": false
   },
 
   "validator": {
-    "source": "./validator/val.cpp"
-  }
+    "name": "validator",
+    "source": "./validator/val.cpp",
+    "testsFilePath": "./validator/validator_tests.json"
+  },
+
+  "testsets": [
+    {
+      "name": "tests",
+      "generatorScript": {
+        "commands": [
+          {
+            "index": 1,
+            "type": "manual",
+            "manualFile": "./tests/manual/sample1.txt",
+            "group": "samples"
+          },
+          {
+            "index": 2,
+            "type": "manual",
+            "manualFile": "./tests/manual/sample2.txt",
+            "group": "samples"
+          },
+          {
+            "type": "generator-single",
+            "generator": "gen-random",
+            "number": 3,
+            "group": "main"
+          },
+          {
+            "type": "generator-single",
+            "generator": "gen-random",
+            "number": 4,
+            "group": "main"
+          },
+          {
+            "type": "generator-range",
+            "generator": "gen-random",
+            "range": [5, 10],
+            "group": "main"
+          }
+        ]
+      },
+      "groupsEnabled": true,
+      "groups": [
+        {
+          "name": "samples"
+        },
+        {
+          "name": "main"
+        }
+      ]
+    }
+  ]
 }

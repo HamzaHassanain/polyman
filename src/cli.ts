@@ -9,14 +9,16 @@
 import { Command } from 'commander';
 
 import {
-  createTemplate,
-  downloadTestlib,
-  listAvailableCheckers,
-  generateTests,
-  validateTests,
-  solveTests,
-  testWhat,
-  fullVerification,
+  createTemplateAction,
+  downloadTestlibAction,
+  listAvailableCheckersAction,
+  listTestsetsAction,
+  generateTestsAction,
+  validateTestsAction,
+  runSolutionAction,
+  testWhatAction,
+  fullVerificationAction,
+  // registerApiKeyAndSecret,
 } from './actions';
 
 const program = new Command();
@@ -43,7 +45,7 @@ program
 program
   .command('new <directory>')
   .description('Create a new problem in the specified directory')
-  .action(createTemplate);
+  .action(createTemplateAction);
 
 /**
  * Command: download-testlib
@@ -56,7 +58,7 @@ program
 program
   .command('download-testlib')
   .description('download testlib.h in the current directory')
-  .action(downloadTestlib);
+  .action(downloadTestlibAction);
 
 /**
  * Command: list-checkers
@@ -69,7 +71,49 @@ program
 program
   .command('list-checkers')
   .description('List available checkers')
-  .action(listAvailableCheckers);
+  .action(listAvailableCheckersAction);
+
+/**
+ * Command: list-testsets
+ * Lists all available testsets in the configuration.
+ * Shows testset names, number of tests, and groups.
+ *
+ * @example
+ * polyman list-testsets
+ */
+program
+  .command('list-testsets')
+  .description('List available testsets in the configuration')
+  .action(listTestsetsAction);
+
+/**
+ * Command: generate <target> [modifier]
+ * Generates tests based on testset/group/test specification.
+ *
+ * Usage:
+ * - polyman generate all                 → Generate all testsets
+ * - polyman generate <testset>           → Generate entire testset
+ * - polyman generate <testset> <group>   → Generate specific group
+ * - polyman generate <testset> <index>   → Generate specific test (by number)
+ *
+ * @example
+ * polyman generate all
+ * polyman generate tests
+ * polyman generate tests samples
+ * polyman generate tests 5
+ */
+program
+  .command('generate <target> [modifier]')
+  .description(
+    'Generate tests for testsets\n' +
+      '\t<target>:\n' +
+      '\t\t"all" - generate all testsets\n' +
+      '\t\t<testset-name> - generate specific testset\n' +
+      '\t[modifier]:\n' +
+      '\t\t<group-name> - generate specific group within testset\n' +
+      '\t\t<test-number> - generate specific test within testset'
+  )
+  .action(generateTestsAction);
 
 /**
  * Command: run-generator <generator-name>
@@ -80,42 +124,68 @@ program
  * polyman run-generator all
  * polyman run-generator gen-random
  */
-program
-  .command('run-generator <generator-name>')
-  .description('Run the test generators for the problem')
-  .action(generateTests);
+// program
+//   .command('run-generator <generator-name>')
+//   .description('Run the test generators for the problem')
+//   .action(generateTests);
 
 /**
- * Command: run-validator <test>
- * Validates generated test files using the validator.
- * Use 'all' to validate all tests, or specify a test number.
+ * Command: validate <target> [modifier]
+ * Validates test input files using the validator program.
+ *
+ * Usage:
+ * - polyman validate all                 → Validate all testsets
+ * - polyman validate <testset>           → Validate entire testset
+ * - polyman validate <testset> <group>   → Validate specific group
+ * - polyman validate <testset> <index>   → Validate specific test (by number)
  *
  * @example
- * polyman run-validator all
- * polyman run-validator 5
+ * polyman validate all
+ * polyman validate tests
+ * polyman validate tests samples
+ * polyman validate tests 5
  */
 program
-  .command('run-validator <test>')
+  .command('validate <target> [modifier]')
   .description(
-    'Run the validator on the generated tests\n\tThe <test>:\n\t\t"all" - to validate all tests\n\t\ta test number - to validate a specific test'
+    'Validate tests using the validator\n' +
+      '\t<target>:\n' +
+      '\t\t"all" - validate all testsets\n' +
+      '\t\t<testset-name> - validate specific testset\n' +
+      '\t[modifier]:\n' +
+      '\t\t<group-name> - validate specific group within testset\n' +
+      '\t\t<test-number> - validate specific test within testset'
   )
-  .action(validateTests);
+  .action(validateTestsAction);
 
 /**
- * Command: run-solution <solution-name> <test>
- * Runs a solution on test files and generates outputs.
- * Use 'all' for all tests, or specify a test number.
+ * Command: run-solution <solution-name> <target> [modifier]
+ * Runs a solution on test files based on testset/group/test specification.
+ *
+ * Usage:
+ * - polyman run-solution <solution-name> all                 → Run on all testsets
+ * - polyman run-solution <solution-name> <testset>           → Run on entire testset
+ * - polyman run-solution <solution-name> <testset> <group>   → Run on specific group
+ * - polyman run-solution <solution-name> <testset> <index>   → Run on specific test (by number)
  *
  * @example
  * polyman run-solution main all
- * polyman run-solution wa-solution 3
+ * polyman run-solution main tests
+ * polyman run-solution main tests samples
+ * polyman run-solution main tests 5
  */
 program
-  .command('run-solution <solution-name> <test>')
+  .command('run-solution <solution-name> <target> [modifier]')
   .description(
-    'Run a solution with a given name on the generated tests.\n\tThe <test>:\n\t\t"all" - to run on all tests\n\t\ta test number - to run on a specific test'
+    'Run solution on tests\n' +
+      '\t<target>:\n' +
+      '\t\t"all" - run on all testsets\n' +
+      '\t\t<testset-name> - run on specific testset\n' +
+      '\t[modifier]:\n' +
+      '\t\t<group-name> - run on specific group within testset\n' +
+      '\t\t<test-number> - run on specific test within testset'
   )
-  .action(solveTests);
+  .action(runSolutionAction);
 
 /**
  * Command: test <what>
@@ -134,7 +204,7 @@ program
   .description(
     'Test the Validator or the Checker against their tests or test a solution agains the main correct solution\n\tThe <what> can be "validator", "checker", or a solution name to run against the main correct solution and compare with the checker.'
   )
-  .action(testWhat);
+  .action(testWhatAction);
 
 /**
  * Command: verify
@@ -150,6 +220,20 @@ program
   .description(
     'Run full verification of the problem including test generation, validation, and solution testing'
   )
-  .action(fullVerification);
+  .action(fullVerificationAction);
+
+/**
+ * Command: register <api-key> <secret>
+ * Registers users Polygon api key locally, then to be used in future commands
+ * @example
+ * polyman register 991d9b535452b525ade5e102dc04ac0ada65044f a4c7c2fc8f4087669edd1139f46c017376af839g
+ * */
+
+// program
+//   .command('register <api-key> <secret>')
+//   .description(
+//     'Registers users Polygon api key locally, then to be used in future commands, please NOTE that, this is only stored on your machine, this app itself, does not do anything with your data execpt using the key and the secret'
+//   )
+//   .action(registerApiKeyAndSecret);
 
 program.parse(process.argv);

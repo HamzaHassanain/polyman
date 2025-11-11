@@ -6,37 +6,48 @@
  */
 
 import {
-  ensureValidatorExists,
-  validateAllTests,
-  validateSingleTest,
-  testValidatorItself,
-} from './helpers/validator';
+  stepCreateDirectoryStructure,
+  stepCopyTemplateFiles,
+  stepDownloadTestlib,
+  stepSaveTestlibToDirectory,
+  stepValidateConfigForValidator,
+  stepCompileValidator,
+  stepValidateAllTestsets,
+  stepValidateSingleTest,
+  stepValidateGroup,
+  stepValidateTestset,
+  stepValidateConfigForGeneration,
+  stepCompileGeneratorsForTestsets,
+  stepGenerateAllTestsets,
+  stepCompileGeneratorsForSingleTest,
+  stepGenerateSingleTest,
+  stepCompileGeneratorsForGroup,
+  stepGenerateTestsForGroup,
+  stepCompileGeneratorsForTestset,
+  stepGenerateTestsForTestset,
+  stepValidateConfigForSolutions,
+  stepCompileSolutions,
+  stepRunSolutionsOnAllTestsets,
+  stepRunSolutionsOnTestset,
+  stepRunSolutionsOnTest,
+  stepRunSolutionsOnGroup,
+  stepValidateConfigForChecker,
+  stepCompileChecker,
+  stepTestChecker,
+  stepValidateConfigForSolutionTest,
+  stepTestSolutionBehavior,
+  stepGenerateTestsForVerification,
+  stepTestValidator,
+  stepValidateGeneratedTests,
+  stepCompileSolutionsForVerification,
+  stepRunSolutionsForVerification,
+  stepVerifySolutionsAgainstMainCorrect,
+} from './steps';
 
-import {
-  logTemplateCreationSuccess,
-  copyTemplate,
-} from './helpers/create-template';
-
-import {
-  ensureGeneratorsExist,
-  runMatchingGenerators,
-} from './helpers/generator';
-
-import {
-  validateSolutionsExist,
-  testSolutionAgainstMainCorrect,
-  ensureMainSolutionExists,
-  getMainSolution,
-  startTheComparisonProcess,
-  runMatchingSolutionsOnTests,
-  runSingleSolutionOnTests,
-} from './helpers/solution';
-
-import { testCheckerItself } from './helpers/checker';
-
+import { logTemplateCreationSuccess } from './helpers/create-template';
+import { findTestset, listTestsets } from './helpers/testset';
+import { findMatchingSolutions } from './helpers/solution';
 import { readConfigFile, isNumeric } from './helpers/utils';
-
-import { downloadFile } from './helpers/testlib-download';
 
 import { fmt } from './formatter';
 
@@ -55,30 +66,22 @@ import fs from 'fs';
  *
  * @example
  * // From CLI: polyman new my-problem
- * createTemplate('my-problem');
+ * createTemplateAction('my-problem');
  * // Creates: my-problem/ with full template structure
  */
-export const createTemplate = (directory: string) => {
+export const createTemplateAction = (directory: string) => {
   fmt.section('📁 CREATE NEW PROBLEM TEMPLATE');
 
   try {
     let stepNum = 1;
 
-    // Create directory structure
-    fmt.step(stepNum++, 'Creating Directory Structure');
-    const problemDir = path.resolve(process.cwd(), directory);
-    const templateDir = path.resolve(__dirname, '../template');
-    fmt.info(
-      `  ${fmt.infoIcon()} Target directory: ${fmt.highlight(directory)}`
-    );
-    fs.mkdirSync(problemDir, { recursive: true });
-    fmt.stepComplete('Directory created');
+    // step 1: Create directory structure
+    stepCreateDirectoryStructure(stepNum++, directory);
 
-    // Copy template files
-    fmt.step(stepNum++, 'Copying Template Files');
-    copyTemplate(templateDir, problemDir);
-    fmt.stepComplete('Template files copied');
+    // step 2: Copy template files
+    stepCopyTemplateFiles(stepNum++, directory);
 
+    // Final success message
     fmt.successBox('TEMPLATE CREATED SUCCESSFULLY!');
     logTemplateCreationSuccess(directory);
   } catch (error) {
@@ -100,14 +103,14 @@ export const createTemplate = (directory: string) => {
  *
  * @example
  * // From CLI: polyman list-checkers
- * listAvailableCheckers();
+ * listAvailableCheckersAction();
  * // Displays:
  * //   1. acmp.cpp       → Almost-correct mode checker
  * //   2. fcmp.cpp       → Floating-point comparison
  * //   3. ncmp.cpp       → Number comparison
  * //   ... etc
  */
-export const listAvailableCheckers = () => {
+export const listAvailableCheckersAction = () => {
   fmt.section('📋 AVAILABLE CHECKERS');
 
   try {
@@ -158,9 +161,11 @@ export const listAvailableCheckers = () => {
 
     console.log();
     fmt.info(
-      `  ${fmt.infoIcon()} ${fmt.dim(`Use these checkers in your Config.json file under the "checker" section, with ${fmt.highlight('custom: false')}.`)}`
+      `  ${fmt.infoIcon()} ${fmt.dim(`Use these checkers in your Config.json file under the "checker" section, with ${fmt.highlight('isStandard: false')}.`)}`
     );
     console.log();
+
+    // Listing complete
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     fmt.errorBox('FAILED TO LIST CHECKERS!');
@@ -182,35 +187,27 @@ export const listAvailableCheckers = () => {
  *
  * @example
  * // From CLI: polyman download-testlib
- * await downloadTestlib();
+ * await downloadTestlibAction();
  * // Downloads testlib.h to current directory
  * // Shows installation instructions for /usr/include or /usr/local/include
  */
-export const downloadTestlib = async () => {
+export const downloadTestlibAction = async () => {
   fmt.section('📥 DOWNLOAD TESTLIB.H');
 
   try {
     let stepNum = 1;
 
-    fmt.step(stepNum++, 'Downloading testlib.h');
-    const testlibUrl =
-      'https://raw.githubusercontent.com/MikeMirzayanov/testlib/master/testlib.h';
-    fmt.info(
-      `  ${fmt.infoIcon()} Source: ${fmt.dim('github.com/MikeMirzayanov/testlib')}`
-    );
+    // step 1: Download testlib.h
+    const testlibContent = await stepDownloadTestlib(stepNum++);
 
-    const testlibContent = await downloadFile(testlibUrl);
-    fmt.stepComplete('Downloaded successfully');
+    // step 2: Save to current directory
+    stepSaveTestlibToDirectory(stepNum++, testlibContent);
 
-    fmt.step(stepNum++, 'Saving to Current Directory');
-    const targetPath = path.join(process.cwd(), 'testlib.h');
-    fs.writeFileSync(targetPath, testlibContent, 'utf-8');
-    fmt.stepComplete('File saved');
-
+    // Final success message
     fmt.successBox('TESTLIB.H DOWNLOADED SUCCESSFULLY!');
     console.log();
     fmt.info(
-      `  ${fmt.infoIcon()} ${fmt.dim('File saved to:')} ${fmt.highlight(targetPath)}`
+      `  ${fmt.infoIcon()} ${fmt.dim('File saved to:')} ${fmt.highlight(path.join(process.cwd(), 'testlib.h'))}`
     );
     console.log();
 
@@ -251,53 +248,129 @@ export const downloadTestlib = async () => {
 };
 
 /**
- * Generates test cases using specified generator or all generators.
- * Compiles generator programs and executes them to create test files.
- * Test files are saved to tests/ directory with names from generator configuration.
+ * Generates tests based on testset/group/test specification.
+ * Supports: all testsets, single testset, single group, or single test.
  *
- * @param {string} generatorName - Name of generator to run, or 'all' for all generators
- * @returns {Promise<void>} Resolves when all tests are generated
+ * @param {string} target - Target specification (testset name, group, or test index)
+ * @param {string} [modifier] - Optional modifier (group name or test index)
  *
- * @throws {Error} If Config.json is invalid or missing generators
- * @throws {Error} If generator compilation fails
- * @throws {Error} If generator execution fails
- * @throws {Error} If no generator matches the name
+ * @throws {Error} If Config.json is invalid
+ * @throws {Error} If testset/group/test not found
+ * @throws {Error} If test generation fails
  *
  * @example
- * // From CLI: polyman run-generator gen-random
- * await generateTests('gen-random');
- * // Runs single generator
+ * // From CLI: polyman generate all
+ * await generateTestsAction('all');
+ * // Generates all testsets
  *
  * @example
- * // From CLI: polyman run-generator all
- * await generateTests('all');
- * // Runs all generators in Config.json
+ * // From CLI: polyman generate tests
+ * await generateTestsAction('testsets');
+ * // Generates testset named 'testsets'
+ *
+ * @example
+ * // From CLI: polyman generate tests samples
+ * await generateTestsAction('testsets', 'samples');
+ * // Generates group 'samples' in testset 'testsets'
+ *
+ * @example
+ * // From CLI: polyman generate tests 5
+ * await generateTestsAction('testsets', '5');
+ * // Generates test 5 in testset 'testsets'
  */
-export const generateTests = async (generatorName: string) => {
-  fmt.section('⚙️  TEST GENERATION');
-
+export const generateTestsAction = async (
+  target: string,
+  modifier?: string
+) => {
   try {
-    const { generators } = readConfigFile();
+    const config = readConfigFile();
     let stepNum = 1;
 
-    // Validate generators exist
-    fmt.step(stepNum++, 'Validating Configuration');
-    ensureGeneratorsExist(generators);
-    const targetGenerators =
-      generatorName === 'all'
-        ? generators
-        : generators.filter(g => g.name === generatorName);
-    fmt.info(
-      `  ${fmt.infoIcon()} Target: ${fmt.highlight(generatorName)} ${fmt.dim(`(${targetGenerators.length} generator${targetGenerators.length > 1 ? 's' : ''})`)}`
-    );
-    fmt.stepComplete('Configuration validated');
+    if (target === 'all') {
+      // Generate all testsets
+      fmt.section('⚙️  GENERATING ALL TESTSETS');
 
-    // Generate tests
-    fmt.step(stepNum++, 'Generating Tests');
-    await runMatchingGenerators(generators, generatorName);
-    fmt.stepComplete('Tests generated successfully');
+      // step 1: Validate configuration
+      stepValidateConfigForGeneration(stepNum++, config);
 
-    fmt.successBox(`TESTS GENERATED FOR: ${generatorName.toUpperCase()}`);
+      // step 2: Compile generators
+      await stepCompileGeneratorsForTestsets(stepNum++, config);
+
+      // step 3: Generate tests for all testsets
+      await stepGenerateAllTestsets(stepNum++, config);
+
+      // Final success message
+      fmt.successBox('ALL TESTSETS GENERATED!');
+    } else {
+      // Find the testset
+      const testset = findTestset(config.testsets!, target);
+
+      if (modifier && isNumeric(modifier)) {
+        // Generate single test
+        const testIndex = parseInt(modifier, 10);
+        fmt.section(
+          `⚙️  GENERATING TEST ${testIndex} IN TESTSET: ${target.toUpperCase()}`
+        );
+
+        // step 1: Validate configuration
+        stepValidateConfigForGeneration(stepNum++, config);
+
+        // step 2: Compile generators
+        await stepCompileGeneratorsForSingleTest(
+          stepNum++,
+          config,
+          testset,
+          testIndex
+        );
+
+        // step 3: Generate test
+        await stepGenerateSingleTest(stepNum++, config, testset, testIndex);
+
+        // Final success message
+        fmt.successBox(
+          `TEST ${testIndex} GENERATED IN ${target.toUpperCase()}!`
+        );
+      } else if (modifier) {
+        // Generate group
+        fmt.section(
+          `⚙️  GENERATING GROUP '${modifier}' IN TESTSET: ${target.toUpperCase()}`
+        );
+
+        // step 1: Validate configuration
+        stepValidateConfigForGeneration(stepNum++, config);
+
+        // step 2: Compile generators
+        await stepCompileGeneratorsForGroup(
+          stepNum++,
+          config,
+          testset,
+          modifier
+        );
+
+        // step 3: Generate group
+        await stepGenerateTestsForGroup(stepNum++, config, testset, modifier);
+
+        // Final success message
+        fmt.successBox(
+          `GROUP '${modifier}' GENERATED IN ${target.toUpperCase()}!`
+        );
+      } else {
+        // Generate entire testset
+        fmt.section(`⚙️  GENERATING TESTSET: ${target.toUpperCase()}`);
+
+        // step 1: Validate configuration
+        stepValidateConfigForGeneration(stepNum++, config);
+
+        // step 2: Compile generators
+        await stepCompileGeneratorsForTestset(stepNum++, config, testset);
+
+        // step 3: Generate tests
+        await stepGenerateTestsForTestset(stepNum++, config, testset);
+
+        // Final success message
+        fmt.successBox(`TESTSET ${target.toUpperCase()} GENERATED!`);
+      }
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     fmt.errorBox('TEST GENERATION FAILED!');
@@ -309,59 +382,118 @@ export const generateTests = async (generatorName: string) => {
 
 /**
  * Validates test input files using the validator program.
- * Can validate a single test by number or all tests.
- * Ensures test inputs conform to problem constraints.
+ * Supports validation by testset, group, or single test.
  *
- * @param {string} arg - Test number or 'all' to validate all tests
- * @returns {Promise<void>} Resolves when validation completes
+ * @param {string} target - Target specification (testset name or 'all')
+ * @param {string} [modifier] - Optional modifier (group name or test index)
  *
  * @throws {Error} If Config.json is invalid or missing validator
  * @throws {Error} If validator compilation fails
  * @throws {Error} If validator rejects any test
- * @throws {Error} If arg is neither 'all' nor a valid number
  *
  * @example
- * // From CLI: polyman run-validator 5
- * await validateTests('5');
- * // Validates only test5.txt
+ * // From CLI: polyman validate all
+ * await validateTestsAction('all');
+ * // Validates all testsets
  *
  * @example
- * // From CLI: polyman run-validator all
- * await validateTests('all');
- * // Validates all tests in tests/ directory
+ * // From CLI: polyman validate tests
+ * await validateTestsAction('testsets');
+ * // Validates testset named 'testsets'
+ *
+ * @example
+ * // From CLI: polyman validate tests samples
+ * await validateTestsAction('testsets', 'samples');
+ * // Validates group 'samples' in testset 'testsets'
+ *
+ * @example
+ * // From CLI: polyman validate tests 5
+ * await validateTestsAction('testsets', '5');
+ * // Validates test 5 in testset 'testsets'
  */
-export const validateTests = async (arg: string) => {
-  fmt.section('✅ TEST VALIDATION');
-
+export const validateTestsAction = async (
+  target: string,
+  modifier?: string
+) => {
   try {
     const config = readConfigFile();
     let stepNum = 1;
 
-    // Validate configuration
-    fmt.step(stepNum++, 'Validating Configuration');
-    ensureValidatorExists(config.validator);
-    fmt.info(
-      `  ${fmt.infoIcon()} Validator: ${fmt.highlight(config.validator.source)} ${fmt.dim('(C++)')}`
-    );
-    fmt.stepComplete('Configuration validated');
+    if (target === 'all') {
+      // Validate all testsets
+      fmt.section('✅ VALIDATING ALL TESTSETS');
 
-    // Run validation
-    if (arg === 'all') {
-      fmt.step(stepNum++, 'Validating All Tests');
-      await validateAllTests(config.validator);
-      fmt.stepComplete('All tests validated');
+      // step 1: Validate configuration
+      stepValidateConfigForValidator(stepNum++, config);
 
-      fmt.successBox('ALL TESTS PASSED VALIDATION!');
-    } else if (isNumeric(arg)) {
-      fmt.step(stepNum++, `Validating Test ${arg}`);
-      await validateSingleTest(config.validator, parseInt(arg, 10));
-      fmt.stepComplete(`Test ${arg} validated`);
+      // step 2: Compile validator
+      await stepCompileValidator(stepNum++, config);
 
-      fmt.successBox(`TEST ${arg} PASSED VALIDATION!`);
+      // step 3: Validate all testsets
+      await stepValidateAllTestsets(stepNum++, config);
+
+      // Final success message
+      fmt.successBox('ALL TESTSETS PASSED VALIDATION!');
     } else {
-      throw new Error(
-        `Invalid argument "${arg}" for validator. Please use "all" or a test number.`
-      );
+      // Find the testset
+      const testset = findTestset(config.testsets!, target);
+
+      if (modifier && isNumeric(modifier)) {
+        // Validate single test
+        const testIndex = parseInt(modifier, 10);
+        fmt.section(
+          `✅ VALIDATING TEST ${testIndex} IN TESTSET: ${target.toUpperCase()}`
+        );
+
+        // step 1: Validate configuration
+        stepValidateConfigForValidator(stepNum++, config);
+
+        // step 2: compile validator
+        await stepCompileValidator(stepNum++, config);
+
+        // step 3: Validate single test
+        await stepValidateSingleTest(
+          stepNum++,
+          config,
+          testset.name,
+          testIndex
+        );
+
+        fmt.successBox(
+          `TEST ${testIndex} IN ${target.toUpperCase()} PASSED VALIDATION!`
+        );
+      } else if (modifier) {
+        // Validate group
+        fmt.section(
+          `✅ VALIDATING GROUP '${modifier}' IN TESTSET: ${target.toUpperCase()}`
+        );
+        // step 1: Validate configuration
+        stepValidateConfigForValidator(stepNum++, config);
+
+        // step 2: compile validator
+        await stepCompileValidator(stepNum++, config);
+
+        // step 3: Validate group
+        await stepValidateGroup(stepNum++, config, testset, modifier);
+
+        fmt.successBox(
+          `GROUP '${modifier}' IN ${target.toUpperCase()} PASSED VALIDATION!`
+        );
+      } else {
+        // Validate entire testset
+        fmt.section(`✅ VALIDATING TESTSET: ${target.toUpperCase()}`);
+
+        // step 1: Validate configuration
+        stepValidateConfigForValidator(stepNum++, config);
+
+        // step 2: compile validator
+        await stepCompileValidator(stepNum++, config);
+
+        // step 3: Validate testset
+        await stepValidateTestset(stepNum++, config, testset.name);
+
+        fmt.successBox(`TESTSET ${target.toUpperCase()} PASSED VALIDATION!`);
+      }
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -373,79 +505,149 @@ export const validateTests = async (arg: string) => {
 };
 
 /**
- * Runs solution programs on test inputs to generate outputs.
+ * Runs solution programs on test inputs based on testset/group/test specification.
  * Executes solution with time and memory limits from Config.json.
- * Saves outputs to solutions-outputs/<solution-name>/ directory.
+ * Saves outputs to solutions-outputs/<solution-name>/<testset>/ directory.
  *
  * @param {string} solutionName - Name of solution to run, or 'all' for all solutions
- * @param {string} arg - Test number or 'all' to run on all tests
- * @returns {Promise<void>} Resolves when execution completes
+ * @param {string} target - Target specification (testset name or 'all')
+ * @param {string} [modifier] - Optional modifier (group name or test index)
  *
  * @throws {Error} If Config.json is invalid or missing solutions
  * @throws {Error} If no solution matches the name
  * @throws {Error} If solution compilation fails
- * @throws {Error} If arg is neither 'all' nor a valid number
- * @throws {Error} If solution execution fails unexpectedly
+ * @throws {Error} If solution execution fails
  *
  * @example
  * // From CLI: polyman run-solution main all
- * await solveTests('main', 'all');
- * // Runs main solution on all tests
+ * await runSolutionAction('main', 'all');
+ * // Runs main solution on all testsets
  *
  * @example
- * // From CLI: polyman run-solution wa-solution 3
- * await solveTests('wa-solution', '3');
- * // Runs wa-solution on test3.txt only
+ * // From CLI: polyman run-solution main tests
+ * await runSolutionAction('main', 'testsets');
+ * // Runs main solution on testset 'testsets'
+ *
+ * @example
+ * // From CLI: polyman run-solution main tests samples
+ * await runSolutionAction('main', 'testsets', 'samples');
+ * // Runs main solution on group 'samples' in testset 'testsets'
+ *
+ * @example
+ * // From CLI: polyman run-solution main tests 5
+ * await runSolutionAction('main', 'testsets', '5');
+ * // Runs main solution on test 5 in testset 'testsets'
  */
-export const solveTests = async (solutionName: string, arg: string) => {
-  fmt.section(`🚀 RUNNING SOLUTION: ${solutionName.toUpperCase()}`);
-
+export const runSolutionAction = async (
+  solutionName: string,
+  target: string,
+  modifier?: string
+) => {
   try {
     const config = readConfigFile();
+    const matchingSolutions = findMatchingSolutions(
+      config.solutions,
+      solutionName
+    );
+
     let stepNum = 1;
 
-    // Validate configuration
-    fmt.step(stepNum++, 'Validating Configuration');
-    validateSolutionsExist(config.solutions);
-    const matchingSolutions =
-      solutionName === 'all'
-        ? config.solutions
-        : config.solutions.filter(s => s.name === solutionName);
+    if (target === 'all') {
+      // Run on all testsets
+      fmt.section(`🚀 RUNNING ${solutionName.toUpperCase()} ON ALL TESTSETS`);
 
-    if (matchingSolutions.length === 0) {
-      throw new Error(`No solution named "${solutionName}" found.`);
-    }
+      // step 1: Validate configuration
+      stepValidateConfigForSolutions(stepNum++, config, matchingSolutions);
 
-    fmt.info(
-      `  ${fmt.infoIcon()} Target: ${fmt.highlight(solutionName)} ${fmt.dim(`(${matchingSolutions.length} solution${matchingSolutions.length > 1 ? 's' : ''})`)}`
-    );
-    fmt.info(
-      `  ${fmt.infoIcon()} Limits: ${fmt.dim(`timeout: ${config['time-limit']}ms, memory: ${config['memory-limit']}MB`)}`
-    );
-    fmt.stepComplete('Configuration validated');
+      // step 2: Compile solutions
+      await stepCompileSolutions(stepNum++, matchingSolutions);
 
-    // Run solutions
-    if (arg === 'all') {
-      fmt.step(stepNum++, 'Running on All Tests');
-      await runMatchingSolutionsOnTests(config.solutions, solutionName, config);
-      fmt.stepComplete('All tests completed');
+      // step 3: Run solutions on all testsets
+      await stepRunSolutionsOnAllTestsets(stepNum++, config, matchingSolutions);
 
-      fmt.successBox(`${solutionName.toUpperCase()} RAN ON ALL TESTS!`);
-    } else if (isNumeric(arg)) {
-      fmt.step(stepNum++, `Running on Test ${arg}`);
-      await runMatchingSolutionsOnTests(
-        config.solutions,
-        solutionName,
-        config,
-        parseInt(arg, 10)
-      );
-      fmt.stepComplete(`Test ${arg} completed`);
-
-      fmt.successBox(`${solutionName.toUpperCase()} RAN ON TEST ${arg}!`);
+      // Final success message
+      fmt.successBox(`${solutionName.toUpperCase()} RAN ON ALL TESTSETS!`);
     } else {
-      throw new Error(
-        `Invalid argument "${arg}" for solution runner. Please use "all" or a test number.`
-      );
+      // Find the testset
+      const testset = findTestset(config.testsets!, target);
+
+      if (!modifier) {
+        // Run on entire testset
+        fmt.section(
+          `🚀 RUNNING ${solutionName.toUpperCase()} ON TESTSET: ${testset.name.toUpperCase()}`
+        );
+
+        // step 1: Validate configuration
+        stepValidateConfigForSolutions(stepNum++, config, matchingSolutions);
+
+        // step 2: Compile solutions
+        await stepCompileSolutions(stepNum++, matchingSolutions);
+
+        // step 3: Run solutions on testset
+        await stepRunSolutionsOnTestset(
+          stepNum++,
+          config,
+          matchingSolutions,
+          testset.name
+        );
+
+        // Final success message
+        fmt.successBox(
+          `${solutionName.toUpperCase()} RAN ON TESTSET ${testset.name.toUpperCase()}!`
+        );
+      } else if (isNumeric(modifier)) {
+        // Run on specific test
+        const testIndex = parseInt(modifier, 10);
+        fmt.section(
+          `🚀 RUNNING ${solutionName.toUpperCase()} ON TEST ${testIndex} IN ${testset.name.toUpperCase()}`
+        );
+
+        // step 1: Validate configuration
+        stepValidateConfigForSolutions(stepNum++, config, matchingSolutions);
+
+        // step 2: Compile solutions
+        await stepCompileSolutions(stepNum++, matchingSolutions);
+
+        // step 3: Run solutions on test
+        await stepRunSolutionsOnTest(
+          stepNum++,
+          config,
+          matchingSolutions,
+          testset.name,
+          testIndex
+        );
+
+        // Final success message
+        fmt.successBox(
+          `${solutionName.toUpperCase()} RAN ON TEST ${testIndex}!`
+        );
+      } else {
+        // Run on specific group
+        const groupName = modifier;
+        fmt.section(
+          `🚀 RUNNING ${solutionName.toUpperCase()} ON GROUP: ${groupName.toUpperCase()} IN ${testset.name.toUpperCase()}`
+        );
+
+        // step 1: Validate configuration
+        stepValidateConfigForSolutions(stepNum++, config, matchingSolutions);
+
+        // step 2: Compile solutions
+        await stepCompileSolutions(stepNum++, matchingSolutions);
+
+        // step 3: Run solutions on group
+        await stepRunSolutionsOnGroup(
+          stepNum++,
+          config,
+          matchingSolutions,
+          testset,
+          groupName
+        );
+
+        // Final success message
+        fmt.successBox(
+          `${solutionName.toUpperCase()} RAN ON GROUP ${groupName.toUpperCase()}!`
+        );
+      }
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -472,21 +674,21 @@ export const solveTests = async (solutionName: string, arg: string) => {
  *
  * @example
  * // From CLI: polyman test validator
- * await testWhat('validator');
+ * await testWhatAction('validator');
  * // Runs validator self-tests from validator_tests.json
  *
  * @example
  * // From CLI: polyman test checker
- * await testWhat('checker');
+ * await testWhatAction('checker');
  * // Runs checker self-tests from checker_tests.json
  *
  * @example
  * // From CLI: polyman test wa-solution
- * await testWhat('wa-solution');
+ * await testWhatAction('wa-solution');
  * // Runs wa-solution and main solution, compares with checker
  * // Validates that wa-solution gets WA on at least one test
  */
-export const testWhat = async (what: string) => {
+export const testWhatAction = async (what: string) => {
   fmt.section(`🔍 TESTING: ${what.toUpperCase()}`);
 
   try {
@@ -494,46 +696,58 @@ export const testWhat = async (what: string) => {
 
     switch (what) {
       case 'validator':
-        fmt.step(stepNum++, 'Running Validator Self-Tests');
-        await testValidatorItself();
-        fmt.stepComplete('Validator tests passed');
+        {
+          const config = readConfigFile();
+
+          // step 1: Validate configuration
+          stepValidateConfigForValidator(stepNum++, config);
+
+          // step 2: Compile validator
+          await stepCompileValidator(stepNum++, config);
+
+          // step 3: Run validator self-tests
+          await stepTestValidator(stepNum++);
+        }
 
         fmt.successBox('VALIDATOR TESTS PASSED!');
         break;
 
       case 'checker':
-        fmt.step(stepNum++, 'Running Checker Self-Tests');
-        await testCheckerItself();
-        fmt.stepComplete('Checker tests passed');
+        {
+          const config = readConfigFile();
+
+          // step 1: Validate configuration
+          stepValidateConfigForChecker(stepNum++, config);
+
+          // step 2: Compile checker
+          await stepCompileChecker(stepNum++, config);
+
+          // step 3: Run checker self-tests
+          await stepTestChecker(stepNum++);
+        }
 
         fmt.successBox('CHECKER TESTS PASSED!');
         break;
       default: {
         // Testing a solution against main-correct
-        fmt.step(stepNum++, 'Validating Configuration');
-        const config = readConfigFile();
-        validateSolutionsExist(config.solutions);
-        ensureMainSolutionExists(config.solutions);
 
-        const mainSolution = getMainSolution(config.solutions);
-        const targetSolution = config.solutions.find(s => s.name === what);
+        // step 1: Validate configuration
+        const { mainSolution, targetSolution } =
+          stepValidateConfigForSolutionTest(stepNum++, what);
 
-        if (!targetSolution) {
-          throw new Error(`No solution named "${what}" found.`);
+        // step 2: Compile solutions
+        await stepCompileSolutions(stepNum++, [mainSolution, targetSolution]);
+
+        // step 3: Compile checker
+        {
+          const config = readConfigFile();
+          await stepCompileChecker(stepNum++, config);
         }
 
-        fmt.info(
-          `  ${fmt.infoIcon()} Main solution: ${fmt.primary(mainSolution.name)} ${fmt.dim(`(${mainSolution.type})`)}`
-        );
-        fmt.info(
-          `  ${fmt.infoIcon()} Target solution: ${fmt.highlight(targetSolution.name)} ${fmt.dim(`(${targetSolution.type})`)}`
-        );
-        fmt.stepComplete('Configuration validated');
+        // step 4: Test solution behavior
+        await stepTestSolutionBehavior(stepNum++, what);
 
-        fmt.step(stepNum++, 'Testing Solution Behavior');
-        await testSolutionAgainstMainCorrect(what);
-        fmt.stepComplete('Solution verified');
-
+        // Final success message
         fmt.successBox(`${what.toUpperCase()} BEHAVES AS EXPECTED!`);
         break;
       }
@@ -571,7 +785,7 @@ export const testWhat = async (what: string) => {
  *
  * @example
  * // From CLI: polyman verify
- * await fullVerification();
+ * await fullVerificationAction();
  * // Runs complete verification workflow:
  * // - Generates tests
  * // - Validates tests
@@ -579,74 +793,50 @@ export const testWhat = async (what: string) => {
  * // - Runs all solutions
  * // - Verifies all solutions against main-correct
  */
-export const fullVerification = async () => {
+export const fullVerificationAction = async () => {
   fmt.section('🏆 POLYGON PROBLEM VERIFICATION');
 
   try {
     const config = readConfigFile();
     let stepNum = 1;
 
-    // Generate Tests
-    fmt.step(stepNum++, 'Generating Tests');
-    ensureGeneratorsExist(config.generators);
-    fmt.info(
-      `  ${fmt.infoIcon()} Found ${fmt.highlight(config.generators.length.toString())} generator(s)`
+    // step 1: Compile generators
+    await stepCompileGeneratorsForTestsets(stepNum++, config);
+
+    // step 2: Generate tests
+    await stepGenerateTestsForVerification(stepNum++, config);
+
+    // step 3: Compile validator
+    await stepCompileValidator(stepNum++, config);
+
+    // step 4: Test validator
+    await stepTestValidator(stepNum++);
+
+    // step 5: Validate generated tests
+    await stepValidateGeneratedTests(stepNum++, config);
+
+    // step 6: Compile checker
+    await stepCompileChecker(stepNum++, config);
+
+    // step 7: Test checker
+    await stepTestChecker(stepNum++);
+
+    // step 8: Compile solutions
+    await stepCompileSolutionsForVerification(stepNum++, config);
+
+    // step 9: Run solutions
+    await stepRunSolutionsForVerification(stepNum++, config);
+
+    // step 10: Verify solutions against main correct
+    await stepVerifySolutionsAgainstMainCorrect(stepNum++, config);
+
+    // Final success message
+    fmt.successBox('🎉 FULL VERIFICATION COMPLETE!');
+    console.log();
+    fmt.success(
+      `  ${fmt.checkmark()} All components tested and verified successfully`
     );
-    await runMatchingGenerators(config.generators, 'all');
-    fmt.stepComplete('All tests generated successfully');
-
-    // Validate Tests - Validator Self-Test
-    fmt.step(stepNum++, 'Testing Validator');
-    await testValidatorItself();
-    fmt.stepComplete('Validator tests passed');
-
-    // Validate Generated Tests
-    fmt.step(stepNum++, 'Validating Generated Tests');
-    await validateAllTests(config.validator);
-    fmt.stepComplete('All generated tests are valid');
-
-    // Checker Self-Test
-    fmt.step(stepNum++, 'Testing Checker');
-    await testCheckerItself();
-    fmt.stepComplete('Checker tests passed');
-
-    // Run Solutions
-    fmt.step(stepNum++, 'Running Solutions');
-    validateSolutionsExist(config.solutions);
-    ensureMainSolutionExists(config.solutions);
-    fmt.info(
-      `  ${fmt.infoIcon()} Found ${fmt.highlight(config.solutions.length.toString())} solution(s)`
-    );
-
-    const mainSolution = getMainSolution(config.solutions);
-    const otherSolutions = config.solutions.filter(
-      s => s.name !== mainSolution.name
-    );
-    fmt.info(
-      `  ${fmt.infoIcon()} Main solution: ${fmt.primary(mainSolution.name)} ${fmt.dim(`(${mainSolution.type})`)}`
-    );
-    await runSingleSolutionOnTests(mainSolution, config);
-
-    try {
-      await runMatchingSolutionsOnTests(otherSolutions, 'all', config);
-      fmt.stepComplete('All solutions ran on all tests');
-    } catch {
-      fmt.stepComplete('Some solutions failed on tests (may be expected)');
-    }
-
-    // Validate Solutions Against Main Correct
-    fmt.step(stepNum++, 'Verifying Solutions Against Main Correct');
-
-    for (const solution of otherSolutions) {
-      fmt.log(
-        `    ${fmt.dim('→')} Checking ${fmt.highlight(solution.name)} ${fmt.dim(`(${solution.type})`)}`
-      );
-      await startTheComparisonProcess(config.checker, mainSolution, solution);
-      fmt.success(`      ${fmt.checkmark()} Behaves as expected`);
-    }
-    fmt.stepComplete('All solutions verified');
-
-    fmt.successBox('VERIFICATION COMPLETED SUCCESSFULLY!');
+    console.log();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     fmt.errorBox('VERIFICATION FAILED!');
@@ -655,3 +845,58 @@ export const fullVerification = async () => {
     process.exit(1);
   }
 };
+
+/**
+ * Lists all available testsets in the configuration.
+ * Shows testset names, number of tests, and groups.
+ *
+ * @returns {Promise<void>} Resolves when listing completes
+ *
+ * @throws {Error} If Config.json is invalid or missing testsets
+ *
+ * @example
+ * // From CLI: polyman list-testsets
+ * await listTestsetsAction();
+ * // Displays:
+ * //   1. tests: 15 tests, groups: samples, main
+ * //   2. stress: 100 tests, groups: none
+ */
+export const listTestsetsAction = () => {
+  fmt.section('📋 AVAILABLE TESTSETS');
+
+  try {
+    const config = readConfigFile();
+    const descriptions = listTestsets(config.testsets!);
+
+    fmt.info(
+      `  ${fmt.infoIcon()} Found ${fmt.highlight(config.testsets!.length.toString())} testset(s)`
+    );
+    console.log();
+
+    for (const [index, description] of descriptions.entries()) {
+      fmt.log(
+        `  ${fmt.primary((index + 1).toString().padStart(2, ' ') + '.')} ${description}`
+      );
+    }
+
+    console.log();
+
+    // Listing complete
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    fmt.errorBox('FAILED TO LIST TESTSETS!');
+    fmt.error(`${message}`);
+    console.log();
+    process.exit(1);
+  }
+};
+
+// export const registerApiKeyAndSecret = async (
+//   apiKey: string,
+//   secret: string
+// ) => {
+//   try {
+//   } catch (error) {
+//     logErrorAndExit(error);
+//   }
+// };

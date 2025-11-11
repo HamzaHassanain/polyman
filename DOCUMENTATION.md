@@ -1,452 +1,812 @@
+**Complete Technical Reference for Polyman CLI Tool**
+
+A TypeScript-based CLI tool for Codeforces problem setters that automates problem preparation workflows including test generation, validation, solution verification, and checker integration.
+
+---
+
 ## Table of Contents
 
-1. [Introduction](#introduction)
-2. [Installation](#installation)
-3. [Quick Start](#quick-start)
-4. [Configuration](#configuration)
-5. [Command Reference](#command-reference)
-6. [Workflows](#workflows)
-7. [File Structure](#file-structure)
-8. [Solution Types](#solution-types)
-9. [Checker System](#checker-system)
-10. [Validator System](#validator-system)
-11. [Generator System](#generator-system)
-12. [Troubleshooting](#troubleshooting)
-13. [Best Practices](#best-practices)
-14. [Examples](#examples)
-15. [FAQ](#faq)
-16. [Contributing](#contributing)
+1. [Architecture Overview](#architecture-overview)
+2. [Core Components](#core-components)
+   - [Entry Point](#entry-point-srclits)
+   - [Command Mapping](#command-mapping)
+3. [Type System](#type-system)
+   - [Solution Tags](#solution-tags)
+   - [Source Types](#source-types)
+   - [Local Interfaces](#local-interfaces)
+   - [Configuration Interface](#configuration-file-interface)
+4. [CLI Interface](#cli-interface)
+   - [Command Parser](#command-parser-srclits)
+5. [Action Layer](#action-layer)
+   - [Template Management](#createtemplatedirectory-string)
+   - [Testlib Integration](#downloadtestlib)
+   - [Checker Listing](#listavailablecheckers)
+   - [Test Generation](#generatetestsgeneratorname-string)
+   - [Test Validation](#validateteststarget-string-modifier-string)
+   - [Solution Execution](#solvetestssolutionname-string-testnumber-string)
+   - [Component Testing](#testwhatwhat-string)
+   - [Full Verification](#fullverification)
+6. [Helper Modules](#helper-modules)
+   - [Utility Functions](#utility-functions-srchelpersutilsts)
+   - [Generator Module](#generator-module-srchelpersgeratorts)
+   - [Validator Module](#validator-module-srchelpersvalidatorts)
+   - [Checker Module](#checker-module-srchelperscheckerts)
+   - [Solution Module](#solution-module-srchelpersolutionts)
+   - [Template Helpers](#template-helpers-srchelpersreate-templatets)
+   - [Testlib Download](#testlib-download-srchelperstestlib-downloadts)
+7. [Execution Engine](#execution-engine)
+8. [Formatter System](#formatter-system)
+   - [Output Methods](#methods)
+   - [Utility Methods](#utility-methods)
+9. [Configuration Schema](#configuration-schema)
+   - [Config.json Structure](#configjson-structure)
+   - [Required Fields](#required-fields)
+   - [Optional Fields](#optional-fields)
+10. [Compilation Pipeline](#compilation-pipeline)
+    - [Language Support](#language-support)
+    - [Compilation Flow](#compilation-flow)
+11. [Validation System](#validation-system)
+    - [Validator Exit Codes](#validator-exit-codes)
+    - [Validation Workflow](#validation-workflow)
+    - [Self-Testing](#self-testing)
+12. [Solution Testing](#solution-testing)
+    - [Execution Flow](#execution-flow)
+    - [Verdict Detection](#verdict-detection)
+13. [Checker Integration](#checker-integration)
+    - [Standard Checkers](#standard-checkers)
+    - [Custom Checkers](#custom-checkers)
+    - [Checker Execution](#checker-execution)
+14. [Generator System](#generator-system)
+    - [Generator Interface](#generator-interface)
+    - [Generation Flow](#generation-flow)
+    - [Special Generators](#special-generators)
+15. [Error Handling](#error-handling)
+    - [Error Flow](#error-flow)
+    - [Error Types](#error-types)
+16. [File Structure](#file-structure)
+    - [Template Structure](#template-structure)
+    - [Generated Project Structure](#generated-project-structure)
+17. [Development Guide](#development-guide)
+    - [Building from Source](#building-from-source)
+    - [Code Structure](#code-structure)
+    - [Adding New Features](#adding-new-features)
+    - [Testing](#testing)
+    - [ESLint Configuration](#eslint-configuration)
+18. [API Reference](#api-reference)
+    - [Key Exports](#key-exports)
+19. [Implementation Notes](#implementation-notes)
+    - [Performance Considerations](#performance-considerations)
+    - [Platform Differences](#platform-differences)
+    - [Security](#security)
+    - [Future Enhancements](#future-enhancements)
 
 ---
 
-## Introduction
+## Architecture Overview
 
-**Polyman** is a CLI tool designed for Codeforces problem setters to manage competitive programming problems directly from the terminal. It streamlines the entire problem preparation workflow, from template creation to complete verification.
+Polyman follows a layered architecture:
 
-### Features
-
-- **Template Creation**: Scaffold new problems with complete directory structure
-- **Test Generation**: Automated test case generation using custom generators
-- **Validation**: Validate test inputs with custom validators
-- **Solution Testing**: Run and verify multiple solution types (correct, TLE, WA, etc.)
-- **Checker Integration**: Support for custom and standard testlib checkers
-- **Full Verification**: Complete problem verification workflow in one command
-
----
-
-## Installation
-
-### Prerequisites
-
-- **Node.js** (v14 or higher)
-- **C++ Compiler** (g++ with C++23 support)
-- **Python 3** (optional, for Python solutions)
-- **Java JDK** (optional, for Java solutions)
-
-### Install from npm
-
-```bash
-npm install -g polyman
 ```
-
-### Install from Source
-
-```bash
-git clone https://github.com/yourusername/polyman.git
-cd polyman
-npm install
-npm run build
-npm link
-```
-
-### Verify Installation
-
-```bash
-polyman --version
+┌─────────────────────────────────────┐
+│     CLI Layer (cli.ts)              │
+│     Commander.js command parsing    │
+└─────────────────────────────────────┘
+              ↓
+┌─────────────────────────────────────┐
+│     Action Layer (actions.ts)       │
+│     High-level workflow orchestration│
+└─────────────────────────────────────┘
+              ↓
+┌─────────────────────────────────────┐
+│     Helper Layer (helpers/)         │
+│     Domain-specific logic modules   │
+└─────────────────────────────────────┘
+              ↓
+┌─────────────────────────────────────┐
+│     Execution Engine (executor.ts)  │
+│     Process management & I/O        │
+└─────────────────────────────────────┘
+              ↓
+┌─────────────────────────────────────┐
+│     Formatter (formatter.ts)        │
+│     Terminal output styling         │
+└─────────────────────────────────────┘
 ```
 
 ---
 
-## Quick Start
+## Core Components
 
-### 1. Create a New Problem
+Polyman's core architecture consists of a CLI layer that delegates to action functions, which coordinate helper modules for specific tasks.
 
-```bash
-polyman new my-problem
-cd my-problem
-```
+### Entry Point: `src/cli.ts`
 
-This creates a directory structure with all necessary files for problem development.
+The CLI interface uses Commander.js to define all user-facing commands:
 
-### 2. Configure Your Problem
+### Command Mapping
 
-Edit `Config.json` to set up your problem parameters, solutions, generators, checker, and validator.
+**Commands:**
 
-### 3. Generate Tests
-
-```bash
-polyman run-generator all
-```
-
-### 4. Verify Everything
-
-```bash
-polyman verify
-```
-
----
-
-## Configuration
-
-### Config.json Structure
-
-```json
-{
-  "name": "problem-name",
-  "version": "1.0",
-  "description": "Problem description",
-  "time-limit": 2000,
-  "memory-limit": 256,
-  "tags": ["math", "implementation"],
-
-  "tags": ["difficulty"],
-
-  "statements": {
-    "english": {
-      "title": "Problem Title"
-    }
-  },
-
-  "solutions": [
-    {
-      "name": "main",
-      "source": "solutions/Solution.cpp",
-      "type": "main-correct"
-    },
-    {
-      "name": "wa-solution",
-      "source": "solutions/WA.cpp",
-      "type": "wa"
-    }
-  ],
-
-  "generators": [
-    {
-      "name": "gen-small",
-      "source": "generators/Small.cpp",
-      "tests-range": [1, 5]
-    },
-    {
-      "name": "gen-large",
-      "source": "generators/Large.cpp",
-      "tests-range": [6, 10]
-    }
-  ],
-
-  "checker": {
-    "custom": false,
-    "source": "ncmp.cpp"
-  },
-
-  "validator": {
-    "source": "validator/Validator.cpp"
-  }
-}
-```
-
-### Configuration Fields
-
-#### Required Fields
-
-- **`name`** (string): Problem identifier
-- **`tag`** (string): Difficulty tag
-- **`time-limit`** (number): Time limit in milliseconds
-- **`memory-limit`** (number): Memory limit in MB
-- **`solutions`** (array): Solution configurations
-- **`checker`** (object): Checker configuration
-- **`validator`** (object): Validator configuration
-
-#### Solution Configuration
-
-```json
-{
-  "name": "solution-identifier",
-  "source": "path/to/source.cpp",
-  "type": "solution-type"
-}
-```
-
-**Solution Types:**
-
-- `main-correct` - Must exist, exactly one per problem
-- `correct` - Additional correct solution
-- `wa` - Wrong answer (must fail on ≥1 test)
-- `tle` - Time limit exceeded
-- `mle` - Memory limit exceeded
-- `pe` - Presentation error
-- `failed` - Runtime error
-
-#### Checker Configuration
-
-**Custom Checker:**
-
-```json
-{
-  "custom": true,
-  "source": "checker/chk.cpp"
-}
-```
-
-**Standard Checker:**
-
-```json
-{
-  "custom": false,
-  "source": "ncmp.cpp"
-}
-```
-
-#### Generator Configuration
-
-```json
-{
-  "generators": [
-    {
-      "name": "generator-name",
-      "source": "generators/Generator.cpp",
-      "tests-range": [start, end]
-    }
-  ]
-}
-```
-
-- `tests-range`: [inclusive start, inclusive end]
-- Example: `[1, 10]` generates test1.txt through test10.txt
-
-#### Samples and Manual Tests
-
-- Please Note that, we termproraly put sample tests and manual tests inside the generators, but without a source, like below:
-
-```json
-{
-  "generators": [
-    {
-      // name must be "samples" for sample tests
-      "name": "samples",
-      "source": "NA",
-      "tests-range": [1, 2]
-    },
-    {
-      // name must be "manual" for manual tests
-      "name": "manual",
-      "source": "NA",
-      "tests-range": [3, 4]
-    }
-  ]
-}
-```
-
-- Also note that, you must create `tests/test1.txt`, `tests/test2.txt` files manually for sample tests, it must be named exactly like that.
-- Same for manual tests, you must create `tests/test3.txt`, `tests/test4.txt` files manually for manual tests.
-
----
-
-## Command Reference
-
-Creates a new problem template in the specified directory.
+- `new <directory>` → `createTemplate`
+- `download-testlib` → `downloadTestlib`
+- `list-checkers` → `listAvailableCheckers`
+- `generate <target> [modifier]` → `generateTests`
+- `validate <target> [modifier]` → `validateTests`
+- `run-solution <name> <target> [modifier]` → `solveTests`
+- `test <what>` → `testWhat`
+- `verify` → `fullVerification`
+- `list-testsets` → Lists all testsets from configuration
 
 **Example:**
 
-```bash
-polyman new two-sum
+```typescript
+program
+  .command('verify')
+  .description('Run full verification of the problem')
+  .action(fullVerification);
 ```
-
-**Output:**
-
-- Complete problem structure
-- Template files for solution, generator, validator, and checker
-- Sample configuration file
 
 ---
 
-### `polyman download-testlib`
+## Type System
 
-Downloads `testlib.h` from the official repository to the current directory.
+### Core Type Definitions: `src/types.d.ts`
 
-**Example:**
+This section documents all TypeScript type definitions used throughout Polyman.
 
-```bash
-polyman download-testlib
+### Solution Tags
+
+```typescript
+type SolutionTag =
+  | 'MA' // Main correct solution (required, exactly one)
+  | 'OK' // Additional correct solution
+  | 'WA' // Wrong Answer
+  | 'TL' // Time Limit Exceeded
+  | 'ML' // Memory Limit Exceeded
+  | 'PE' // Presentation Error
+  | 'RE'; // Runtime Error
 ```
 
-**Post-Installation:**
+### Source Types
 
-- **Linux/Mac**: Copy to `/usr/include/` or `/usr/local/include/`
-- **Windows (MinGW)**: Copy to `C:\MinGW\include\`
+Polyman supports multiple programming languages and compiler versions for solutions, while generators, validators, and checkers must use C++ with testlib.h.
 
----
+```typescript
+type CppSourceType =
+  | 'cpp.g++11'
+  | 'cpp.g++14'
+  | 'cpp.g++17'
+  | 'cpp.g++20'
+  | 'cpp.ms2017'
+  | 'cpp.ms2019'
+  | 'cpp.clang++17'
+  | 'cpp.clang++20';
 
-### `polyman list-checkers`
+type JavaSourceType = 'java.8' | 'java.11' | 'java.17' | 'java.21';
 
-Lists all available standard checkers with descriptions.
+type PythonSourceType =
+  | 'python.2'
+  | 'python.3'
+  | 'python.pypy2'
+  | 'python.pypy3';
 
-**Example:**
+type SolutionSourceType = CppSourceType | JavaSourceType | PythonSourceType;
 
-```bash
-polyman list-checkers
+type TestlibSourceType = CppSourceType;
 ```
 
-**Sample Output:**
+### Local Interfaces
 
-```
- 1. ncmp.cpp       → Compares signed int64 numbers
- 2. wcmp.cpp       → Compares sequences of tokens
- 3. fcmp.cpp       → Compares files line by line
- 4. dcmp.cpp       → Compares doubles with precision 1E-6
- 5. yesno.cpp      → YES/NO checker (case insensitive)
-```
+These interfaces define the structure of local configuration objects that reference files in your problem directory.
 
-**Available Checkers:**
+#### LocalSolution Interface
 
-- [`ncmp.cpp`](assets/checkers/ncmp.cpp) - Integer comparison
-- [`wcmp.cpp`](assets/checkers/wcmp.cpp) - Token sequence comparison
-- [`fcmp.cpp`](assets/checkers/fcmp.cpp) - Line-by-line comparison
-- [`dcmp.cpp`](assets/checkers/dcmp.cpp) - Double comparison (1E-6 precision)
-- [`rcmp.cpp`](assets/checkers/rcmp.cpp) - Double comparison (1.5E-6 precision)
-- [`yesno.cpp`](assets/checkers/yesno.cpp) - YES/NO validation
-- [`hcmp.cpp`](assets/checkers/hcmp.cpp) - Huge integer comparison
-- [`uncmp.cpp`](assets/checkers/uncmp.cpp) - Unordered sequence comparison
-
----
-
-### `polyman run-generator <generator-name>`
-
-Runs test generators to create test files.
-
-**Examples:**
-
-```bash
-# Run specific generator
-polyman run-generator gen-random
-
-# Run all generators
-polyman run-generator all
+```typescript
+interface LocalSolution {
+  name: string; // Solution name/identifier
+  source: string; // Path to solution source file
+  tag: SolutionTag; // Expected behavior tag
+  sourceType?: SolutionSourceType; // Language/compiler (C++, Java, or Python)
+}
 ```
 
-**Generator Requirements:**
+#### LocalGenerator Interface
 
-- Must accept test number as command-line argument
-- Must output test to stdout
-- Example: `./generator 5` generates test5.txt
+```typescript
+interface LocalGenerator {
+  name: string; // Generator name/identifier
+  source: string; // Path to generator source file (must be C++)
+  sourceType?: TestlibSourceType; // C++ compiler version (generators must use testlib.h)
+}
+```
 
-**Sample Generator (C++):**
+#### LocalChecker Interface
 
-```cpp
-#include <iostream>
-#include "testlib.h"
-using namespace std;
+```typescript
+interface LocalChecker {
+  name: string; // Checker name
+  source: string; // Path to checker source or standard checker name
+  isStandard?: boolean; // True if using standard testlib checker
+  testsFilePath?: string; // Path to checker tests JSON file
+  sourceType?: TestlibSourceType; // C++ compiler version (checkers must use testlib.h)
+}
+```
 
-int main(int argc, char* argv[]) {
-    registerGen(argc, argv, 1);
-    int n = rnd.next(1, 100);
-    cout << n << endl;
-    return 0;
+#### LocalValidator Interface
+
+```typescript
+interface LocalValidator {
+  name: string; // Validator name
+  source: string; // Path to validator source file (must be C++)
+  sourceType?: TestlibSourceType; // C++ compiler version (validators must use testlib.h)
+  testsFilePath?: string; // Path to validator tests JSON file
+}
+```
+
+#### Testset Interfaces
+
+```typescript
+interface GeneratorScriptCommand {
+  type: 'generator-single' | 'manual' | 'generator-range';
+  generator?: string;
+  number?: number;
+  index?: number;
+  manualFile?: string;
+  group?: string;
+  points?: number;
+  range?: [number, number];
+}
+
+interface GeneratorScript {
+  commands?: GeneratorScriptCommand[];
+  script?: string;
+  scriptFile?: string;
+}
+
+interface LocalTestGroup {
+  name: string;
+  pointsPolicy?: 'COMPLETE_GROUP' | 'EACH_TEST';
+  feedbackPolicy?: 'NONE' | 'POINTS' | 'ICPC' | 'COMPLETE';
+  dependencies?: string[];
+}
+
+interface LocalTestset {
+  name: string;
+  generatorScript?: GeneratorScript;
+  groupsEnabled?: boolean;
+  pointsEnabled?: boolean;
+  groups?: LocalTestGroup[];
+}
+```
+
+### Configuration File Interface
+
+The main configuration file that defines all aspects of a competitive programming problem.
+
+```typescript
+interface ConfigFile {
+  // Polygon metadata
+  problemId?: number;
+  name: string;
+  owner?: string;
+  revision?: number;
+
+  // Problem info
+  timeLimit: number; // Milliseconds
+  memoryLimit: number; // Megabytes
+  inputFile: string; // 'stdin' or filename
+  outputFile: string; // 'stdout' or filename
+  interactive: boolean;
+
+  // Tags and descriptions
+  tags?: string[];
+  description?: string;
+  tutorial?: string;
+
+  // Statements
+  statements: {
+    [language: string]: Statement;
+  };
+
+  // Solutions
+  solutions: LocalSolution[];
+
+  // Generators
+  generators?: LocalGenerator[];
+
+  // Checker
+  checker: LocalChecker;
+
+  // Validator
+  validator: LocalValidator;
+
+  // Testsets
+  testsets?: LocalTestset[];
+}
+
+interface Statement {
+  encoding: string;
+  name: string;
+  legend: string;
+  input: string;
+  output: string;
+  scoring?: string;
+  interaction?: string;
+  notes?: string;
+  tutorial?: string;
 }
 ```
 
 ---
 
-### `polyman run-validator <test-number|all>`
+## CLI Interface
 
-Validates test inputs using the configured validator.
+### Command Parser: `src/cli.ts`
 
-**Examples:**
+The CLI layer is minimal and delegates to action functions:
 
-```bash
-# Validate specific test
-polyman run-validator 5
+```typescript
+// Creates new problem template
+program
+  .command('new <directory>')
+  .description('Create a new problem template')
+  .action(createTemplate);
 
-# Validate all tests
-polyman run-validator all
-```
+// Downloads testlib.h from GitHub
+program
+  .command('download-testlib')
+  .description('Download testlib.h header file')
+  .action(downloadTestlib);
 
-**Validator Requirements:**
+// Lists available standard checkers
+program
+  .command('list-checkers')
+  .description('List all available standard checkers')
+  .action(listAvailableCheckers);
 
-- Must read from stdin
-- Must exit with code 0 for valid input
-- Must exit with non-zero for invalid input
-- Should use testlib.h for proper error messages
+// Runs generators to create test files
+program
+  .command('generate <target> [modifier]')
+  .description(
+    'Run generators for tests (target: all|testset-name, modifier: group|test-number)'
+  )
+  .action(generateTests);
 
-**Sample Validator (C++):**
+// Validates test inputs
+program
+  .command('validate <target> [modifier]')
+  .description(
+    'Validate test files (target: all|testset-name, modifier: group|test-number)'
+  )
+  .action(validateTests);
 
-```cpp
-#include "testlib.h"
-using namespace std;
+// Executes solutions on tests
+program
+  .command('run-solution <solution-name> <target> [modifier]')
+  .description(
+    'Run solution on tests (target: all|testset-name, modifier: group|test-number)'
+  )
+  .action(solveTests);
 
-int main(int argc, char* argv[]) {
-    registerValidation(argc, argv);
-    int n = inf.readInt(1, 100, "n");
-    inf.readEoln();
-    inf.readEof();
-    return 0;
-}
+// Tests validators/checkers/solutions
+program
+  .command('test <what>')
+  .description('Test validator, checker, or solution')
+  .action(testWhat);
+
+// Complete verification workflow
+program
+  .command('verify')
+  .description('Run full problem verification')
+  .action(fullVerification);
 ```
 
 ---
 
-### `polyman run-solution <solution-name> <test-number|all>`
+## Action Layer
 
-Executes solutions on test inputs to generate outputs.
+All Actions are separated into steps, each step calls relevant helper functions to perform the task, each step is supposed to be completely independent from others to allow better maintainability and testability.
 
-**Examples:**
+### Action Functions: `src/actions.ts`
 
-```bash
-# Run specific solution on all tests
-polyman run-solution main all
+High-level workflow orchestration functions that coordinate helper modules.
 
-# Run solution on specific test
-polyman run-solution wa-solution 5
+### Template Management
 
-# Run all solutions
-polyman run-solution all all
-```
+#### `createTemplate(directory: string)`
 
-**Output Location:**
+Creates new problem directory structure from template.
 
-- Outputs saved to `solutions-outputs/<solution-name>/output_test*.txt`
+**Workflow:**
 
-**Solution Types:**
+1. Validates directory doesn't exist
+2. Copies template files from `template/`
+3. Logs success message
 
-- `main-correct` - Reference solution (always correct)
-- `correct` - Alternative correct solution
-- `wa` - Wrong Answer solution
-- `tle` - Time Limit Exceeded solution
-- `mle` - Memory Limit Exceeded solution
-- `pe` - Presentation Error solution
-- `failed` - Runtime error solution
+**Called by:** `polyman new <dir>`
 
 ---
 
-### `polyman test <what>`
+### Testlib Integration
+
+#### `downloadTestlib()`
+
+Downloads testlib.h from official repository.
+
+**Workflow:**
+
+1. Fetches from `https://raw.githubusercontent.com/MikeMirzayanov/testlib/master/testlib.h`
+2. Saves to current directory
+3. Displays installation instructions per OS
+
+**Called by:** `polyman download-testlib`
+
+**Implementation:**
+
+```typescript
+const testlibUrl =
+  'https://raw.githubusercontent.com/MikeMirzayanov/testlib/master/testlib.h';
+const testlibContent = await downloadFile(testlibUrl);
+fs.writeFileSync('testlib.h', testlibContent, 'utf-8');
+```
+
+---
+
+### Checker Listing
+
+#### `listAvailableCheckers()`
+
+Lists all standard checkers from `assets/checkers/`.
+
+**Workflow:**
+
+1. Reads checker directory
+2. Parses description from C++ comments (`// Description:`)
+3. Formats output with `fmt`
+
+**Called by:** `polyman list-checkers`
+
+**Output Format:**
+
+```
+1. ncmp.cpp       → Compares signed int64 numbers
+2. wcmp.cpp       → Compares sequences of tokens
+...
+```
+
+---
+
+### Test Generation
+
+#### `generateTests(generatorName: string)`
+
+Runs generators to create test input files.
+
+**Workflow:**
+
+1. Reads `Config.json`
+2. Validates generators exist via `ensureGeneratorsExist`
+3. Runs matching generators via `runMatchingGenerators`
+
+**Called by:** `polyman generate <target> [modifier]`
+
+**Parameters:**
+
+- `target`: Testset name or 'all'
+- `modifier`: (Optional) Group name or test number
+
+---
+
+### Test Validation
+
+#### `validateTests(target: string, modifier?: string)`
+
+Validates test input files using validator.
+
+**Workflow:**
+
+1. Validates input parameter (testset name or 'all')
+2. Ensures validator exists via `ensureValidatorExists`
+3. Validates tests via `validateSingleTest` or `validateAllTests`
+
+**Called by:** `polyman validate <target> [modifier]`
+
+---
+
+### Solution Execution
+
+#### `solveTests(solutionName: string, testNumber: string)`
+
+Executes solutions on test inputs.
+
+**Workflow:**
+
+1. Reads configuration
+2. Validates solutions exist via `validateSolutionsExist`
+3. Runs solutions via `runSingleSolutionOnTests` or `runMatchingSolutionsOnTests`
+
+**Called by:** `polyman run-solution <name> <test>`
+
+**Parameters:**
+
+- `solutionName`: Solution name or 'all'
+- `testNumber`: Test number or 'all'
+
+---
+
+### Component Testing
+
+#### `testWhat(what: string)`
 
 Tests validators, checkers, or solutions against expected behavior.
 
-**Examples:**
+**Workflow:**
 
-```bash
-# Test validator against validator_tests.json
-polyman test validator
+**For 'validator':**
 
-# Test checker against checker_tests.json
-polyman test checker
+1. Calls `testValidatorItself`
+2. Runs validator against `validator_tests.json`
 
-# Test WA solution (ensures it gets WA on at least one test)
-polyman test wa-solution
+**For 'checker':**
+
+1. Calls `testCheckerItself`
+2. Runs checker against `checker_tests.json`
+
+**For solution name:**
+
+1. Calls `testSolutionAgainstMainCorrect`
+2. Compares solution output with main-correct using checker
+3. Validates verdict matches expected type
+
+**Called by:** `polyman test <what>`
+
+---
+
+### Full Verification
+
+#### `fullVerification()`
+
+Complete problem verification workflow.
+
+**Workflow:**
+
+1. **Generate Tests:** Runs all generators
+2. **Test Validator:** Self-tests via `testValidatorItself`
+3. **Validate All Tests:** Ensures all inputs are valid
+4. **Test Checker:** Self-tests via `testCheckerItself`
+5. **Run All Solutions:** Executes all solutions on all tests
+6. **Verify Solutions:** Compares all solutions against main-correct
+
+**Called by:** `polyman verify`
+
+**Success Criteria:**
+
+- All tests generated
+- Validator passes self-tests
+- All tests are valid
+- Checker passes self-tests
+- Main solution produces correct outputs
+- WA solutions get WA on ≥1 test
+- TLE solutions exceed time limit
+- All verdicts match expected types
+
+---
+
+## Helper Modules
+
+Helper modules contain domain-specific logic for generators, validators, checkers, solutions, and utilities.
+
+### Utility Functions: `src/helpers/utils.ts`
+
+Core utility functions for compilation, configuration, and file operations.
+
+### Compilation Functions
+
+**`compileCPP(sourcePath: string): Promise<string>`**
+
+Compiles C++ source using g++.
+
+```typescript
+// Compilation command:
+g++ -o <output> <source>
 ```
 
-**Test Files:**
+**Parameters:**
 
-**Validator Tests** ([`validator/validator_tests.json`](template/validator/validator_tests.json)):
+- `sourcePath`: Path to `.cpp` file
+
+**Returns:** Path to compiled executable
+
+**Throws:** Error if not `.cpp` or compilation fails
+
+---
+
+**`compileJava(sourcePath: string): Promise<string>`**
+
+Compiles Java source using javac.
+
+**Returns:** Class name (e.g., 'Solution')
+
+---
+
+### Configuration Functions
+
+**`readConfigFile(): ConfigFile`**
+
+Reads and parses `Config.json`.
+
+**Returns:** Parsed configuration object
+
+**Throws:** Error if file doesn't exist or has invalid JSON
+
+---
+
+**`isNumeric(value: string): boolean`**
+
+Checks if string represents a number.
+
+---
+
+### File Operations
+
+**`ensureDirectoryExists(dirName: string)`**
+
+Creates directory if it doesn't exist (recursive).
+
+```typescript
+ensureDirectoryExists('tests');
+ensureDirectoryExists('nested/path/to/dir');
+```
+
+---
+
+**`removeDirectory(dirName: string)`**
+
+Removes directory and all contents.
+
+---
+
+**`readFirstLine(filePath: string): string`**
+
+Reads first line from file (used for verdict detection).
+
+---
+
+### Error Handling
+
+**`logError(error: unknown)`**
+
+Logs error with formatted output.
+
+---
+
+**`logErrorAndExit(error: unknown)`**
+
+Logs error and exits with code 1.
+
+---
+
+**`logErrorAndThrow(error: unknown, message?: string)`**
+
+Logs error and re-throws.
+
+---
+
+**`throwError(error: unknown, message?: string): never`**
+
+Throws error, ensuring it's an Error instance.
+
+---
+
+### Generator Module: `src/helpers/generator.ts`
+
+Handles test case generation.
+
+#### `ensureGeneratorsExist(generators: LocalGenerator[] | undefined)`
+
+Type assertion that throws if no generators defined.
+
+---
+
+#### `runMatchingGenerators(generators: LocalGenerator[], generatorName: string)`
+
+Runs generators matching name or 'all'.
+
+**Workflow:**
+
+1. Filters generators by name
+2. For each generator:
+   - Compiles generator via `compileCPP`
+   - Generates test files via `generateTestFiles`
+
+**Special Cases:**
+
+- `name: 'samples'` → Uses existing manual test files
+- `name: 'manual'` → Uses existing manual test files
+- Others → Compiles and runs generator
+
+---
+
+**Private Functions:**
+
+**`compileGenerator(generator: LocalGenerator): Promise<string>`**
+
+Compiles generator C++ source.
+
+**Returns:** Path to compiled executable
+
+---
+
+**`generateTestFiles(compiledPath: string, generator: LocalGenerator, testsDir: string)`**
+
+Generates test files by running generator for each test number in range.
+
+**Command:**
+
+```bash
+./generator <testNum> > tests/test<testNum>.txt
+```
+
+---
+
+**`ensureTestsDirectory(): string`**
+
+Creates `tests/` directory if needed.
+
+---
+
+### Validator Module: `src/helpers/validator.ts`
+
+Input validation system.
+
+#### `ensureValidatorExists(validator: LocalValidator | undefined)`
+
+Type assertion for validator existence.
+
+---
+
+#### `validateSingleTest(testNumber: number)`
+
+Validates a single test file.
+
+**Workflow:**
+
+1. Compiles validator via `compileValidator`
+2. Runs validator with test input
+3. Checks exit code (0 = VALID, 3 = INVALID)
+
+**Command:**
+
+```bash
+./validator < tests/test<N>.txt
+```
+
+---
+
+#### `validateAllTests()`
+
+Validates all test files in `tests/` directory.
+
+**Workflow:**
+
+1. Reads all test files
+2. Validates each via `validateSingleTest`
+3. Reports results
+
+---
+
+#### `testValidatorItself()`
+
+Validator self-testing using `validator_tests.json`.
+
+**Workflow:**
+
+1. Parses validator tests via `parseValidatorTests`
+2. Creates test files via `makeValidatorTests`
+3. Validates each test
+4. Compares actual verdict with expected
+
+**Test File Format:**
 
 ```json
 {
@@ -463,19 +823,103 @@ polyman test wa-solution
 }
 ```
 
-**Checker Tests** ([`checker/checker_tests.json`](template/checker/checker_tests.json)):
+---
+
+**Private Functions:**
+
+**`compileValidator(): Promise<void>`**
+
+Compiles validator C++ source.
+
+---
+
+**`parseValidatorTests(): Promise<ValidatorTest[]>`**
+
+Reads and parses `validator/validator_tests.json`.
+
+---
+
+**`makeValidatorTests()`**
+
+Creates test files in `validator_tests/` directory.
+
+---
+
+**`runValidator(compiledPath: string, testFilePath: string): Promise<ValidatorVerdict>`**
+
+Executes validator and returns verdict based on exit code.
+
+---
+
+**`getValidatorVerdict(exitCode: number): ValidatorVerdict`**
+
+Maps exit code to verdict (0 → VALID, 3 → INVALID).
+
+---
+
+### Checker Module: `src/helpers/checker.ts`
+
+Output verification system.
+
+#### `ensureCheckerExists(checker: LocalChecker | undefined)`
+
+Type assertion for checker existence.
+
+---
+
+#### `compileChecker(checker: LocalChecker): Promise<void>`
+
+Compiles checker.
+
+**For custom checkers:**
+
+```bash
+g++ -o checker checker/chk.cpp
+```
+
+**For standard checkers:**
+Copies from `assets/checkers/` and compiles.
+
+---
+
+#### `runChecker(compiledPath: string, inputFile: string, outputFile: string, answerFile: string): Promise<CheckerVerdict>`
+
+Runs checker to compare output with answer.
+
+**Command:**
+
+```bash
+./checker <input> <output> <answer>
+```
+
+**Returns:** Verdict from checker output (OK/WA/PE)
+
+---
+
+#### `testCheckerItself()`
+
+Checker self-testing using `checker_tests.json`.
+
+**Workflow:**
+
+1. Parses checker tests via `parseCheckerTests`
+2. Creates test files (input, output, answer)
+3. Runs checker on each test
+4. Compares actual verdict with expected
+
+**Test File Format:**
 
 ```json
 {
   "tests": [
     {
-      "stdin": "5",
+      "stdin": "3",
       "stdout": "YES",
       "answer": "YES",
       "verdict": "OK"
     },
     {
-      "stdin": "5",
+      "stdin": "3",
       "stdout": "NO",
       "answer": "YES",
       "verdict": "WA"
@@ -486,2238 +930,1077 @@ polyman test wa-solution
 
 ---
 
-### `polyman verify`
+#### `getExpectedCheckerVerdict(solutionTag: SolutionTag): CheckerVerdict`
 
-Runs complete problem verification workflow.
+Maps solution tag to expected checker verdict.
 
-**Example:**
+**Mapping:**
 
-```bash
-polyman verify
-```
-
-**Verification Steps:**
-
-1. ✅ Generate all tests
-2. ✅ Test validator (self-tests)
-3. ✅ Validate all generated tests
-4. ✅ Test checker (self-tests)
-5. ✅ Run all solutions
-6. ✅ Verify solution behaviors against expected types
-
-**Success Criteria:**
-
-- All tests generated successfully
-- Validator passes self-tests
-- All tests are valid
-- Checker passes self-tests
-- Main solution produces correct outputs
-- WA solutions get WA on at least one test
-- TLE solutions exceed time limit appropriately
-- All verdicts match expected solution types
+- `'MA'`, `'OK'`, `'TL'`, `'ML'` → `'OK'` or `'WRONG_ANSWER'` (depends on checker)
+- `'WA'` → `'WRONG_ANSWER'`
+- `'PE'` → `'PRESENTATION_ERROR'`
+- `'RE'` → Depends on runtime behavior
 
 ---
 
-## Workflows
+**Private Functions:**
 
-### Complete Problem Preparation Workflow
+**`parseCheckerTests(): Promise<CheckerTest[]>`**
 
-Follow this end-to-end workflow to create a complete problem:
+Reads `checker/checker_tests.json`.
 
-#### Step 1: Create Template
+---
 
-```bash
-polyman new my-problem
-cd my-problem
-```
+**`makeCheckerTests()`**
 
-#### Step 2: Write Main Solution
+Creates test files in `checker_tests/` directory.
 
-Edit `solutions/Solution.cpp`:
+---
 
-```cpp
-#include <iostream>
-using namespace std;
+**`getCheckerVerdict(output: string): CheckerVerdict`**
 
-int main() {
-    int n;
-    cin >> n;
-    cout << n * n << endl;
-    return 0;
+Parses checker output for verdict.
+
+---
+
+### Solution Module: `src/helpers/solution.ts`
+
+Solution execution and verification.
+
+#### `validateSolutionsExist(solutions: LocalSolution[] | undefined)`
+
+Type assertion for solutions existence.
+
+---
+
+#### `ensureMainSolutionExists(solutions: LocalSolution[] | undefined)`
+
+Type assertion ensuring main-correct solution exists.
+
+**Throws:** If no `main-correct` solution found.
+
+---
+
+#### `ensureSolutionExists(solutions: LocalSolution[] | undefined, solutionName: string)`
+
+Type assertion for specific solution existence.
+
+---
+
+#### `getMainSolution(solutions: LocalSolution[]): LocalSolution`
+
+Returns the main-correct solution.
+
+---
+
+#### `runSingleSolutionOnTests(config: ConfigFile, solutionName: string, testNumber: string)`
+
+Runs a solution on test(s).
+
+**Workflow:**
+
+1. Finds solution by name
+2. Compiles solution via `compileSolution`
+3. Runs on test(s) via `runSolutionOnTests`
+
+---
+
+#### `runMatchingSolutionsOnTests(config: ConfigFile, solutionName: string, testNumber: string)`
+
+Runs solution(s) matching name on test(s).
+
+**Parameters:**
+
+- `solutionName`: Solution name or 'all'
+- `testNumber`: Test number or 'all'
+
+---
+
+#### `testSolutionAgainstMainCorrect(solutionName: string)`
+
+Tests solution against main-correct using checker.
+
+**Workflow:**
+
+1. Runs main-correct solution on all tests
+2. Runs target solution on all tests
+3. Compares outputs using checker
+4. Validates verdict matches expected type
+
+**Verification:**
+
+- WA solutions must get WA on ≥1 test
+- TLE solutions must TLE on ≥1 test
+- Correct solutions must get OK on all tests
+
+---
+
+#### `startTheComparisonProcess(solutions: LocalSolution[], checker: LocalChecker)`
+
+Compares all solutions against main-correct.
+
+**Workflow:**
+
+1. Compiles checker
+2. For each non-main solution:
+   - Compares outputs with checker
+   - Tracks verdicts
+   - Validates against expected type
+
+---
+
+**Private Functions:**
+
+**`compileSolution(sourcePath: string): Promise<void>`**
+
+Compiles solution based on language.
+
+**Supported Languages:**
+
+- C++ → `compileCPP`
+- Java → `compileJava`
+- Python → Returns interpreter command
+
+---
+
+**`runSolutionOnTests(solution: LocalSolution, compiledPath: string, testFiles: string[])`**
+
+Executes solution on test files.
+
+**For each test:**
+
+1. Creates output directory
+2. Runs solution with test input
+3. Saves output to file
+4. Handles TLE/MLE/RTE verdicts
+
+---
+
+**`runSolutionOnTest(compiledPath: string, testFilePath: string, outputPath: string, timeLimit: number, memoryLimit: number, solutionTag: SolutionTag): Promise<void>`**
+
+Runs solution on single test.
+
+**Verdict Detection:**
+
+- First line starts with "Time Limit Exceeded" → TLE
+- First line starts with "Memory Limit Exceeded" → MLE
+- First line starts with "Runtime Error" → RTE
+- Otherwise → OK (checker will verify correctness)
+
+---
+
+**`ensureOutputDirectory(solutionName: string): string`**
+
+Creates `solutions-outputs/<solution-name>/` directory.
+
+---
+
+**`compareSolutionWithMainCorrect(solution: LocalSolution, mainSolution: LocalSolution, checker: LocalChecker, compiledChecker: string, testFiles: string[]): Promise<VerdictTracker>`**
+
+Compares solution outputs with main-correct.
+
+**Returns:** Verdict tracker with counts per verdict type.
+
+---
+
+**`validateSolutionVerdicts(solution: LocalSolution, verdictTracker: VerdictTracker)`**
+
+Validates verdicts match expected solution type.
+
+**Rules:**
+
+- WA solutions must have ≥1 WA verdict
+- Correct solutions must have all OK verdicts
+- TLE solutions must have ≥1 TLE verdict
+
+---
+
+**`isTLE(firstLine: string): boolean`**
+
+Checks if first line indicates TLE.
+
+---
+
+**`isMLE(firstLine: string): boolean`**
+
+Checks if first line indicates MLE.
+
+---
+
+**`isRTE(firstLine: string): boolean`**
+
+Checks if first line indicates RTE.
+
+---
+
+**`isTLEValue(solutionTag: SolutionTag): boolean`**
+
+Checks if solution tag allows TLE verdict.
+
+---
+
+**`isMLEValue(solutionTag: SolutionTag): boolean`**
+
+Checks if solution tag allows MLE verdict.
+
+---
+
+### Template Helpers: `src/helpers/create-template.ts`
+
+Template creation utilities.
+
+#### `copyTemplate(sourceDir: string, targetDir: string)`
+
+Recursively copies template directory.
+
+---
+
+#### `logTemplateCreationSuccess(problemName: string)`
+
+Logs success message with next steps.
+
+---
+
+### Testlib Download: `src/helpers/testlib-download.ts`
+
+#### `downloadFile(url: string): Promise<string>`
+
+Downloads file from URL.
+
+**Uses:** Node.js `https` module
+
+---
+
+## Execution Engine
+
+### Executor: `src/executor.ts`
+
+Low-level process execution with timeout and memory limit support.
+
+#### `executor.executeWithTimeout(command: string, args: string[], timeoutMs: number, memoryLimitMB: number): Promise<ExecutionResult>`
+
+Executes command with resource limits.
+
+**Parameters:**
+
+- `command`: Executable path or command
+- `args`: Command-line arguments
+- `timeoutMs`: Maximum execution time
+- `memoryLimitMB`: Maximum memory usage
+
+**Returns:**
+
+```typescript
+interface ExecutionResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  timedOut: boolean;
+  memoryExceeded: boolean;
 }
 ```
 
-#### Step 3: Write Validator
+**Platform Support:**
 
-Edit `validator/Validator.cpp`:
+- **Linux:** Uses `ulimit` for memory limiting
+- **macOS:** Memory limiting not supported (warning shown)
+- **Windows:** Memory limiting not supported (warning shown)
 
-```cpp
-#include "testlib.h"
-using namespace std;
+**Implementation:**
 
-int main(int argc, char* argv[]) {
-    registerValidation(argc, argv);
-    int n = inf.readInt(1, 1000, "n");
-    inf.readEoln();
-    inf.readEof();
-    return 0;
+```typescript
+// Linux memory limiting
+if (process.platform === 'linux' && memoryLimitMB > 0) {
+  const memoryLimitKB = memoryLimitMB * 1024;
+  command = `ulimit -v ${memoryLimitKB} && ${command}`;
 }
+
+// Spawn process with timeout
+const child = spawn(command, args, { shell: true });
+const timeout = setTimeout(() => {
+  child.kill();
+  timedOut = true;
+}, timeoutMs);
 ```
 
-#### Step 4: Create Validator Tests
+---
 
-Edit `validator/validator_tests.json`:
+## Formatter System
+
+### Formatter Class: `src/formatter.ts`
+
+Terminal output styling with Codeforces theme.
+
+**Colors:**
+
+- Primary: `#1E88E5` (blue)
+- Error: `#FF6B6B` (red)
+- Success: `#4CAF50` (green)
+- Warning: `#FFC107` (yellow)
+
+### Output Methods
+
+#### Methods
+
+**`section(title: string)`**
+
+Prints section header with box.
+
+```
+╭─────────────────────────────────╮
+│  📁 SECTION TITLE               │
+╰─────────────────────────────────╯
+```
+
+---
+
+**`step(stepNumber: number, title: string)`**
+
+Prints numbered step header.
+
+```
+╭─ STEP 1: Creating Directory
+```
+
+---
+
+**`stepComplete(message: string)`**
+
+Prints step completion.
+
+```
+╰─ ✓ Done
+```
+
+---
+
+**`success(message: string)`**
+
+Prints success message (green).
+
+---
+
+**`error(message: string)`**
+
+Prints error message (red).
+
+---
+
+**`warning(message: string)`**
+
+Prints warning message (yellow).
+
+---
+
+**`info(message: string)`**
+
+Prints info message (blue).
+
+---
+
+**`log(message: string)`**
+
+Prints plain message.
+
+---
+
+**`successBox(title: string)`**
+
+Prints success box with checkmark.
+
+---
+
+**`errorBox(title: string)`**
+
+Prints error box with X mark.
+
+---
+
+### Utility Methods
+
+**Utility Methods:**
+
+- `primary(text: string)`: Blue color
+- `highlight(text: string)`: Cyan color
+- `dim(text: string)`: Dimmed text
+- `successIcon()`: ✓ icon
+- `errorIcon()`: ✗ icon
+- `warningIcon()`: ⚠ icon
+- `infoIcon()`: ℹ icon
+
+---
+
+## Configuration Schema
+
+The `Config.json` file is the heart of every Polyman problem, defining all metadata, constraints, and components.
+
+### Config.json Structure
+
+**Location:** `Config.json` in problem root
+
+**Full Schema:**
 
 ```json
 {
-  "tests": [
-    { "stdin": "1\n", "expectedVerdict": "VALID" },
-    { "stdin": "1000\n", "expectedVerdict": "VALID" },
-    { "stdin": "0\n", "expectedVerdict": "INVALID" },
-    { "stdin": "1001\n", "expectedVerdict": "INVALID" }
-  ]
-}
-```
+  "name": "problem-name",
+  "description": "Problem description",
+  "timeLimit": 2000,
+  "memoryLimit": 256,
+  "inputFile": "stdin",
+  "outputFile": "stdout",
+  "interactive": false,
+  "tags": ["tag1", "tag2"],
 
-#### Step 5: Write Generator
+  "statements": {
+    "english": {
+      "encoding": "UTF-8",
+      "name": "Problem Title",
+      "legend": "./statements/english/legend.tex",
+      "input": "./statements/english/input-format.tex",
+      "output": "./statements/english/output-format.tex",
+      "notes": "./statements/english/notes.tex"
+    }
+  },
 
-Edit `generators/Generator.cpp`:
-
-```cpp
-#include "testlib.h"
-using namespace std;
-
-int main(int argc, char* argv[]) {
-    registerGen(argc, argv, 1);
-    int testNum = atoi(argv[1]);
-    int n = rnd.next(1, min(100 * testNum, 1000));
-    cout << n << endl;
-    return 0;
-}
-```
-
-#### Step 6: Configure Checker
-
-For numeric output, use standard checker in `Config.json`:
-
-```json
-"checker": {
-  "custom": false,
-  "source": "ncmp.cpp"
-}
-```
-
-For custom verification, write `checker/chk.cpp`.
-
-#### Step 7: Update Config.json
-
-```json
-{
-  "name": "square-number",
-  "tag": "easy",
-  "time-limit": 1000,
-  "memory-limit": 256,
   "solutions": [
     {
       "name": "main",
-      "source": "solutions/Solution.cpp",
-      "type": "main-correct"
+      "source": "./solutions/Solution.cpp",
+      "tag": "MA",
+      "sourceType": "cpp.g++17"
     }
   ],
+
   "generators": [
     {
       "name": "gen-all",
-      "source": "generators/Generator.cpp",
-      "tests-range": [1, 20]
+      "source": "./generators/Generator.cpp"
     }
   ],
+
   "checker": {
-    "custom": false,
-    "source": "ncmp.cpp"
+    "name": "ncmp.cpp",
+    "isStandard": true
   },
+
   "validator": {
-    "source": "validator/Validator.cpp"
-  }
-}
-```
+    "name": "validator",
+    "source": "./validator/Validator.cpp",
+    "testsFilePath": "./validator/validator_tests.json"
+  },
 
-#### Step 8: Verify Problem
-
-```bash
-polyman verify
-```
-
-### Adding Wrong Answer Solutions Workflow
-
-#### Create WA Solution
-
-`solutions/WA.cpp`:
-
-```cpp
-#include <iostream>
-using namespace std;
-
-int main() {
-    int n;
-    cin >> n;
-    cout << n * n + 1 << endl; // Intentionally wrong
-    return 0;
-}
-```
-
-#### Add to Config.json
-
-```json
-{
-  "solutions": [
+  "testsets": [
     {
-      "name": "main",
-      "source": "solutions/Solution.cpp",
-      "type": "main-correct"
-    },
-    {
-      "name": "wa-solution",
-      "source": "solutions/WA.cpp",
-      "type": "wa"
-    }
-  ]
-}
-```
-
-#### Test WA Solution
-
-```bash
-# Test against main solution
-polyman test wa-solution
-
-# Or run full verification
-polyman verify
-```
-
-**Expected Behavior:**
-
-- WA solution must get WA verdict on ≥1 test
-- Polyman validates this automatically
-
-### Multiple Generators Workflow
-
-Create different generators for different test groups:
-
-```json
-{
-  "generators": [
-    {
-      "name": "gen-small",
-      "source": "generators/Small.cpp",
-      "tests-range": [1, 5]
-    },
-    {
-      "name": "gen-medium",
-      "source": "generators/Medium.cpp",
-      "tests-range": [6, 15]
-    },
-    {
-      "name": "gen-large",
-      "source": "generators/Large.cpp",
-      "tests-range": [16, 30]
-    }
-  ]
-}
-```
-
-Run specific generator:
-
-```bash
-polyman run-generator gen-large
-```
-
----
-
-## File Structure
-
-When you create a new problem with `polyman new <directory>`, the following structure is generated:
-
-### NOTE: Keep in mind that, you must not change any of the directory names, as Polyman relies on these names to function properly.
-
-```
-my-problem/
-├── Config.json                    # Main configuration file
-├── testlib.h                      # Testlib header (if downloaded)
-│
-├── solutions/                  # Solution files
-│   ├── acc.cpp                 # Main correct solution (required)
-│   ├── acc2.java               # Other correct solution (Java)
-│   └── tle.py                  # TLE solution (Python)
-│
-├── generators/                    # Test generators
-│   └── gen.cpp                     # Main generator
-│
-├── checker/                       # Output checker
-│   ├── chk.cpp                   # Custom checker template (YES/NO)
-│   └── checker_tests.json        # Checker test cases
-│
-├── validator/                     # Input validator
-│   ├── val.cpp                    # Validator implementation
-│   └── validator_tests.json      # Validator test cases
-│
-├── statements/                    # Problem statements (LaTeX)
-│   ├── english/
-│   │   ├── legend.tex
-│   │   ├── input-format.tex
-│   │   ├── output-format.tex
-│   │   └── notes.tex
-│   └── russian/
-│       ├── legend.tex
-│       ├── input-format.tex
-│       └── output-format.tex
-│
-├── tests/                         # Generated test files
-│   ├── test1.txt                 # Sample test
-│   ├── test2.txt                 # Sample test
-│
-└── solutions-outputs/             # Solution outputs (auto-created)
-    ├── main/
-    │   ├── output_test1.txt
-    │   └── output_test*.txt
-    └── <solution-name>/
-        └── output_test*.txt
-```
-
-### Key Files Explained
-
-#### Config.json
-
-The central configuration file that defines:
-
-- Problem metadata (name, tag, limits)
-- Solutions and their types
-- Generators and test ranges
-- Checker configuration
-- Validator configuration
-
-#### solutions/
-
-Contains all solution implementations:
-
-- **acc.cpp**: Main correct solution (required, must be type `main-correct`) (you may change the name as you want but do not forget to update the `Config.json` accordingly)
-- Additional solutions for testing (WA, TLE, etc.)
-- Supports C++, Python, and Java
-
-#### generators/
-
-Contains test generation programs:
-
-- Must accept test number as command-line argument
-- Must output test to stdout
-- Uses testlib.h for random generation
-- ONLY C++ is supported for generators
-
-#### validator/
-
-Contains input validation logic:
-
-- **Validator.cpp**: Checks if test input is valid
-- **validator_tests.json**: Self-tests for validator
-- Uses testlib.h for input reading
-- ONLY C++ is supported for validators
-
-#### checker/
-
-Contains output verification logic:
-
-- **chk.cpp**: Custom checker (if needed)
-- **checker_tests.json**: Self-tests for checker
-- Can use standard checkers (ncmp, wcmp, etc.)
-- ONLY C++ is supported for checkers
-
-#### tests/
-
-Contains all test files:
-
-- Manual tests (test1.txt, test2.txt)
-- Auto-generated tests (test3.txt, test4.txt, ...)
-- Input files used by solutions
-
-#### solutions-outputs/
-
-Auto-created directory containing solution outputs:
-
-- Organized by solution name
-- Used for comparison and verification
-- Generated by `polyman run-solution`
-
----
-
-## Solution Types
-
-Polyman supports various solution types to test different aspects of your problem:
-
-### Main Correct Solution (`main-correct`)
-
-**Purpose**: The reference solution that always produces correct output.
-
-**Requirements**:
-
-- Exactly one per problem
-- Must pass all tests
-- Used as reference for comparing other solutions
-
-**Example Config**:
-
-```json
-{
-  "name": "main",
-  "source": "solutions/acc.cpp",
-  "type": "main-correct"
-}
-```
-
-### Additional Correct Solution (`correct`)
-
-**Purpose**: Alternative correct implementations.
-
-**Use Cases**:
-
-- Testing different algorithms
-- Verifying multiple approaches work
-- Language-specific implementations
-
-**Example**:
-
-```json
-{
-  "name": "python-solution",
-  "source": "solutions/solution.py",
-  "type": "correct"
-}
-```
-
-### Wrong Answer Solution (`wa`)
-
-**Purpose**: Solutions that produce incorrect output.
-
-**Requirements**:
-
-- Must get WA verdict on at least one test
-- Verified by `polyman verify` or when testing solutions
-
-**Example**:
-
-```cpp
-// solutions/WA.cpp
-#include <iostream>
-using namespace std;
-
-int main() {
-    int n;
-    cin >> n;
-    cout << n * n + 1 << endl; // Off by one error
-    return 0;
-}
-```
-
-**Config**:
-
-```json
-{
-  "name": "wa-solution",
-  "source": "solutions/WA.cpp",
-  "type": "wa"
-}
-```
-
-### Time Limit Exceeded Solution (`tle`)
-
-**Purpose**: Solutions that are too slow.
-
-**Use Cases**:
-
-- Testing time limits are appropriate
-- Demonstrating inefficient algorithms
-
-**Example**:
-
-```cpp
-// solutions/TLE.cpp - O(n²) when O(n) is required
-#include <iostream>
-using namespace std;
-
-int main() {
-    int n;
-    cin >> n;
-
-    long long sum = 0;
-    for (int i = 0; i < n; i++) {
-        for (int j = 0; j < n; j++) {
-            sum += i * j;
+      "name": "tests",
+      "generatorScript": {
+        "commands": [
+          {
+            "type": "generator-range",
+            "generator": "gen-all",
+            "range": [1, 20],
+            "group": "main"
+          }
+        ]
+      },
+      "groupsEnabled": true,
+      "groups": [
+        {
+          "name": "main"
         }
-    }
-
-    cout << sum << endl;
-    return 0;
-}
-```
-
-**Config**:
-
-```json
-{
-  "name": "tle-solution",
-  "source": "solutions/TLE.cpp",
-  "type": "tle"
-}
-```
-
-### Memory Limit Exceeded Solution (`mle`)
-
-**Purpose**: Solutions that use too much memory.
-
-**Example**:
-
-```cpp
-// solutions/MLE.cpp
-#include <iostream>
-#include <vector>
-using namespace std;
-
-int main() {
-    int n;
-    cin >> n;
-
-    // Allocate way too much memory
-    vector<int> huge(1000000000);
-    cout << n << endl;
-    return 0;
-}
-```
-
-**Config**:
-
-```json
-{
-  "name": "mle-solution",
-  "source": "solutions/MLE.cpp",
-  "type": "mle"
-}
-```
-
-### Presentation Error Solution (`pe`)
-
-**Purpose**: Solutions with formatting issues.
-
-**Example**:
-
-```cpp
-// solutions/PE.cpp
-#include <iostream>
-using namespace std;
-
-int main() {
-    int n;
-    cin >> n;
-    cout << n * n << " "; // Extra space
-    return 0;
-}
-```
-
-**Config**:
-
-```json
-{
-  "name": "pe-solution",
-  "source": "solutions/PE.cpp",
-  "type": "pe"
-}
-```
-
-### Failed/Runtime Error Solution (`failed`)
-
-**Purpose**: Solutions that crash or exit with errors.
-
-**Example**:
-
-```cpp
-// solutions/RTE.cpp
-#include <iostream>
-#include <vector>
-using namespace std;
-
-int main() {
-    vector<int> v;
-    cout << v[100] << endl; // Out of bounds
-    return 0;
-}
-```
-
-**Config**:
-
-```json
-{
-  "name": "rte-solution",
-  "source": "solutions/RTE.cpp",
-  "type": "failed"
-}
-```
-
-### Multi-Language Solutions
-
-**Python**:
-
-```python
-# solutions/solution.py
-n = int(input())
-print(n * n)
-```
-
-**Java**:
-
-```java
-// solutions/Solution.java
-import java.util.Scanner;
-
-public class Solution {
-    public static void main(String[] args) {
-        Scanner sc = new Scanner(System.in);
-        int n = sc.nextInt();
-        System.out.println(n * n);
-    }
-}
-```
-
-**Config**:
-
-```json
-{
-  "solutions": [
-    {
-      "name": "main",
-      "source": "solutions/Solution.cpp",
-      "type": "main-correct"
-    },
-    {
-      "name": "python-sol",
-      "source": "solutions/solution.py",
-      "type": "correct"
-    },
-    {
-      "name": "java-sol",
-      "source": "solutions/Solution.java",
-      "type": "correct"
+      ]
     }
   ]
 }
 ```
 
+### Required Fields
+
+**Required Fields:**
+
+- `name`
+- `timeLimit`
+- `memoryLimit`
+- `inputFile`
+- `outputFile`
+- `solutions` (must include exactly one with tag `MA`)
+- `checker`
+- `validator`
+- `testsets`
+
+### Optional Fields
+
+**Optional Fields:**
+
+- `description`
+- `tags`
+- `interactive`
+- `statements`
+
 ---
 
-## Checker System
+## Compilation Pipeline
 
-Checkers validate solution output against expected answers. Polyman supports both standard and custom checkers.
+### Language Support
+
+**C++:**
+
+```bash
+g++ -o output source.cpp
+```
+
+**Java:**
+
+```bash
+javac source.java
+java ClassName < input.txt > output.txt
+```
+
+**Python:**
+
+```bash
+python3 source.py < input.txt > output.txt
+```
+
+### Compilation Flow
+
+1. Detect language from file extension
+2. Call appropriate compiler function:
+   - `.cpp` → `compileCPP`
+   - `.java` → `compileJava`
+   - `.py` → Return interpreter command
+3. Handle compilation errors
+4. Return executable path or command
+
+---
+
+## Validation System
+
+### Validator Exit Codes
+
+- `0` → VALID
+- `3` → INVALID
+- Other → Error
+
+### Validation Workflow
+
+1. Compile validator C++ source
+2. For each test file:
+   - Run validator with test as stdin
+   - Check exit code
+   - Log result
+
+### Self-Testing
+
+Validator tests from `validator/validator_tests.json`:
+
+**Test Structure:**
+
+```json
+{
+  "tests": [
+    {
+      "stdin": "test input content",
+      "expectedVerdict": "VALID" | "INVALID"
+    }
+  ]
+}
+```
+
+**Verification:**
+
+1. Create test files in `validator_tests/`
+2. Run validator on each
+3. Compare actual verdict with expected
+4. Report mismatches
+
+---
+
+## Solution Testing
+
+### Execution Flow
+
+1. **Compilation:**
+   - Compile solution via `compileSolution`
+
+2. **Execution:**
+   - For each test:
+     - Run solution with test input
+     - Capture output
+     - Detect TLE/MLE/RTE
+     - Save output to file
+
+3. **Comparison:**
+   - Run checker on (input, output, answer)
+   - Get verdict (OK/WA/PE)
+
+4. **Verification:**
+   - Check verdicts match expected type
+   - Ensure WA solutions fail on ≥1 test
+   - Ensure TLE solutions timeout on ≥1 test
+
+### Verdict Detection
+
+**From Output File First Line:**
+
+- `"Time Limit Exceeded"` → TLE
+- `"Memory Limit Exceeded"` → MLE
+- `"Runtime Error"` → RTE
+- Otherwise → Run checker
+
+**Verdict Tracking:**
+
+```typescript
+type VerdictTracker = {
+  didWA: boolean;
+  didTLE: boolean;
+  didMLE: boolean;
+  didRTE: boolean;
+};
+```
+
+---
+
+## Checker Integration
 
 ### Standard Checkers
 
-Built-in checkers from testlib for common verification patterns:
+Located in `assets/checkers/`.
 
-#### Available Standard Checkers
+**Available:**
 
-| Checker         | Description                          | Use Case                      |
-| --------------- | ------------------------------------ | ----------------------------- |
-| `ncmp.cpp`      | Integer comparison                   | Single or multiple integers   |
-| `wcmp.cpp`      | Token sequence comparison            | Space-separated values        |
-| `fcmp.cpp`      | Line-by-line comparison              | Exact file match              |
-| `dcmp.cpp`      | Double comparison (1E-6)             | Floating-point numbers        |
-| `rcmp.cpp`      | Double comparison (1.5E-6)           | Precise floating-point        |
-| `rcmp4.cpp`     | Double comparison (1E-4)             | Less precise floating-point   |
-| `rcmp6.cpp`     | Double comparison (1E-6)             | Standard floating-point       |
-| `rcmp9.cpp`     | Double comparison (1E-9)             | High precision floating-point |
-| `yesno.cpp`     | YES/NO validation (case-insensitive) | Binary output problems        |
-| `hcmp.cpp`      | Huge integer comparison              | Big integers                  |
-| `uncmp.cpp`     | Unordered sequence comparison        | Sets, any order               |
-| `lcmp.cpp`      | Lines comparison                     | Multiline output              |
-| `pointscmp.cpp` | Points/scores comparison             | Scoring problems              |
-
-#### Using Standard Checkers
-
-**Configuration**:
-
-```json
-{
-  "checker": {
-    "custom": false,
-    "source": "ncmp.cpp"
-  }
-}
-```
-
-**List available checkers**:
-
-```bash
-polyman list-checkers
-```
+- `ncmp.cpp` - Sequence of signed 64-bit integers
+- `icmp.cpp` - Single signed 32-bit integer
+- `wcmp.cpp` - Sequence of tokens (words)
+- `fcmp.cpp` - Line-by-line exact comparison
+- `lcmp.cpp` - Line-by-line comparison ignoring extra whitespace
+- `dcmp.cpp` - Double with absolute/relative error 1E-6
+- `rcmp.cpp` - Double with absolute error 1.5E-6
+- `rcmp4.cpp` - Double with 4 decimal places precision
+- `rcmp6.cpp` - Double with 6 decimal places precision
+- `rcmp9.cpp` - Double with 9 decimal places precision
+- `rncmp.cpp` - Sequence of doubles with absolute error 1.5E-5
+- `acmp.cpp` - Double with maximal absolute error
+- `yesno.cpp` - Single YES/NO answer (case insensitive)
+- `nyesno.cpp` - Multiple YES/NO answers (case insensitive)
+- `hcmp.cpp` - Arbitrary-precision (huge) integers
+- `uncmp.cpp` - Unordered sequence of signed 64-bit integers
+- `caseicmp.cpp` - Case-sensitive single integer comparison
+- `casencmp.cpp` - Case-sensitive sequence of integers
+- `casewcmp.cpp` - Case-sensitive sequence of tokens
 
 ### Custom Checkers
 
-For problems requiring specialized output validation.
+**Location:** `checker/chk.cpp`
 
-#### When to Use Custom Checkers
-
-- Multiple valid answers exist
-- Complex validation logic needed
-- Partial scoring required
-- Format checking beyond standard comparisons
-
-#### Custom Checker Template
+**Interface:**
 
 ```cpp
-#include "testlib.h"
-using namespace std;
-
 int main(int argc, char* argv[]) {
-    // Register checker with testlib
-    registerTestlibCmd(argc, argv);
+  registerTestlibCmd(argc, argv);
 
-    // Read input (from inf stream)
-    int n = inf.readInt();
+  // Read input
+  // Read output (ouf)
+  // Read answer (ans)
 
-    // Read participant output (from ouf stream)
-    int participant_answer = ouf.readInt();
-
-    // Read jury answer (from ans stream)
-    int jury_answer = ans.readInt();
-
-    // Validate
-    if (participant_answer == jury_answer) {
-        quitf(_ok, "Correct answer: %d", participant_answer);
-    } else {
-        quitf(_wa, "Wrong answer: expected %d, found %d",
-              jury_answer, participant_answer);
-    }
+  // Compare and return verdict:
+  // quitf(_ok, "Correct");
+  // quitf(_wa, "Wrong Answer");
+  // quitf(_pe, "Presentation Error");
 }
 ```
 
-#### Checker Streams
+### Checker Execution
 
-- **`inf`**: Input file (test input)
-- **`ouf`**: Output file (participant's output)
-- **`ans`**: Answer file (jury's answer/main solution output)
-
-#### Checker Verdicts
-
-```cpp
-quitf(_ok, "message");        // Accepted
-quitf(_wa, "message");        // Wrong Answer
-quitf(_pe, "message");        // Presentation Error
-quitf(_fail, "message");      // Checker failure (internal error)
-quitf(_dirt, "message");      // Unexpected EOF or format error
-quitf(_points, score, "msg"); // Partial score (0-1)
-```
-
-#### Example: Permutation Checker
-
-```cpp
-#include "testlib.h"
-#include <set>
-using namespace std;
-
-int main(int argc, char* argv[]) {
-    registerTestlibCmd(argc, argv);
-
-    int n = inf.readInt();
-    vector<int> perm(n);
-    set<int> used;
-
-    // Read participant's permutation
-    for (int i = 0; i < n; i++) {
-        perm[i] = ouf.readInt(1, n, format("perm[%d]", i));
-        if (used.count(perm[i])) {
-            quitf(_wa, "Duplicate element %d at position %d", perm[i], i + 1);
-        }
-        used.insert(perm[i]);
-    }
-
-    // Ensure it's a complete permutation
-    if ((int)used.size() != n) {
-        quitf(_wa, "Not a valid permutation: only %d unique elements",
-              (int)used.size());
-    }
-
-    quitf(_ok, "Valid permutation");
-}
-```
-
-#### Configuration for Custom Checker
-
-```json
-{
-  "checker": {
-    "custom": true,
-    "source": "checker/chk.cpp"
-  }
-}
-```
-
-### Testing Checkers
-
-Create `checker/checker_tests.json`:
-
-```json
-{
-  "tests": [
-    {
-      "stdin": "3",
-      "stdout": "1 2 3",
-      "answer": "3 2 1",
-      "verdict": "OK"
-    },
-    {
-      "stdin": "3",
-      "stdout": "1 1 2",
-      "answer": "1 2 3",
-      "verdict": "WA"
-    },
-    {
-      "stdin": "3",
-      "stdout": "1 2 3 4",
-      "answer": "1 2 3",
-      "verdict": "PE"
-    }
-  ]
-}
-```
-
-**Run checker tests**:
+**Command:**
 
 ```bash
-polyman test checker
+./checker <input_file> <output_file> <answer_file>
 ```
 
----
+**Output Parsing:**
 
-## Validator System
-
-Validators ensure test inputs meet problem constraints.
-
-### Purpose
-
-- Verify all test inputs are valid
-- Catch invalid test data before submission
-- Document input constraints formally
-
-### Validator Template
-
-```cpp
-#include "testlib.h"
-using namespace std;
-
-int main(int argc, char* argv[]) {
-    registerValidation(argc, argv);
-
-    // Read and validate input
-    int n = inf.readInt(1, 100000, "n");
-    inf.readEoln();
-
-    inf.readEof();
-    return 0;
-}
-```
-
-### Testlib Validation Functions
-
-#### Integer Reading
-
-```cpp
-// Read integer in range [min, max]
-int n = inf.readInt(1, 100, "n");
-
-// Read long long
-long long x = inf.readLong(1LL, 1000000000000LL, "x");
-
-// Read unsigned long long
-unsigned long long u = inf.readULong(0ULL, 1000000000ULL, "u");
-```
-
-#### String/Token Reading
-
-```cpp
-// Read single token (no spaces)
-string s = inf.readToken();
-
-// Read token matching pattern
-string s = inf.readToken("[a-z]{1,10}", "s");
-
-// Read entire line
-string line = inf.readLine();
-
-// Read line matching pattern
-string line = inf.readLine("[a-z ]+", "line");
-
-// Read word (alphanumeric)
-string word = inf.readWord();
-```
-
-#### Line Ending & EOF
-
-```cpp
-// Expect end of line
-inf.readEoln();
-
-// Expect end of file
-inf.readEof();
-
-// Expect space
-inf.readSpace();
-```
-
-### Example Validators
-
-#### Simple Integer Validator
-
-```cpp
-#include "testlib.h"
-using namespace std;
-
-int main(int argc, char* argv[]) {
-    registerValidation(argc, argv);
-
-    int n = inf.readInt(1, 1000, "n");
-    inf.readEoln();
-    inf.readEof();
-
-    return 0;
-}
-```
-
-#### Array Validator
-
-```cpp
-#include "testlib.h"
-using namespace std;
-
-int main(int argc, char* argv[]) {
-    registerValidation(argc, argv);
-
-    int n = inf.readInt(1, 100000, "n");
-    inf.readEoln();
-
-    for (int i = 0; i < n; i++) {
-        inf.readInt(1, 1000000000, format("a[%d]", i));
-        if (i < n - 1) {
-            inf.readSpace();
-        }
-    }
-    inf.readEoln();
-
-    inf.readEof();
-    return 0;
-}
-```
-
-#### Graph Validator
-
-```cpp
-#include "testlib.h"
-using namespace std;
-
-int main(int argc, char* argv[]) {
-    registerValidation(argc, argv);
-
-    int n = inf.readInt(1, 100000, "n");
-    inf.readSpace();
-    int m = inf.readInt(0, min(200000, n * (n - 1) / 2), "m");
-    inf.readEoln();
-
-    set<pair<int, int>> edges;
-    for (int i = 0; i < m; i++) {
-        int u = inf.readInt(1, n, format("u[%d]", i));
-        inf.readSpace();
-        int v = inf.readInt(1, n, format("v[%d]", i));
-        inf.readEoln();
-
-        // Check no self-loops
-        ensuref(u != v, "Self-loop at edge %d", i + 1);
-
-        // Check no duplicate edges
-        if (u > v) swap(u, v);
-        ensuref(!edges.count({u, v}), "Duplicate edge %d-%d", u, v);
-        edges.insert({u, v});
-    }
-
-    inf.readEof();
-    return 0;
-}
-```
-
-#### String Pattern Validator
-
-```cpp
-#include "testlib.h"
-using namespace std;
-
-int main(int argc, char* argv[]) {
-    registerValidation(argc, argv);
-
-    string s = inf.readToken("[a-z]{1,100}", "s");
-    inf.readEoln();
-    inf.readEof();
-
-    return 0;
-}
-```
-
-### Validator Testing
-
-Create `validator/validator_tests.json`:
-
-```json
-{
-  "tests": [
-    {
-      "stdin": "5\n",
-      "expectedVerdict": "VALID"
-    },
-    {
-      "stdin": "100\n",
-      "expectedVerdict": "VALID"
-    },
-    {
-      "stdin": "0\n",
-      "expectedVerdict": "INVALID"
-    },
-    {
-      "stdin": "101\n",
-      "expectedVerdict": "INVALID"
-    },
-    {
-      "stdin": "5",
-      "expectedVerdict": "INVALID"
-    }
-  ]
-}
-```
-
-**Run validator tests**:
-
-```bash
-polyman test validator
-```
-
-### Best Practices for Validators
-
-1. **Be Strict**: Validate exact format (spaces, newlines, EOF)
-2. **Meaningful Names**: Use descriptive variable names in error messages
-3. **Check Constraints**: Verify all problem constraints
-4. **Test Edge Cases**: Include minimum, maximum, and boundary values
-5. **Use Patterns**: Leverage regex patterns for string validation
+- First word determines verdict
+- `ok`/`OK` → OK
+- `wrong`/`WA` → WA
+- `presentation`/`PE` → PE
 
 ---
 
 ## Generator System
 
-Generators create test cases programmatically using pseudorandom generation.
+### Generator Interface
 
-### Purpose
+**Input:** Test number as command-line argument
 
-- Automate test creation
-- Ensure comprehensive test coverage
-- Generate large tests easily
-- Maintain reproducibility
+**Output:** Test content to stdout
 
-### Generator Template
+**Example:**
 
 ```cpp
-#include "testlib.h"
-using namespace std;
-
 int main(int argc, char* argv[]) {
     registerGen(argc, argv, 1);
-
-    // Get test number from command line
     int testNum = atoi(argv[1]);
 
-    // Generate test based on test number
-    int n = rnd.next(1, 100 * testNum);
+    int n = rnd.next(1, testNum * 100);
     cout << n << endl;
 
     return 0;
 }
 ```
 
-### Testlib Random Functions
+### Generation Flow
 
-#### Integer Generation
+1. Compile generator C++ source
+2. For each test in range:
+   ```bash
+   ./generator <testNum> > tests/test<testNum>.txt
+   ```
+3. Verify test file created
 
-```cpp
-// Random integer in [min, max]
-int x = rnd.next(1, 100);
+### Special Generators
 
-// Random long long
-long long x = rnd.next(1LL, 1000000000000LL);
+**Samples (`name: 'samples'`):**
 
-// Random unsigned
-unsigned x = rnd.next(0u, 1000000000u);
+- No source compilation
+- Uses existing `tests/test1.txt`, `tests/test2.txt`, etc.
 
-// Weighted random (returns 1..n with probability proportional to weight)
-int x = rnd.wnext(1, 100, weight); // weight: -1 (decreasing), 0 (uniform), 1 (increasing)
-```
+**Manual (`name: 'manual'`):**
 
-#### Array Generation
-
-```cpp
-// Random permutation
-vector<int> p(n);
-for (int i = 0; i < n; i++) p[i] = i + 1;
-shuffle(p.begin(), p.end());
-
-// Random array
-vector<int> a(n);
-for (int i = 0; i < n; i++) {
-    a[i] = rnd.next(1, 1000000);
-}
-```
-
-#### String Generation
-
-```cpp
-// Random lowercase string
-string s = rnd.next("[a-z]{10,20}");
-
-// Random pattern-matched string
-string s = rnd.next("[A-Z][a-z]{5,10}");
-```
-
-#### Graph Generation
-
-```cpp
-// Random tree (n vertices)
-cout << n << endl;
-for (int i = 2; i <= n; i++) {
-    int parent = rnd.next(1, i - 1);
-    cout << parent << " " << i << endl;
-}
-
-// Random graph (n vertices, m edges)
-set<pair<int, int>> edges;
-while ((int)edges.size() < m) {
-    int u = rnd.next(1, n);
-    int v = rnd.next(1, n);
-    if (u != v) {
-        if (u > v) swap(u, v);
-        edges.insert({u, v});
-    }
-}
-for (auto [u, v] : edges) {
-    cout << u << " " << v << endl;
-}
-```
-
-### Example Generators
-
-#### Simple Integer Generator
-
-```cpp
-#include "testlib.h"
-using namespace std;
-
-int main(int argc, char* argv[]) {
-    registerGen(argc, argv, 1);
-
-    int testNum = atoi(argv[1]);
-
-    // Scale based on test number
-    int n = rnd.next(1, min(1000, 10 * testNum));
-    cout << n << endl;
-
-    return 0;
-}
-```
-
-#### Array Generator
-
-```cpp
-#include "testlib.h"
-using namespace std;
-
-int main(int argc, char* argv[]) {
-    registerGen(argc, argv, 1);
-
-    int testNum = atoi(argv[1]);
-    int n = rnd.next(1, min(100000, 1000 * testNum));
-
-    cout << n << endl;
-    for (int i = 0; i < n; i++) {
-        if (i > 0) cout << " ";
-        cout << rnd.next(1, 1000000000);
-    }
-    cout << endl;
-
-    return 0;
-}
-```
-
-#### Tree Generator
-
-```cpp
-#include "testlib.h"
-using namespace std;
-
-int main(int argc, char* argv[]) {
-    registerGen(argc, argv, 1);
-
-    int n = atoi(argv[1]);
-    n = min(n * 100, 100000);
-
-    cout << n << endl;
-
-    // Generate random tree
-    for (int i = 2; i <= n; i++) {
-        int parent = rnd.next(1, i - 1);
-        cout << parent << " " << i << endl;
-    }
-
-    return 0;
-}
-```
-
-#### Multiple Test Cases Generator
-
-```cpp
-#include "testlib.h"
-using namespace std;
-
-int main(int argc, char* argv[]) {
-    registerGen(argc, argv, 1);
-
-    int t = rnd.next(1, 10); // Number of test cases
-    cout << t << endl;
-
-    for (int i = 0; i < t; i++) {
-        int n = rnd.next(1, 100);
-        cout << n << endl;
-    }
-
-    return 0;
-}
-```
-
-### Generator Configuration
-
-#### Single Generator
-
-```json
-{
-  "generators": [
-    {
-      "name": "gen-all",
-      "source": "generators/Generator.cpp",
-      "tests-range": [1, 30]
-    }
-  ]
-}
-```
-
-#### Multiple Generators
-
-```json
-{
-  "generators": [
-    {
-      "name": "gen-small",
-      "source": "generators/Small.cpp",
-      "tests-range": [1, 10]
-    },
-    {
-      "name": "gen-medium",
-      "source": "generators/Medium.cpp",
-      "tests-range": [11, 20]
-    },
-    {
-      "name": "gen-large",
-      "source": "generators/Large.cpp",
-      "tests-range": [21, 50]
-    },
-    {
-      "name": "gen-stress",
-      "source": "generators/Stress.cpp",
-      "tests-range": [51, 100]
-    }
-  ]
-}
-```
-
-### Running Generators
-
-```bash
-# Run all generators
-polyman run-generator all
-
-# Run specific generator
-polyman run-generator gen-large
-
-# Run specific generator for specific test
-./gen-large 25 > tests/test25.txt
-```
-
-### Generator Best Practices
-
-1. **Seed Management**: testlib handles seeding automatically based on test number
-2. **Progressive Difficulty**: Scale test size/difficulty with test number
-3. **Edge Cases**: Include manual tests for edge cases (test1.txt, test2.txt)
-4. **Validation**: Always validate generated tests with validator
-5. **Reproducibility**: Same test number = same test (deterministic)
+- No source compilation
+- Uses existing manually created test files
 
 ---
 
-## Troubleshooting
+## Error Handling
 
-### Common Issues
+Polyman provides comprehensive error handling with formatted output and proper exit codes.
 
-#### 1. Validator Compilation Fails
+### Error Flow
 
-**Error:**
+1. **Catch Error:** In action or helper function
+2. **Log Error:** Via `logError`
+3. **Handle Error:**
+   - Exit: `logErrorAndExit`
+   - Throw: `logErrorAndThrow`
 
-```
-Failed to compile validator
-```
+### Error Types
 
-**Solution:**
+**Configuration Errors:**
 
-- Ensure testlib.h is installed: `polyman download-testlib`
-- Check C++ compiler: `g++ --version`
-- Verify validator syntax
+- Config.json not found
+- Invalid JSON
+- Missing required fields
+- No main-correct solution
 
-#### 2. Generator Doesn't Produce Output
+**Compilation Errors:**
 
-**Error:**
+- Source file not found
+- Compilation failed
+- Invalid syntax
 
-```
-Generated test file is empty
-```
+**Execution Errors:**
 
-**Solution:**
+- TLE (timeout)
+- MLE (memory exceeded)
+- RTE (runtime error)
+- Exit code ≠ 0
 
-- Generator must write to stdout
-- Test manually: `./generator 1`
-- Check for runtime errors
+**Validation Errors:**
 
-#### 3. Checker Always Returns WA
+- Test file not found
+- Validator failed
+- Invalid test input
 
-**Solution:**
+**Checker Errors:**
 
-- Test checker manually:
-  ```bash
-  ./checker input.txt output.txt answer.txt
-  ```
-- Check testlib.h integration
-- Verify file reading logic
-
-#### 4. Solution Gets Unexpected Verdict
-
-**Solution:**
-
-- Run solution manually:
-  ```bash
-  ./solution < tests/test1.txt
-  ```
-- Check time/memory limits in Config.json
-- Verify solution logic
-
-#### 5. Tests Not Generated
-
-**Error:**
-
-```
-No tests found in tests/ directory
-```
-
-**Solution:**
+- Checker compilation failed
+- Unexpected verdict format
+- Answer file not found
 
 ---
 
-## Best Practices
+## File Structure
 
-### 1. Start Simple
-
-Begin with minimal configuration:
-
-- One main solution
-- One generator
-- Standard checker (if possible)
-- Basic validator
-
-**Rationale**: Get the core working before adding complexity.
-
-### 2. Test Incrementally
-
-Don't write everything at once. Test after each component:
-
-```bash
-# After writing validator
-polyman test validator
-
-# After writing generator
-polyman run-generator all
-polyman run-validator all
-
-# After writing checker
-polyman test checker
-
-# After adding solutions
-polyman run-solution all all
-
-# Final verification
-polyman verify
-```
-
-**Rationale**: Catch errors early when they're easier to fix.
-
-### 3. Use Standard Checkers When Possible
-
-Before writing a custom checker, verify if a standard one works:
-
-```bash
-polyman list-checkers
-```
-
-**Common Mappings**:
-
-- Integer output → `ncmp.cpp`
-- Float output → `dcmp.cpp` or `rcmp.cpp`
-- Yes/No → `yesno.cpp`
-- Token sequence → `wcmp.cpp`
-- Exact match → `fcmp.cpp`
-
-**Rationale**: Standard checkers are well-tested and save development time.
-
-### 4. Version Control Everything
-
-Initialize git repository from the start:
-
-```bash
-git init
-git add .
-git commit -m "Initial problem setup"
-```
-
-**Recommended `.gitignore`**:
+### Template Structure
 
 ```
-solutions-outputs/
-*.out
-*.exe
-*.o
-*.class
-__pycache__/
-.vscode/
-.idea/
+template/
+├── Config.json                    # Configuration template
+├── GUIDE.md                       # User guide
+├── solutions/
+│   └── acc.cpp                    # Main solution template
+├── generators/
+│   └── gen.cpp                    # Generator template
+├── validator/
+│   ├── val.cpp                    # Validator template
+│   └── validator_tests.json      # Validator tests template
+├── checker/
+│   ├── chk.cpp                    # Custom checker template
+│   └── checker_tests.json        # Checker tests template
+└── statements/
+    └── english/
+        ├── legend.tex
+        └── ...
 ```
 
-**Rationale**: Track changes, enable collaboration, prevent data loss.
+### Generated Project Structure
 
-### 5. Document Edge Cases in Validator Tests
-
-Include comprehensive test cases in `validator_tests.json`:
-
-```json
-{
-  "tests": [
-    { "stdin": "1\n", "expectedVerdict": "VALID" },
-    { "stdin": "100000\n", "expectedVerdict": "VALID" },
-    { "stdin": "0\n", "expectedVerdict": "INVALID" },
-    { "stdin": "100001\n", "expectedVerdict": "INVALID" },
-    { "stdin": "1 \n", "expectedVerdict": "INVALID" },
-    { "stdin": "1", "expectedVerdict": "INVALID" }
-  ]
-}
 ```
-
-**Include**:
-
-- Minimum valid value
-- Maximum valid value
-- Below minimum (invalid)
-- Above maximum (invalid)
-- Format errors (extra spaces, missing newlines)
-
-**Rationale**: Ensures validator correctly handles all cases.
-
-### 6. Use Meaningful Test Grouping
-
-Organize generators by difficulty/purpose:
-
-```json
-{
-  "generators": [
-    {
-      "name": "gen-samples",
-      "source": "generators/Samples.cpp",
-      "tests-range": [1, 2]
-    },
-    {
-      "name": "gen-small",
-      "source": "generators/Small.cpp",
-      "tests-range": [3, 10]
-    },
-    {
-      "name": "gen-medium",
-      "source": "generators/Medium.cpp",
-      "tests-range": [11, 30]
-    },
-    {
-      "name": "gen-large",
-      "source": "generators/Large.cpp",
-      "tests-range": [31, 50]
-    },
-    {
-      "name": "gen-edge-cases",
-      "source": "generators/Edge.cpp",
-      "tests-range": [51, 60]
-    }
-  ]
-}
-```
-
-**Rationale**: Makes test organization clear and maintainable.
-
-### 7. Always Include Manual Sample Tests
-
-Create `tests/test1.txt` and `tests/test2.txt` manually:
-
-```bash
-# tests/test1.txt
-5
-
-# tests/test2.txt
-10
-```
-
-**Rationale**: Samples are often used in problem statements and should be carefully crafted.
-
-### 8. Validate Generated Tests
-
-Always run validator after generation:
-
-```bash
-polyman run-generator all
-polyman run-validator all
-```
-
-**Rationale**: Catches generator bugs before they become test data issues.
-
-### 9. Test WA Solutions Thoroughly
-
-Don't assume WA solutions will fail. Verify:
-
-```bash
-polyman test wa-solution
-```
-
-**Rationale**: Ensures WA solution actually fails (not accidentally correct).
-
-### 10. Use Descriptive Solution Names
-
-Instead of:
-
-```json
-{
-  "name": "sol1",
-  "source": "solutions/s1.cpp",
-  "type": "wa"
-}
-```
-
-Use:
-
-```json
-{
-  "name": "wa-off-by-one",
-  "source": "solutions/WA_OffByOne.cpp",
-  "type": "wa"
-}
-```
-
-**Rationale**: Makes problem debugging and maintenance easier.
-
-### 11. Set Appropriate Time Limits
-
-**Guidelines**:
-
-- Main solution should run in < 50% of time limit
-- TLE solution should exceed limit reliably
-- Account for slower languages (Python ~3x, Java ~2x slower than C++)
-
-**Testing**:
-
-```bash
-# Run main solution and check times
-polyman run-solution main all
-```
-
-**Rationale**: Prevents false positives/negatives on judge systems.
-
-### 12. Keep Config.json Clean and Organized
-
-Use consistent formatting:
-
-```json
-{
-  "name": "problem-name",
-  "tag": "medium",
-  "time-limit": 2000,
-  "memory-limit": 256,
-
-  "solutions": [
-    { "name": "main", "source": "solutions/Main.cpp", "type": "main-correct" },
-    {
-      "name": "cpp-alt",
-      "source": "solutions/Alternative.cpp",
-      "type": "correct"
-    },
-    { "name": "python", "source": "solutions/solution.py", "type": "correct" },
-    { "name": "wa-greedy", "source": "solutions/WA_Greedy.cpp", "type": "wa" },
-    {
-      "name": "tle-bruteforce",
-      "source": "solutions/TLE_Brute.cpp",
-      "type": "tle"
-    }
-  ],
-
-  "generators": [
-    {
-      "name": "gen-small",
-      "source": "generators/Small.cpp",
-      "tests-range": [1, 10]
-    },
-    {
-      "name": "gen-large",
-      "source": "generators/Large.cpp",
-      "tests-range": [11, 30]
-    }
-  ],
-
-  "checker": {
-    "custom": false,
-    "source": "ncmp.cpp"
-  },
-
-  "validator": {
-    "source": "validator/Validator.cpp"
-  }
-}
-```
-
-**Rationale**: Easier to read and maintain.
-
----
-
-## Examples
-
-### Example 1: Simple Math Problem
-
-**Problem**: Given an integer n, output n².
-
-#### Setup
-
-```bash
-polyman new square-problem
-cd square-problem
-```
-
-#### Main Solution
-
-`solutions/Solution.cpp`:
-
-```cpp
-#include <iostream>
-using namespace std;
-
-int main() {
-    long long n;
-    cin >> n;
-    cout << n * n << endl;
-    return 0;
-}
-```
-
-#### Validator
-
-`validator/Validator.cpp`:
-
-```cpp
-#include "testlib.h"
-using namespace std;
-
-int main(int argc, char* argv[]) {
-    registerValidation(argc, argv);
-
-    long long n = inf.readLong(-1000000LL, 1000000LL, "n");
-    inf.readEoln();
-    inf.readEof();
-
-    return 0;
-}
-```
-
-#### Validator Tests
-
-`validator/validator_tests.json`:
-
-```json
-{
-  "tests": [
-    { "stdin": "0\n", "expectedVerdict": "VALID" },
-    { "stdin": "1000000\n", "expectedVerdict": "VALID" },
-    { "stdin": "-1000000\n", "expectedVerdict": "VALID" },
-    { "stdin": "1000001\n", "expectedVerdict": "INVALID" }
-  ]
-}
-```
-
-#### Generator
-
-`generators/Generator.cpp`:
-
-```cpp
-#include "testlib.h"
-using namespace std;
-
-int main(int argc, char* argv[]) {
-    registerGen(argc, argv, 1);
-
-    int testNum = atoi(argv[1]);
-    long long n = rnd.next(-1000000LL, 1000000LL);
-    cout << n << endl;
-
-    return 0;
-}
-```
-
-#### Config
-
-```json
-{
-  "name": "square-problem",
-  "tag": "easy",
-  "time-limit": 1000,
-  "memory-limit": 256,
-
-  "solutions": [
-    {
-      "name": "main",
-      "source": "solutions/Solution.cpp",
-      "type": "main-correct"
-    }
-  ],
-
-  "generators": [
-    {
-      "name": "gen",
-      "source": "generators/Generator.cpp",
-      "tests-range": [1, 20]
-    }
-  ],
-
-  "checker": { "custom": false, "source": "ncmp.cpp" },
-  "validator": { "source": "validator/Validator.cpp" }
-}
-```
-
-#### Verify
-
-```bash
-polyman verify
+my-problem/
+├── Config.json
+├── testlib.h                      # Downloaded via polyman download-testlib
+├── solutions/
+│   ├── Solution.cpp
+│   └── WA.cpp
+├── generators/
+│   └── Generator.cpp
+├── validator/
+│   ├── Validator.cpp
+│   └── validator_tests.json
+├── checker/
+│   ├── chk.cpp
+│   └── checker_tests.json
+├── tests/                         # Generated by 'polyman generate'
+│   ├── test1.txt
+│   └── ...
+└── solutions-outputs/             # Generated by 'polyman run-solution'
+    ├── main/
+    │   ├── output_test1.txt
+    │   └── ...
+    └── wa-solution/
+        └── ...
 ```
 
 ---
 
-### Example 2: Permutation Validation Problem
+## Development Guide
 
-**Problem**: Check if the output is a valid permutation of 1..n (any order accepted).
-
-#### Custom Checker
-
-`checker/chk.cpp`:
-
-```cpp
-#include "testlib.h"
-#include <set>
-using namespace std;
-
-int main(int argc, char* argv[]) {
-    registerTestlibCmd(argc, argv);
-
-    int n = inf.readInt();
-
-    set<int> used;
-    for (int i = 0; i < n; i++) {
-        int x = ouf.readInt(1, n, format("perm[%d]", i));
-
-        if (used.count(x)) {
-            quitf(_wa, "Duplicate element %d at position %d", x, i + 1);
-        }
-        used.insert(x);
-    }
-
-    if ((int)used.size() != n) {
-        quitf(_wa, "Expected %d elements, found %d", n, (int)used.size());
-    }
-
-    quitf(_ok, "Valid permutation of %d elements", n);
-}
-```
-
-#### Checker Tests
-
-`checker/checker_tests.json`:
-
-```json
-{
-  "tests": [
-    {
-      "stdin": "3",
-      "stdout": "1 2 3",
-      "answer": "3 2 1",
-      "verdict": "OK"
-    },
-    {
-      "stdin": "4",
-      "stdout": "4 3 2 1",
-      "answer": "1 2 3 4",
-      "verdict": "OK"
-    },
-    {
-      "stdin": "3",
-      "stdout": "1 1 2",
-      "answer": "1 2 3",
-      "verdict": "WA"
-    },
-    {
-      "stdin": "3",
-      "stdout": "1 2 4",
-      "answer": "1 2 3",
-      "verdict": "WA"
-    }
-  ]
-}
-```
-
-#### Config
-
-```json
-{
-  "name": "permutation-check",
-  "tag": "medium",
-  "time-limit": 1000,
-  "memory-limit": 256,
-
-  "solutions": [
-    {
-      "name": "main",
-      "source": "solutions/Solution.cpp",
-      "type": "main-correct"
-    }
-  ],
-
-  "generators": [
-    {
-      "name": "gen",
-      "source": "generators/Generator.cpp",
-      "tests-range": [1, 20]
-    }
-  ],
-
-  "checker": { "custom": true, "source": "checker/chk.cpp" },
-  "validator": { "source": "validator/Validator.cpp" }
-}
-```
-
----
-
-### Example 3: Graph Problem with Multiple Generators
-
-**Problem**: Given a graph, solve some graph problem.
-
-#### Generators
-
-`generators/SmallTree.cpp`:
-
-```cpp
-#include "testlib.h"
-using namespace std;
-
-int main(int argc, char* argv[]) {
-    registerGen(argc, argv, 1);
-
-    int n = rnd.next(5, 20);
-    cout << n << endl;
-
-    // Generate tree
-    for (int i = 2; i <= n; i++) {
-        int parent = rnd.next(1, i - 1);
-        cout << parent << " " << i << endl;
-    }
-
-    return 0;
-}
-```
-
-`generators/LargeGraph.cpp`:
-
-```cpp
-#include "testlib.h"
-#include <set>
-using namespace std;
-
-int main(int argc, char* argv[]) {
-    registerGen(argc, argv, 1);
-
-    int n = rnd.next(1000, 5000);
-    int m = rnd.next(n - 1, min(10000, n * (n - 1) / 2));
-
-    cout << n << " " << m << endl;
-
-    set<pair<int, int>> edges;
-
-    // Ensure connected (tree)
-    for (int i = 2; i <= n; i++) {
-        int parent = rnd.next(1, i - 1);
-        int u = min(parent, i), v = max(parent, i);
-        edges.insert({u, v});
-    }
-
-    // Add random edges
-    while ((int)edges.size() < m) {
-        int u = rnd.next(1, n);
-        int v = rnd.next(1, n);
-        if (u != v) {
-            if (u > v) swap(u, v);
-            edges.insert({u, v});
-        }
-    }
-
-    for (auto [u, v] : edges) {
-        cout << u << " " << v << endl;
-    }
-
-    return 0;
-}
-```
-
-#### Config
-
-```json
-{
-  "name": "graph-problem",
-  "tag": "hard",
-  "time-limit": 3000,
-  "memory-limit": 512,
-
-  "solutions": [
-    {
-      "name": "main",
-      "source": "solutions/Solution.cpp",
-      "type": "main-correct"
-    },
-    { "name": "tle-naive", "source": "solutions/TLE.cpp", "type": "tle" }
-  ],
-
-  "generators": [
-    {
-      "name": "gen-small-tree",
-      "source": "generators/SmallTree.cpp",
-      "tests-range": [1, 10]
-    },
-    {
-      "name": "gen-large-graph",
-      "source": "generators/LargeGraph.cpp",
-      "tests-range": [11, 30]
-    }
-  ],
-
-  "checker": { "custom": false, "source": "ncmp.cpp" },
-  "validator": { "source": "validator/Validator.cpp" }
-}
-```
-
----
-
-## FAQ
-
-### General Questions
-
-**Q: What is Polyman?**  
-A: Polyman is a CLI tool for Codeforces problem setters to automate problem preparation, including test generation, validation, and solution verification.
-
-**Q: Do I need to know testlib.h?**  
-A: Yes, basic testlib knowledge is recommended. See [testlib documentation](https://github.com/MikeMirzayanov/testlib).
-
----
-
-### Installation & Setup
-
-**Q: What compilers are supported?**  
-A: Polyman supports g++ (C++), Python 3, and Java. C++23 features are used in templates.
-
-**Q: How do I install testlib.h?**  
-A:
+### Building from Source
 
 ```bash
-polyman download-testlib
-sudo cp testlib.h /usr/local/include/
+git clone https://github.com/HamzaHassanain/polyman.git
+cd polyman
+npm install
+npm run build
+npm link
 ```
 
-**Q: Can I use Polyman on Windows?**  
-A: Yes, but you need MinGW or WSL for C++ compilation.
+### Code Structure
 
----
+**Entry Points:**
 
-### Configuration
+- `src/cli.ts` - CLI commands
+- `src/actions.ts` - Action functions
 
-**Q: What's the difference between `main-correct` and `correct`?**  
-A: `main-correct` is the reference solution (exactly one required). `correct` solutions are additional correct implementations.
+**Core Logic:**
 
-**Q: Can I have multiple `main-correct` solutions?**  
-A: No, exactly one `main-correct` solution is required per problem.
+- `src/helpers/` - Domain modules
+- `src/executor.ts` - Process execution
+- `src/formatter.ts` - Output formatting
 
-**Q: What time limits should I use?**  
-A: Set limits so the main solution runs in < 50% of the time limit. Common values: 1000ms (easy), 2000ms (medium), 3000ms (hard).
+**Types:**
 
-**Q: How do I set memory limits?**  
-A: Typical values: 256MB (standard), 512MB (large data structures), 1024MB (special cases).
+- `src/types.d.ts` - TypeScript type definitions
 
----
+**Assets:**
 
-### Generators
+- `assets/checkers/` - Standard checkers
+- `template/` - Problem template
 
-**Q: Why use generators instead of manual tests?**  
-A: Generators enable:
+### Adding New Features
 
-- Large test creation
-- Reproducibility
-- Comprehensive coverage
-- Edge case testing
+**New Command:**
 
-**Q: How are test numbers used?**  
-A: The test number is passed as `argv[1]` to the generator. Use it to scale difficulty or change test properties.
+1. Add action function in `src/actions.ts`
+2. Register command in `src/cli.ts`
+3. Document in README and DOCUMENTATION
 
-**Q: Can I create tests manually?**  
-A: Yes, place them in `tests/test1.txt`, `tests/test2.txt`, etc.
+**New Helper Module:**
 
-**Q: How do I generate specific test?**  
-A:
+1. Create file in `src/helpers/`
+2. Export functions
+3. Import in `src/actions.ts`
+
+**New Solution Type:**
+
+1. Add type to `src/types.d.ts`
+2. Handle in `getExpectedCheckerVerdict`
+3. Update verdict validation in `src/helpers/solution.ts`
+
+### Testing
 
 ```bash
-./generator 5 > tests/test5.txt
+# Lint code
+npm run lint
+
+# Build
+npm run build
+
+# Manual testing
+polyman new test-problem
+cd test-problem
+# Test commands...
 ```
+
+### ESLint Configuration
+
+See `eslint.config.js` for linting rules.
+
+**Key Rules:**
+
+- TypeScript strict mode
+- Prettier integration
+- No unused variables (except prefixed with `_`)
+- No explicit `any` (warning)
 
 ---
 
-### Validators
+## API Reference
 
-**Q: What happens if validator fails?**  
-A: The test is marked as invalid. Fix the generator or test file.
+For detailed API documentation of all functions, classes, and types, see the auto-generated TypeDoc documentation.
 
-**Q: Can I skip validator?**  
-A: Not recommended. Validators ensure test quality and catch generator bugs.
+### Key Exports
 
-**Q: How strict should validators be?**  
-A: Very strict. Validate exact format including spaces, newlines, and EOF.
+**From `src/actions.ts`:**
 
-**Q: What's the difference between `readEoln()` and `readEof()`?**  
-A:
+- `createTemplate`
+- `downloadTestlib`
+- `listAvailableCheckers`
+- `generateTests`
+- `validateTests`
+- `solveTests`
+- `testWhat`
+- `fullVerification`
 
-- `readEoln()`: Expects end of line (`\n`)
-- `readEof()`: Expects end of file (no more data)
+**From `src/helpers/utils.ts`:**
 
----
+- `compileCPP`
+- `compileJava`
+- `readConfigFile`
+- `ensureDirectoryExists`
+- `removeDirectory`
+- `logError`
+- `logErrorAndExit`
 
-### Checkers
+**From `src/helpers/generator.ts`:**
 
-**Q: When should I use custom checkers?**  
-A: When:
+- `ensureGeneratorsExist`
+- `runMatchingGenerators`
 
-- Multiple valid answers exist
-- Answer order doesn't matter
-- Complex validation logic needed
-- Partial scoring required
+**From `src/helpers/validator.ts`:**
 
-**Q: What's the difference between `inf`, `ouf`, and `ans`?**  
-A:
+- `ensureValidatorExists`
+- `validateSingleTest`
+- `validateAllTests`
+- `testValidatorItself`
 
-- `inf`: Input file (test input)
-- `ouf`: Output file (participant's output)
-- `ans`: Answer file (jury's answer)
+**From `src/helpers/checker.ts`:**
 
-**Q: Can I use standard checkers for floating-point?**  
-A: Yes, use `dcmp.cpp` (1E-6), `rcmp.cpp` (1.5E-6), or `rcmp9.cpp` (1E-9).
+- `ensureCheckerExists`
+- `compileChecker`
+- `runChecker`
+- `testCheckerItself`
+- `getExpectedCheckerVerdict`
 
-**Q: How do I test custom checkers?**  
-A:
+**From `src/helpers/solution.ts`:**
 
-```bash
-polyman test checker
-```
+- `validateSolutionsExist`
+- `ensureMainSolutionExists`
+- `ensureSolutionExists`
+- `getMainSolution`
+- `runSingleSolutionOnTests`
+- `runMatchingSolutionsOnTests`
+- `testSolutionAgainstMainCorrect`
+- `startTheComparisonProcess`
 
----
+**From `src/formatter.ts`:**
 
-### Solutions
+- `fmt` (Formatter instance)
 
-**Q: How do I test WA solutions?**  
-A:
+**From `src/executor.ts`:**
 
-```bash
-polyman test wa-solution-name
-```
+- `executor`
 
-**Q: What if WA solution passes all tests?**  
-A: Add more test cases that expose the bug, or fix the WA solution to actually be wrong.
+**From `src/types.d.ts`:**
 
-**Q: Can I use Python for main solution?**  
-A: Yes, but be mindful of time limits (Python is ~3x slower than C++).
-
-**Q: How do I handle TLE solutions?**  
-A: Set `time-limit` in Config.json appropriately. TLE solutions should reliably exceed the limit on large tests.
-
----
-
-### Testing & Verification
-
-**Q: What does `polyman verify` do?**  
-A: Runs the complete workflow:
-
-1. Generate all tests
-2. Test validator
-3. Validate all tests
-4. Test checker
-5. Run all solutions
-6. Verify solution verdicts
-
-**Q: How long should verification take?**  
-A: Depends on problem complexity. Typically seconds to minutes.
-
-**Q: What if verification fails?**  
-A: Check the error message. Common issues:
-
-- WA solution doesn't fail
-- TLE solution doesn't timeout
-- Validator fails on generated test
-- Checker gives wrong verdict
-
-**Q: Can I run specific tests only?**  
-A: Yes:
-
-```bash
-polyman run-solution main 5
-polyman run-validator 10
-```
+- `ConfigFile`
+- `LocalSolution`
+- `LocalGenerator`
+- `LocalChecker`
+- `LocalValidator`
+- `LocalTestset`
+- `LocalTestGroup`
+- `GeneratorScript`
+- `GeneratorScriptCommand`
+- `SolutionTag`
+- `SolutionSourceType`
+- `TestlibSourceType`
+- `CppSourceType`
+- `JavaSourceType`
+- `PythonSourceType`
+- `Statement`
+- `CheckerVerdict`
+- `ValidatorVerdict`
+- `VerdictTracker`
 
 ---
 
-### Troubleshooting
+## Implementation Notes
 
-**Q: Generator produces empty test files**  
-A: Ensure generator outputs to stdout, not stderr. Check for runtime errors.
+Important considerations for development, deployment, and platform-specific behavior.
 
-**Q: Validator always fails**  
-A: Check:
+### Performance Considerations
 
-- testlib.h is included
-- Exact format matching (spaces, newlines, EOF)
-- Constraint bounds
+- **Parallel Execution:** Currently sequential; could parallelize test generation and solution execution
+- **Caching:** Compiled executables are not cached between runs
+- **Memory Limiting:** Only supported on Linux via `ulimit`
 
-**Q: Checker gives unexpected verdicts**  
-A: Test manually:
+### Platform Differences
 
-```bash
-./checker tests/test1.txt solutions-outputs/main/output_test1.txt solutions-outputs/main/output_test1.txt
-```
+**Linux:**
 
-**Q: Solution times out unexpectedly**  
-A: Check:
+- Full support for memory limiting
+- Recommended platform
 
-- Time limit is reasonable
-- Solution algorithm complexity
-- Large test generation
+**macOS:**
 
-**Q: Compilation fails**  
-A: Verify:
+- Memory limiting not supported
+- Warning shown when memory limit specified
 
-- C++ compiler installed (`g++ --version`)
-- testlib.h in include path
-- Correct C++ standard (C++17 or later)
+**Windows:**
+
+- Memory limiting not supported
+- Requires MinGW or WSL for C++ compilation
+
+### Security
+
+- **Command Injection:** Uses `spawn` with `shell: true`; sanitize user input if accepting external configs
+- **File System:** Direct file operations; validate paths to prevent directory traversal
+
+### Future Enhancements
+
+- Parallel test execution
+- Compiled executable caching
+- Windows native memory limiting
+- Progress bars for long operations
+- Config validation schema
+- Interactive mode
 
 ---
 
-## Contributing
+## Related Documentation
 
-We welcome contributions to Polyman! Here's how you can help:
-
-### Reporting Bugs
-
-1. **Check existing issues** on GitHub
-2. **Create detailed bug report** including:
-   - Polyman version (`polyman --version`)
-   - Operating system
-   - Steps to reproduce
-   - Expected vs actual behavior
-   - Error messages/logs
-
-### Suggesting Features
-
-1. **Open feature request** on GitHub Issues
-2. **Describe use case** and benefits
-3. **Provide examples** if applicable
-
-### Contributing Code
-
-1. **Fork the repository**
-2. **Create feature branch**: `git checkout -b feature/your-feature`
-3. **Make changes** with clear commits
-4. **Add tests** for new functionality
-5. **Update documentation** as needed
-6. **Submit pull request**
-
-### Code Style
-
-- Follow existing TypeScript/JavaScript conventions
-- Use ESLint and Prettier for formatting
-- Write meaningful commit messages
-- Add JSDoc comments for new functions
-
-### Testing Contributions
-
-Before submitting:
-
-```bash
-npm run lint        # Check code style
-npm run build       # Ensure builds successfully
-npm test            # Run test suite (if available)
-```
-
-### Documentation Improvements
-
-- Fix typos and unclear explanations
-- Add examples and use cases
-- Improve existing sections
-- Translate to other languages
-
-### Community
-
-- Be respectful and constructive
-- Help others in issues and discussions
-- Share your problems and templates
+- **User Guide:** `README.md`
+- **Template Guide:** `template/GUIDE.md`
+- **Testlib Documentation:** [testlib on GitHub](https://github.com/MikeMirzayanov/testlib)
+- **Polygon System:** [Codeforces Polygon](https://polygon.codeforces.com/)
 
 ---
 
 ## License
 
-Polyman is released under the MIT License. See [LICENSE](LICENCE) file for details.
+MIT License - See `LICENCE` file for details.
 
 ---
 
-## Support
-
-For issues, questions, and discussions:
-
-- **GitHub Issues**: [polyman/issues](https://github.com/HamzaHassanain/polyman/issues)
-- **Documentation**: [Online Docs](https://hamzahassanain.github.io/polyman/)
-- **Repository**: [github.com/HamzaHassanain/polyman](https://github.com/HamzaHassanain/polyman)
+**This technical documentation is auto-generated alongside TypeDoc API documentation. For the latest version, visit the [online documentation](https://hamzahassanain.github.io/polyman/).**

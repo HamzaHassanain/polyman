@@ -3,220 +3,333 @@
  * Provides functions to run test generators and create test files.
  */
 
-import fs from 'fs';
-import path from 'path';
+import type {
+  LocalGenerator,
+  GeneratorScriptCommand,
+  LocalTestset,
+} from '../types';
 import { executor } from '../executor';
-import { compileCPP, DEFAULT_TIMEOUT, DEFAULT_MEMORY_LIMIT } from './utils';
+import path from 'path';
+import fs from 'fs';
+import {
+  compileCPP,
+  throwError,
+  ensureDirectoryExists,
+  getCompiledCommandToRun,
+} from './utils';
+import { DEFAULT_TIMEOUT, DEFAULT_MEMORY_LIMIT } from './utils';
 import { fmt } from '../formatter';
-import { Generator } from '../types';
+
+/**
+ * Runs a generator program to create a test file.
+ * Executes the compiled generator with given arguments and redirects output to a file.
+ *
+ * @param {string} execCommand - Path to compiled generator executable
+ * @param {string[]} args - Arguments to pass to the generator
+ * @param {string} outputFilePath - Path where test output will be written
+ *
+ * @throws {Error} If generator execution fails
+ * @throws {Error} If generator exceeds time or memory limits (exits process)
+ *
+ * @example
+ * await runGenerator(
+ *   './gen-random',
+ *   ['1', '100'],
+ *   'tests/test1.txt'
+ * );
+ */
+export async function runGenerator(
+  execCommand: string,
+  args: string[],
+  outputFilePath: string
+) {
+  const argsString = args.join(' ');
+  await executor.executeWithRedirect(
+    `${execCommand} ${argsString}`,
+    {
+      timeout: DEFAULT_TIMEOUT,
+      memoryLimitMB: DEFAULT_MEMORY_LIMIT,
+      silent: true,
+      onTimeout: () => {
+        fmt.error(
+          `${fmt.cross()} ${fmt.bold('Generator Unexpectedly Exceeded Time Limit!')} (${DEFAULT_TIMEOUT}ms)`
+        );
+        executor.cleanup();
+        process.exit(1);
+      },
+      onMemoryExceeded: () => {
+        fmt.error(
+          `${fmt.cross()} ${fmt.bold('Generator Unexpectedly Exceeded Memory Limit!')} (${DEFAULT_MEMORY_LIMIT} MB)`
+        );
+        executor.cleanup();
+        process.exit(1);
+      },
+    },
+    undefined,
+    outputFilePath
+  );
+}
 
 /**
  * Ensures generators are defined in configuration.
- * Type assertion function that exits gracefully if no generators exist.
+ * Type assertion function that throws if no generators exist.
  *
- * @param {Generator[] | undefined} generators - Generators array to validate
+ * @param {LocalGenerator[] | undefined} generators - Generators array to validate
+ *
+ * @throws {Error} If no generators are defined in configuration
  *
  * @example
  * const config = readConfigFile();
  * ensureGeneratorsExist(config.generators);
- * // Now TypeScript knows generators is defined and non-empty
+ * // Now TypeScript knows generators is defined
  */
 export function ensureGeneratorsExist(
-  generators: Generator[] | undefined
-): asserts generators is Generator[] {
+  generators: LocalGenerator[] | undefined
+): asserts generators is LocalGenerator[] {
   if (!generators || generators.length === 0) {
-    fmt.warning(
-      `${fmt.warningIcon()} No test generators defined in the configuration file.`
-    );
-    process.exit(0);
+    throw new Error('No test generators defined in the configuration file.');
   }
 }
 
 /**
- * Runs matching test generators based on name.
- * Compiles and executes generators, creating test files in the tests/ directory.
- * Fails fast - stops on first generator failure.
+ * Compiles a generator program.
+ * Wrapper around compileCPP with consistent error handling.
  *
- * @param {Generator[]} generators - Array of generator configurations
- * @param {string} generatorName - Name of generator to run, or 'all' for all generators
+ * @param {LocalGenerator} generator - Generator configuration
+ * @returns {Promise<string>} Path to compiled generator executable
  *
- * @throws {Error} If no generator matches the name
- * @throws {Error} If any generator fails to compile or run
- *
- * @example
- * // From actions.ts generateTests
- * const config = readConfigFile();
- * await runMatchingGenerators(config.generators, 'gen-random');
- *
- * @example
- * // Run all generators
- * await runMatchingGenerators(config.generators, 'all');
- */
-export async function runMatchingGenerators(
-  generators: Generator[],
-  generatorName: string
-) {
-  let didRunAGenerator = false;
-  let someFailed = false;
-  for (const generator of generators) {
-    if (generator.name === 'samples' || generator.name === 'manual') continue;
-    if (generatorName === 'all' || generator.name === generatorName) {
-      fmt.log(
-        `  ${fmt.dim('→')} ${fmt.highlight(generator.name)} ${fmt.dim('(compiling and running...)')}`
-      );
-      try {
-        await runGenerator(generator);
-        const [start, end] = generator['tests-range'];
-        const totalTests = end - start + 1;
-
-        fmt.log(
-          `    ${fmt.bold(`${totalTests}/${totalTests} test${totalTests > 1 ? 's' : ''}`)} generated successfully.`
-        );
-      } catch (error) {
-        handleGenerationError(error);
-        someFailed = true;
-      }
-    }
-
-    didRunAGenerator = true;
-  }
-
-  if (!didRunAGenerator && generatorName !== 'all') {
-    throw new Error(`No generator named "${generatorName}" found`);
-  }
-
-  if (someFailed) {
-    throw new Error('Some generators failed to run');
-  }
-}
-
-/**
- * Handles test generation errors.
- * Logs error message and optionally exits process.
- *
- * @param {unknown} error - Error that occurred during generation
- * @param {boolean} [isCancelationPoint=false] - Whether to exit process on error
- *
- * @example
- * try {
- *   await runGenerator(generator);
- * } catch (error) {
- *   handleGenerationError(error, false);
- * }
- */
-export function handleGenerationError(
-  error: unknown,
-  isCancelationPoint = false
-) {
-  const message = error instanceof Error ? error.message : String(error);
-  fmt.error(`  ${fmt.cross()} ${message}`);
-  if (isCancelationPoint) process.exit(1);
-}
-
-/**
- * Runs a single test generator.
- * Compiles the generator and generates all tests in its range.
- *
- * @private
- * @param {Generator} generator - Generator configuration
- *
- * @throws {Error} If generator has no source file
  * @throws {Error} If compilation fails
- * @throws {Error} If test generation fails
  *
  * @example
- * // Generates tests from test1.txt to test10.txt
- * await runGenerator({
- *   name: 'gen-random',
- *   source: 'generators/random.cpp',
- *   'tests-range': [1, 10]
- * });
+ * const path = await compileGenerator({ name: 'gen', source: 'generators/gen.cpp' });
  */
-async function runGenerator(generator: Generator) {
-  if (!generator.source) {
-    throw new Error(`Generator ${generator.name} has no source file specified`);
-  }
-
+export async function compileGenerator(generator: LocalGenerator) {
   try {
-    const testsDir = ensureTestsDirectory();
+    if (!generator.source) {
+      throw new Error(
+        `Generator ${generator.name} has no source file specified`
+      );
+    }
     const compiledPath = await compileCPP(generator.source);
-    await generateTestFiles(compiledPath, generator, testsDir);
+    return compiledPath;
   } catch (error) {
     throw error instanceof Error
       ? error
-      : new Error(
-          `Failed to run generator ${generator.name}:\n\t ${String(error)}`
-        );
-  } finally {
-    executor.cleanup();
+      : new Error(`Failed to compile generator ${generator.name}`);
   }
 }
 
 /**
- * Generates test files using a compiled generator.
- * Calls the generator with test numbers as arguments and redirects output to files.
+ * Compiles all generators needed for the given commands.
+ * Returns a map of generator names to compiled paths.
  *
- * @private
- * @param {string} compiledPath - Path to compiled generator executable
- * @param {Generator} generator - Generator configuration
- * @param {string} testsDir - Directory where test files will be created
+ * @param {GeneratorScriptCommand[]} commands - Generator commands to analyze
+ * @param {LocalGenerator[]} generators - Available generators
+ * @returns {Promise<Map<string, string>>} Map of generator name to compiled path
  *
- * @throws {Error} If test generation fails for any test number
+ * @throws {Error} If any generator compilation fails
+ * @throws {Error} If a required generator is not found
  *
  * @example
- * // Generates test1.txt, test2.txt, test3.txt in tests/ directory
- * await generateTestFiles('./gen-random', {
- *   name: 'gen-random',
- *   'tests-range': [1, 3]
- * }, 'tests');
+ * const compiledPaths = await compileAllGenerators(commands, generators);
+ * const genPath = compiledPaths.get('gen-random');
  */
-async function generateTestFiles(
-  compiledPath: string,
-  generator: Generator,
-  testsDir: string
-) {
-  const [start, end] = generator['tests-range'];
-  for (let i = start; i <= end; i++) {
-    const outputFilePath = path.join(testsDir, `test${i}.txt`);
+export async function compileAllGenerators(
+  commands: GeneratorScriptCommand[],
+  generators: LocalGenerator[]
+): Promise<Map<string, string>> {
+  const compiledGenerators = new Map<string, string>();
 
-    try {
-      await executor.executeWithRedirect(
-        `${compiledPath} ${i}`,
-        {
-          timeout: DEFAULT_TIMEOUT,
-          memoryLimitMB: DEFAULT_MEMORY_LIMIT,
-          silent: true,
-        },
-        undefined,
-        outputFilePath
-      );
-    } catch (error) {
-      throw error instanceof Error
-        ? error
-        : new Error(
-            `Failed to generate test ${i} using generator ${generator.name}: ${String(
-              error
-            )}`
+  for (const command of commands) {
+    if (
+      (command.type === 'generator-single' ||
+        command.type === 'generator-range') &&
+      command.generator
+    ) {
+      if (!compiledGenerators.has(command.generator)) {
+        const generator = generators.find(g => g.name === command.generator);
+        if (!generator) {
+          throw new Error(
+            `Generator "${command.generator}" not found in configuration`
           );
+        }
+        try {
+          await compileGenerator(generator);
+          compiledGenerators.set(
+            command.generator,
+            getCompiledCommandToRun(generator)
+          );
+        } catch (error) {
+          throwError(error, `Failed to compile generator ${command.generator}`);
+        }
+      }
     }
   }
+
+  return compiledGenerators;
 }
 
 /**
- * Ensures the tests directory exists.
- * Creates the directory if it doesn't exist.
+ * Compiles all unique generators used across all testsets.
  *
- * @private
- * @returns {string} Absolute path to tests directory
+ * @param {LocalTestset[]} testsets - Testsets to analyze for generator usage
+ * @param {LocalGenerator[]} generators - Available generators
+ * @returns {Promise<void>} Resolves when all generators are compiled
+ *
+ * @throws {Error} If any generator compilation fails
  *
  * @example
- * const testsDir = ensureTestsDirectory();
- * // Returns: '/path/to/problem/tests'
+ * await compileGeneratorsForTestsets(config.testsets, config.generators);
  */
-function ensureTestsDirectory(): string {
-  const testsDir = path.resolve(process.cwd(), 'tests');
-  if (!fs.existsSync(testsDir)) {
-    fs.mkdirSync(testsDir);
+export async function compileGeneratorsForTestsets(
+  testsets: LocalTestset[],
+  generators: LocalGenerator[]
+): Promise<void> {
+  const uniqueGeneratorNames = new Set<string>();
+
+  // Collect all unique generator names from all testsets
+  for (const testset of testsets) {
+    if (testset.generatorScript?.commands) {
+      for (const command of testset.generatorScript.commands) {
+        if (
+          (command.type === 'generator-single' ||
+            command.type === 'generator-range') &&
+          command.generator
+        ) {
+          uniqueGeneratorNames.add(command.generator);
+        }
+      }
+    }
   }
-  return testsDir;
+
+  // Compile each unique generator
+  for (const generatorName of uniqueGeneratorNames) {
+    const generator = generators.find(g => g.name === generatorName);
+    if (!generator) {
+      throw new Error(
+        `Generator "${generatorName}" not found in configuration`
+      );
+    }
+    await compileGenerator(generator);
+  }
+}
+
+/**
+ * Executes generation script commands to create test files.
+ * Processes each command in the script, handling both manual and generated tests.
+ * Requires generators to be pre-compiled (use compileAllGenerators first).
+ *
+ * @param {GeneratorScriptCommand[]} commands - Array of generation commands
+ * @param {LocalGenerator[]} generators - Available generators
+ * @param {string} [outputDir] - Output directory for tests (defaults to ./tests)
+ * @param {number} [startIndex] - Starting test index (defaults to 1)
+ *
+ * @throws {Error} If any command fails to execute
+ *
+ * @example
+ * await executeGeneratorScript(
+ *   [
+ *     { type: 'manual', manualFile: './tests/manual/sample.txt' },
+ *     { type: 'generator-single', generator: 'gen-random', args: ['1'] }
+ *   ],
+ *   generators,
+ *   './tests/my-testset'
+ * );
+ */
+export async function executeGeneratorScript(
+  commands: GeneratorScriptCommand[],
+  generators: LocalGenerator[],
+  outputDir: string
+) {
+  let someFailed = false;
+  const testsDir = outputDir || path.resolve(process.cwd(), 'testsets');
+  ensureDirectoryExists(testsDir);
+
+  // Get compiled paths for all generators
+  const compiledGenerators = new Map<string, string>();
+  for (const generator of generators) {
+    const compiledPath = getCompiledCommandToRun(generator);
+    compiledGenerators.set(generator.name, compiledPath);
+  }
+  let testNumber = 1;
+  for (const command of commands) {
+    try {
+      if (command.type === 'manual' && command.manualFile) {
+        // Copy manual test file
+        const testFilePath = path.join(testsDir, `test${testNumber++}.txt`);
+        await copyManualTest(command.manualFile, testFilePath);
+      } else if (command.type === 'generator-single' && command.generator) {
+        // Run generator once
+        const testFilePath = path.join(testsDir, `test${testNumber++}.txt`);
+        const compiledPath = compiledGenerators.get(command.generator);
+        if (!compiledPath) {
+          throw new Error(`Generator "${command.generator}" not compiled`);
+        }
+        await runGenerator(
+          compiledPath,
+          [command.number!.toString()],
+          testFilePath
+        );
+      } else if (command.type === 'generator-range' && command.generator) {
+        // Run generator multiple times for a range
+        const compiledPath = compiledGenerators.get(command.generator);
+        if (!compiledPath) {
+          throw new Error(`Generator "${command.generator}" not compiled`);
+        }
+        if (!command.range || command.range.length !== 2) {
+          throw new Error(
+            `Generator range command for "${command.generator}" missing valid range [start, end]`
+          );
+        }
+        const [start, end] = command.range;
+        for (let i = start; i <= end; i++) {
+          const testFilePath = path.join(testsDir, `test${testNumber++}.txt`);
+          const args = [i.toString()];
+          await runGenerator(compiledPath, args, testFilePath);
+        }
+      } else {
+        throw new Error(`Invalid command type or missing required fields`);
+      }
+    } catch (error) {
+      someFailed = true;
+      fmt.error(
+        `  ${fmt.cross()} Test ${command.index} generation failed:\n\t${(error as Error).message}`
+      );
+    }
+  }
+
+  if (someFailed) {
+    throw new Error('Some tests failed to generate');
+  }
+}
+
+/**
+ * Copies a manual test file to the tests directory.
+ *
+ * @private
+ * @param {string} sourceFilePath - Path to manual test file
+ * @param {string} destFilePath - Destination path in tests directory
+ *
+ * @throws {Error} If file doesn't exist or copy fails
+ *
+ * @example
+ * await copyManualTest('./tests/manual/sample1.txt', 'tests/test1.txt');
+ */
+async function copyManualTest(
+  sourceFilePath: string,
+  destFilePath: string
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const sourcePath = path.resolve(process.cwd(), sourceFilePath);
+    if (!fs.existsSync(sourcePath)) {
+      return reject(new Error(`Manual test file not found: ${sourceFilePath}`));
+    }
+
+    fs.copyFile(sourcePath, destFilePath, err => {
+      if (err) {
+        return reject(new Error(`Failed to copy manual test: ${err.message}`));
+      }
+      resolve();
+    });
+  });
 }

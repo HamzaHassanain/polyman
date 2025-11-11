@@ -1,10 +1,10 @@
 {
   "tests": [
     {
-      "stdin": "MY BE INGNORED",
-      "stdout": "YeS",
+      "input": "MY BE INGNORED",
+      "output": "YeS",
       "answer": "YES",
-      "verdict": "ok"
+      "expectedVerdict": "OK"
     }
   ]
 }

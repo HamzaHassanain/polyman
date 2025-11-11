@@ -1,9 +1,10 @@
 {
   "name": "polyman-cli",
-  "version": "1.0.1",
+  "version": "2.0.0",
   "description": "Polyman is a CLI tool that will allow codeforces problem setters to never get out of their coding environment to create a new problem. You can create, test, or update your problems and then submit them to polygon directly from your terminal.",
   "author": "Hamza Hassanain",
   "license": "MIT",
+  "homepage": "https://hamzahassanain.github.io/polyman/",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/HamzaHassanain/polyman.git"
@@ -17,8 +18,8 @@
     "start": "node dist/cli.js",
     "dev": "ts-node src/cli.ts",
     "watch": "tsc --watch",
-    "lint": "eslint . --ext .ts",
-    "lint:fix": "eslint . --ext .ts --fix",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
     "docs": "typedoc",
@@ -32,7 +33,6 @@
     "@eslint/js": "^9.39.1",
     "@types/chalk": "^0.4.31",
     "@types/commander": "^2.12.0",
-    "@types/jest": "^30.0.0",
     "@types/node": "^24.10.0",
     "@types/ora": "^3.1.0",
     "@typescript-eslint/eslint-plugin": "^8.46.3",
@@ -51,7 +51,6 @@
   },
   "dependencies": {
     "chalk": "^5.6.2",
-    "commander": "^14.0.2",
-    "ora": "^9.0.0"
+    "commander": "^14.0.2"
   }
 }

@@ -7,13 +7,28 @@ import path from 'path';
 import { executor } from '../executor';
 import fs from 'fs';
 import { fmt } from '../formatter';
-import ConfigFile from '../types';
+import ConfigFile, {
+  LocalChecker,
+  LocalGenerator,
+  LocalSolution,
+  LocalValidator,
+} from '../types';
 
 /** Default compilation timeout in milliseconds */
 export const DEFAULT_TIMEOUT = 10000;
 
 /** Default memory limit in megabytes */
 export const DEFAULT_MEMORY_LIMIT = 1024;
+
+// ENV is win or unix
+export const ENV = process.platform === 'win32' ? 'win' : 'unix';
+
+export const SECRET_KEY_LOCATION =
+  ENV === 'win'
+    ? '%USERPROFILE%\\.polyman\\secret_key'
+    : '~/.polyman/secret_key';
+export const API_KEY_LOCATION =
+  ENV === 'win' ? '%USERPROFILE%\\.polyman\\api_key' : '~/.polyman/api_key';
 
 /**
  * Compiles a C++ source file using g++.
@@ -28,7 +43,7 @@ export const DEFAULT_MEMORY_LIMIT = 1024;
  * const executablePath = await compileCPP('solutions/main.cpp');
  * // Returns: '/path/to/solutions/main'
  */
-export async function compileCPP(sourcePath: string): Promise<string> {
+export async function compileCPP(sourcePath: string): Promise<void> {
   const absolutePath = path.resolve(process.cwd(), sourcePath);
 
   if (path.extname(absolutePath) !== '.cpp') {
@@ -36,14 +51,12 @@ export async function compileCPP(sourcePath: string): Promise<string> {
   }
 
   const outputPath = absolutePath.replace('.cpp', '');
-  const compileCommand = `g++ -o ${outputPath} ${absolutePath} -O2 -std=c++23`;
+  const compileCommand = `g++ -o ${outputPath} ${absolutePath}`;
 
   await executor.execute(compileCommand, {
     timeout: DEFAULT_TIMEOUT,
     silent: true,
   });
-
-  return outputPath;
 }
 
 /**
@@ -58,18 +71,13 @@ export async function compileCPP(sourcePath: string): Promise<string> {
  * const javaCommand = await compileJava('solutions/Solution.java');
  * // Returns: 'java -cp /path/to/solutions Solution'
  */
-export async function compileJava(sourcePath: string): Promise<string> {
+export async function compileJava(sourcePath: string): Promise<void> {
   const absolutePath = path.resolve(sourcePath);
-  const directory = path.dirname(absolutePath);
-  const fileName = path.basename(absolutePath);
-  const className = fileName.replace('.java', '');
 
   await executor.execute(`javac ${absolutePath}`, {
     timeout: DEFAULT_TIMEOUT,
     silent: true,
   });
-
-  return `java -cp ${directory} ${className}`;
 }
 
 /**
@@ -105,6 +113,29 @@ export function filterTestsByRange(
       !isNaN(testNumber) && testNumber >= testBegin && testNumber <= testEnd
     );
   });
+}
+
+/**
+ * Gets all test files from tests directory.
+ * Returns only files starting with 'test' prefix in sorted order by test number.
+ *
+ * @private
+ * @param {string} testsDir - Path to tests directory
+ * @returns {string[]} Array of test filenames
+ *
+ * @example
+ * getTestFiles('/path/to/tests')
+ * // Returns: ['test1.txt', 'test2.txt', 'test3.txt', ...]
+ */
+export function getTestFiles(testsDir: string): string[] {
+  return fs
+    .readdirSync(testsDir)
+    .filter(file => file.startsWith('test'))
+    .sort((a, b) => {
+      const numA = parseInt(a.replace('test', '').replace('.txt', ''));
+      const numB = parseInt(b.replace('test', '').replace('.txt', ''));
+      return numA - numB;
+    });
 }
 
 /**
@@ -157,9 +188,9 @@ export function isNumeric(value: string): boolean {
  *   logError(error);
  * }
  */
-export function logError(error: unknown) {
+export function logError(error: unknown, indent: number = 1) {
   const message = error instanceof Error ? error.message : String(error);
-  fmt.error(`  ${fmt.cross()} ${message}`);
+  fmt.error(`${' '.repeat(indent)} ${fmt.cross()} ${message}`);
 }
 
 /**
@@ -222,7 +253,7 @@ export function throwError(error: unknown, message = ''): never {
  * @param {string} dirName - Directory name/path relative to current working directory
  *
  * @example
- * ensureDirectoryExists('tests');
+ * ensureDirectoryExists('testsets');
  * ensureDirectoryExists('nested/path/to/dir');
  */
 export function ensureDirectoryExists(dirName: string) {
@@ -283,4 +314,39 @@ export function readFirstLine(filePath: string): Promise<string> {
       reject(err);
     });
   });
+}
+
+export function getCompiledCommandToRun(
+  object: LocalChecker | LocalValidator | LocalSolution | LocalGenerator
+): string {
+  if ('isStandard' in object && object.isStandard) {
+    const checkerName = object.source.replace('.cpp', '');
+    return path.resolve(
+      __dirname,
+      '../..',
+      'assets',
+      'checkers',
+      `${checkerName}`
+    );
+  }
+
+  const source = path.resolve(process.cwd(), object.source);
+  const extention = path.extname(source);
+
+  switch (extention) {
+    case '.cpp':
+      return source.replace('.cpp', '');
+    case '.java': {
+      const dir = path.dirname(source);
+      const fileName = path.basename(source);
+      const className = fileName.replace('.java', '');
+      return `java -cp ${dir} ${className}`;
+    }
+    case '.py':
+      return `python ${source}`;
+    case '.js':
+      return `node ${source}`;
+    default:
+      throw new Error(`Unsupported source file extension: ${extention}`);
+  }
 }

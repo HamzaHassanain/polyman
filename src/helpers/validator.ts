@@ -1,102 +1,56 @@
 /**
  * @fileoverview Input validator compilation, testing, and execution utilities.
- * Provides functions to run validators on test inputs, validate correctness,
- * and test validators against their own test suites.
+ * Provides functions to run validators on test inputs with testset support.
  */
 
-import { Validator, ValidatorTest, ValidatorVerdict } from '../types';
+import type {
+  LocalValidator,
+  LocalTestset,
+  ValidatorTest,
+  ValidatorVerdict,
+} from '../types';
 import { executor } from '../executor';
 import path from 'path';
 import fs from 'fs';
 import {
   compileCPP,
   logError,
-  logErrorAndThrow,
   readConfigFile,
   throwError,
   ensureDirectoryExists,
   removeDirectoryRecursively,
+  getTestFiles,
+  getCompiledCommandToRun,
 } from './utils';
 import { DEFAULT_TIMEOUT, DEFAULT_MEMORY_LIMIT } from './utils';
 import { fmt } from '../formatter';
+import { getGeneratorCommands } from './testset';
 
 /**
- * Validates a single test file using the validator.
- * Compiles validator and runs it on the specified test.
- * Fails fast - throws on validation failure.
+ * Compiles the validator program.
+ * Wrapper around compileCPP with consistent error handling.
  *
- * @param {Validator} validator - Validator configuration
- * @param {number} testNumber - Test number to validate
+ * @param {LocalValidator} validator - Validator configuration
+ * @returns {Promise<void>} Does not return anything on success
  *
- * @throws {Error} If validator compilation fails
- * @throws {Error} If test is invalid
+ * @throws {Error} If compilation fails
  *
  * @example
- * // From actions.ts validateTests
- * const config = readConfigFile();
- * await validateSingleTest(config.validator, 5);
+ * await compileValidator({ name: 'val', source: 'validator/val.cpp' });
  */
-export async function validateSingleTest(
-  validator: Validator,
-  testNumber: number
-) {
+export async function compileValidator(
+  validator: LocalValidator
+): Promise<void> {
   try {
-    const compiledPath = await compileCPP(validator.source);
-    const testsDir = path.resolve(process.cwd(), 'tests');
-    const testFilePath = path.join(testsDir, `test${testNumber}.txt`);
-    try {
-      await runValidator(compiledPath, testFilePath, 'VALID');
-    } catch (error) {
-      const message = `Test ${testFilePath} failed validation:\n\t${error instanceof Error ? error.message : 'Unknown error'}`;
-      logErrorAndThrow(new Error(message));
+    if (!validator.source) {
+      throw new Error('Validator has no source file specified');
     }
+    await compileCPP(validator.source);
   } catch (error) {
-    throwError(error, 'Failed to compile validator');
+    throw error instanceof Error
+      ? error
+      : new Error('Failed to compile validator');
   }
-}
-
-/**
- * Validates all generated test files.
- * Compiles validator and runs it on all test*.txt files.
- * Fails fast - throws on first invalid test.
- *
- * @param {Validator} validator - Validator configuration
- *
- * @throws {Error} If validator compilation fails
- * @throws {Error} If any test is invalid
- *
- * @example
- * // From actions.ts validateTests and fullVerification
- * const config = readConfigFile();
- * await validateAllTests(config.validator);
- */
-export async function validateAllTests(validator: Validator) {
-  let someFailed = false;
-  try {
-    const compiledPath = await compileCPP(validator.source);
-
-    const testsDir = path.resolve(process.cwd(), 'tests');
-    const testFiles = fs
-      .readdirSync(testsDir)
-      .filter(file => file.startsWith('test') && file.endsWith('.txt'));
-
-    for (const testFile of testFiles) {
-      const testFileDir = path.join(testsDir, testFile);
-      try {
-        await runValidator(compiledPath, testFileDir, 'VALID');
-      } catch (error) {
-        someFailed = true;
-        const message = `Test ${testFile} failed validation:\n\t${error instanceof Error ? error.message : 'Unknown error'}`;
-        logError(new Error(message));
-      }
-    }
-  } catch (error) {
-    throwError(error, 'Failed to compile validator');
-  } finally {
-    executor.cleanup();
-  }
-
-  if (someFailed) throw new Error('Some tests failed validation');
 }
 
 /**
@@ -105,18 +59,18 @@ export async function validateAllTests(validator: Validator) {
  *
  * @private
  * @param {string} execCommand - Path to compiled validator executable
- * @param {string} testFileDir - Path to test file
+ * @param {string} testFilePath - Path to test file
  * @param {ValidatorVerdict} expectedVerdict - Expected verdict (VALID or INVALID)
  *
  * @throws {Error} If validator verdict doesn't match expected
  * @throws {Error} If validator exceeds time or memory limits (exits process)
  *
  * @example
- * await runValidator('./validator', 'tests/test1.txt', 'VALID');
+ * await runValidator('./validator', 'tests/tests/test1.txt', 'VALID');
  */
 async function runValidator(
   execCommand: string,
-  testFileDir: string,
+  testFilePath: string,
   expectedVerdict: ValidatorVerdict
 ) {
   let didCatchInvalid = false;
@@ -128,11 +82,7 @@ async function runValidator(
       silent: true,
       onError: result => {
         didCatchInvalid = true;
-        if (
-          expectedVerdict === 'VALID' ||
-          expectedVerdict === 1 ||
-          expectedVerdict === 'valid'
-        )
+        if (expectedVerdict === 'VALID')
           throw new Error(result.stderr || 'Validator execution failed');
       },
       onTimeout: () => {
@@ -150,17 +100,219 @@ async function runValidator(
         process.exit(1);
       },
     },
-    testFileDir,
+    testFilePath,
     undefined
   );
 
-  if (
-    (expectedVerdict === 'INVALID' ||
-      expectedVerdict === 0 ||
-      expectedVerdict === 'invalid') &&
-    !didCatchInvalid
-  ) {
+  if (expectedVerdict === 'INVALID' && !didCatchInvalid) {
     throw new Error('Validator did not detect invalid test');
+  }
+}
+
+/**
+ * Validates a single test in a testset.
+ *
+ * @param {LocalValidator} validator - Validator configuration
+ * @param {string} testsetName - Testset name
+ * @param {number} testIndex - 1-based test index
+ *
+ * @throws {Error} If validator compilation fails
+ * @throws {Error} If test is invalid
+ *
+ * @example
+ * await validateSingleTest(validator, 'testsets', 5);
+ */
+export async function validateSingleTest(
+  validator: LocalValidator,
+  testsetName: string,
+  testIndex: number
+) {
+  try {
+    const compiledPath = getCompiledCommandToRun(validator);
+    const testsDir = path.resolve(process.cwd(), 'testsets', testsetName);
+    const testFilePath = path.join(testsDir, `test${testIndex}.txt`);
+
+    if (!fs.existsSync(testFilePath)) {
+      throw new Error(`Test file not found: ${testFilePath}`);
+    }
+
+    try {
+      await runValidator(compiledPath, testFilePath, 'VALID');
+    } catch (error) {
+      throw new Error(
+        `Test ${testIndex} failed validation:\n\t${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+    }
+  } catch (error) {
+    throwError(error, 'Failed to validate test');
+  }
+}
+
+/**
+ * Validates all tests in a testset.
+ *
+ * @param {LocalValidator} validator - Validator configuration
+ * @param {string} testsetName - Testset name
+ *
+ * @throws {Error} If validator compilation fails
+ * @throws {Error} If any test is invalid
+ *
+ * @example
+ * await validateTestset(validator, 'testsets');
+ */
+export async function validateTestset(
+  validator: LocalValidator,
+  testsetName: string
+) {
+  let someFailed = false;
+  try {
+    const compiledPath = getCompiledCommandToRun(validator);
+    const testsDir = path.resolve(process.cwd(), 'testsets', testsetName);
+
+    if (!fs.existsSync(testsDir)) {
+      throw new Error(`Testset directory not found: ${testsDir}`);
+    }
+
+    const testFiles = getTestFiles(testsDir);
+
+    if (testFiles.length === 0) {
+      throw new Error(`No test files found in testset: ${testsetName}`);
+    }
+
+    for (const testFile of testFiles) {
+      const testFilePath = path.join(testsDir, testFile);
+      try {
+        await runValidator(compiledPath, testFilePath, 'VALID');
+      } catch (error) {
+        someFailed = true;
+        logError(
+          new Error(
+            `Test ${fmt.bold(`${testsetName}/${testFile}`)} failed validation:\n\t${error instanceof Error ? error.message : 'Unknown error'}`
+          )
+        );
+      }
+    }
+  } catch (error) {
+    throwError(error, `Failed to validate testset ${testsetName}`);
+  } finally {
+    executor.cleanup();
+  }
+
+  if (someFailed) throw new Error('Some tests failed validation');
+}
+
+/**
+ * Validates tests in a specific group within a testset.
+ *
+ * @param {LocalValidator} validator - Validator configuration
+ * @param {LocalTestset} testset - Testset configuration
+ * @param {string} groupName - Group name
+ *
+ * @throws {Error} If validator compilation fails
+ * @throws {Error} If any test in group is invalid
+ *
+ * @example
+ * await validateGroup(validator, testset, 'samples');
+ */
+export async function validateGroup(
+  validator: LocalValidator,
+  testset: LocalTestset,
+  groupName: string
+) {
+  let someFailed = false;
+  try {
+    const compiledPath = getCompiledCommandToRun(validator);
+    const testsDir = path.resolve(process.cwd(), 'testsets', testset.name);
+
+    if (!fs.existsSync(testsDir)) {
+      throw new Error(`Testset directory not found: ${testsDir}`);
+    }
+
+    // Get commands for this testset
+    const commands = getGeneratorCommands(testset);
+
+    // Filter commands by group and get their indices
+    const groupCommands: number[] = [];
+    let currentIndex = 1;
+
+    for (const command of commands) {
+      if (command.group === groupName) {
+        if (command.type === 'generator-range' && command.range) {
+          const [start, end] = command.range;
+          for (let i = start; i <= end; i++) {
+            groupCommands.push(currentIndex);
+            currentIndex++;
+          }
+        } else {
+          groupCommands.push(currentIndex);
+          currentIndex++;
+        }
+      } else {
+        // Count tests not in this group
+        if (command.type === 'generator-range' && command.range) {
+          const [start, end] = command.range;
+          currentIndex += end - start + 1;
+        } else {
+          currentIndex++;
+        }
+      }
+    }
+
+    if (groupCommands.length === 0) {
+      throw new Error(`No tests found in group "${groupName}"`);
+    }
+
+    for (const testIndex of groupCommands) {
+      const testFilePath = path.join(testsDir, `test${testIndex}.txt`);
+      try {
+        await runValidator(compiledPath, testFilePath, 'VALID');
+      } catch (error) {
+        someFailed = true;
+        logError(
+          new Error(
+            `Test ${testIndex} in group ${groupName} failed validation:\n\t${error instanceof Error ? error.message : 'Unknown error'}`
+          )
+        );
+      }
+    }
+  } catch (error) {
+    throwError(error, `Failed to validate group ${groupName}`);
+  } finally {
+    executor.cleanup();
+  }
+
+  if (someFailed)
+    throw new Error(`Some tests in group ${groupName} failed validation`);
+}
+
+/**
+ * Validates all testsets.
+ *
+ * @param {LocalValidator} validator - Validator configuration
+ * @param {LocalTestset[]} testsets - All testsets
+ *
+ * @throws {Error} If validator compilation fails
+ * @throws {Error} If any test is invalid
+ *
+ * @example
+ * await validateAllTestsets(validator, testsets);
+ */
+export async function validateAllTestsets(
+  validator: LocalValidator,
+  testsets: LocalTestset[]
+) {
+  let someFailed = false;
+  for (const testset of testsets) {
+    try {
+      await validateTestset(validator, testset.name);
+    } catch (error) {
+      logError(error);
+      someFailed = true;
+    }
+  }
+
+  if (someFailed) {
+    throw new Error('Some testsets failed validation');
   }
 }
 
@@ -168,7 +320,7 @@ async function runValidator(
  * Ensures a validator is defined in the configuration.
  * Type assertion function that throws if validator is undefined.
  *
- * @param {Validator | undefined} validator - Validator configuration to validate
+ * @param {LocalValidator | undefined} validator - Validator configuration to validate
  *
  * @throws {Error} If no validator is defined in configuration
  *
@@ -178,8 +330,8 @@ async function runValidator(
  * // Now TypeScript knows validator is defined
  */
 export function ensureValidatorExists(
-  validator: Validator | undefined
-): asserts validator is Validator {
+  validator: LocalValidator | undefined
+): asserts validator is LocalValidator {
   if (!validator) {
     throw new Error('No validator defined in the configuration file.');
   }
@@ -203,7 +355,13 @@ export async function testValidatorItself() {
     const config = readConfigFile();
     ensureValidatorExists(config.validator);
 
-    await makeValidatorTests();
+    if (!config.validator.testsFilePath) {
+      throw new Error(
+        'Validator tests file path is not specified in the configuration.'
+      );
+    }
+
+    await makeValidatorTests(config.validator.testsFilePath);
     await runValidatorTests(config.validator);
   } catch (error) {
     throwError(error, 'Failed to test validator');
@@ -218,6 +376,8 @@ export async function testValidatorItself() {
  * Reads validator_tests.json and creates input files.
  *
  * @private
+ *
+ * @param {string} testsFilePath - Directory to create test files in
  * @throws {Error} If test file parsing fails
  *
  * @example
@@ -225,8 +385,8 @@ export async function testValidatorItself() {
  * // validator_tests/test1.txt
  * // validator_tests/test2.txt
  */
-async function makeValidatorTests() {
-  const validatorTests = await parseValidatorTests();
+async function makeValidatorTests(testsFilePath: string) {
+  const validatorTests = await parseValidatorTests(testsFilePath);
 
   ensureDirectoryExists('validator_tests');
   for (const [index, test] of validatorTests.entries()) {
@@ -235,7 +395,7 @@ async function makeValidatorTests() {
       'validator_tests',
       `test${index + 1}.txt`
     );
-    fs.writeFileSync(testFilePath, test.stdin);
+    fs.writeFileSync(testFilePath, test.input);
   }
 }
 
@@ -244,7 +404,7 @@ async function makeValidatorTests() {
  * Compiles the validator and runs it against all test cases.
  * Fails fast - throws on first test failure.
  *
- * @param {Validator} validator - Validator configuration
+ * @param {LocalValidator} validator - Validator configuration
  *
  * @throws {Error} If validator compilation fails
  * @throws {Error} If any test fails
@@ -253,18 +413,20 @@ async function makeValidatorTests() {
  * const config = readConfigFile();
  * await runValidatorTests(config.validator);
  */
-export async function runValidatorTests(validator: Validator) {
+export async function runValidatorTests(validator: LocalValidator) {
   let someFailed = false;
   try {
-    const validatorTests = await parseValidatorTests();
-    const compiledPath = await compileCPP(validator.source);
-
+    const validatorTests = await parseValidatorTests(validator.testsFilePath!);
     const testsDir = path.resolve(process.cwd(), 'validator_tests');
 
     for (const [index, { expectedVerdict }] of validatorTests.entries()) {
       const testFileDir = path.join(testsDir, `test${index + 1}.txt`);
       try {
-        await runValidator(compiledPath, testFileDir, expectedVerdict);
+        await runValidator(
+          getCompiledCommandToRun(validator),
+          testFileDir,
+          expectedVerdict
+        );
       } catch (error) {
         someFailed = true;
         fmt.error(
@@ -286,6 +448,7 @@ export async function runValidatorTests(validator: Validator) {
  * Reads the JSON file containing validator test cases.
  *
  * @private
+ * @param {string} testsFilePath The path to the tests JSON file
  * @returns {Promise<ValidatorTest[]>} Array of validator test cases
  *
  * @throws {Error} If file doesn't exist or has invalid JSON
@@ -294,18 +457,14 @@ export async function runValidatorTests(validator: Validator) {
  * // Expects file structure:
  * // {
  * //   "tests": [
- * //     { "stdin": "1 2 3", "expectedVerdict": "VALID" }
+ * //     { "index": 1, "input": "1 2 3", "expectedVerdict": "VALID" }
  * //   ]
  * // }
  */
-function parseValidatorTests(): Promise<ValidatorTest[]> {
+function parseValidatorTests(testsFilePath: string): Promise<ValidatorTest[]> {
   return new Promise((resolve, reject) => {
-    const testsFilePath = path.resolve(
-      process.cwd(),
-      'validator',
-      'validator_tests.json'
-    );
-    fs.readFile(testsFilePath, 'utf-8', (err, data) => {
+    const absouluteTestsFilePath = path.resolve(process.cwd(), testsFilePath);
+    fs.readFile(absouluteTestsFilePath, 'utf-8', (err, data) => {
       if (err) {
         return reject(new Error('Failed to read validator tests file.'));
       }

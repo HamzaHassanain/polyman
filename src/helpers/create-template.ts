@@ -14,12 +14,15 @@ import { fmt } from '../formatter';
  * @param {string} directory - Name of the created problem directory
  *
  * @example
- * // From actions.ts createTemplate
+ * // From actions.ts createTemplateAction
  * logTemplateCreationSuccess('my-problem');
  * // Displays:
  * //   1. cd my-problem
  * //   2. Add your solutions, generators, and validator
  * //   3. Edit Config.json...
+ * //   4. Run 'polyman generate all' to generate tests
+ * //   5. Run 'polyman validate all' to validate tests
+ * //   6. Run 'polyman verify' for full verification
  */
 export function logTemplateCreationSuccess(directory: string) {
   console.log();
@@ -33,10 +36,10 @@ export function logTemplateCreationSuccess(directory: string) {
     `    ${fmt.primary('3.')} Edit ${fmt.highlight('Config.json')} to configure your problem`
   );
   fmt.log(
-    `    ${fmt.primary('4.')} Run ${fmt.highlight('polyman generate-tests all')} to generate tests`
+    `    ${fmt.primary('4.')} Run ${fmt.highlight('polyman generate all')} to generate tests`
   );
   fmt.log(
-    `    ${fmt.primary('5.')} Run ${fmt.highlight('polyman validate-tests all')} to validate tests`
+    `    ${fmt.primary('5.')} Run ${fmt.highlight('polyman validate all')} to validate tests`
   );
   fmt.log(
     `    ${fmt.primary('6.')} Run ${fmt.highlight('polyman verify')} for full verification`
