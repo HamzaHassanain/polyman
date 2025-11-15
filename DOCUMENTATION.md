@@ -8,21 +8,77 @@ A TypeScript-based CLI tool for Codeforces problem setters that automates proble
 
 1. [Architecture Overview](#architecture-overview)
 2. [Core Components](#core-components)
+   - [Entry Point](#entry-point-srclits)
+   - [Command Mapping](#command-mapping)
 3. [Type System](#type-system)
+   - [Solution Tags](#solution-tags)
+   - [Source Types](#source-types)
+   - [Local Interfaces](#local-interfaces)
+   - [Configuration Interface](#configuration-file-interface)
 4. [CLI Interface](#cli-interface)
+   - [Command Parser](#command-parser-srclits)
 5. [Action Layer](#action-layer)
+   - [Template Management](#createtemplatedirectory-string)
+   - [Testlib Integration](#downloadtestlib)
+   - [Checker Listing](#listavailablecheckers)
+   - [Test Generation](#generatetestsgeneratorname-string)
+   - [Test Validation](#validateteststarget-string-modifier-string)
+   - [Solution Execution](#solvetestssolutionname-string-testnumber-string)
+   - [Component Testing](#testwhatwhat-string)
+   - [Full Verification](#fullverification)
 6. [Helper Modules](#helper-modules)
+   - [Utility Functions](#utility-functions-srchelpersutilsts)
+   - [Generator Module](#generator-module-srchelpersgeratorts)
+   - [Validator Module](#validator-module-srchelpersvalidatorts)
+   - [Checker Module](#checker-module-srchelperscheckerts)
+   - [Solution Module](#solution-module-srchelpersolutionts)
+   - [Template Helpers](#template-helpers-srchelpersreate-templatets)
+   - [Testlib Download](#testlib-download-srchelperstestlib-downloadts)
 7. [Execution Engine](#execution-engine)
 8. [Formatter System](#formatter-system)
+   - [Output Methods](#methods)
+   - [Utility Methods](#utility-methods)
 9. [Configuration Schema](#configuration-schema)
+   - [Config.json Structure](#configjson-structure)
+   - [Required Fields](#required-fields)
+   - [Optional Fields](#optional-fields)
 10. [Compilation Pipeline](#compilation-pipeline)
+    - [Language Support](#language-support)
+    - [Compilation Flow](#compilation-flow)
 11. [Validation System](#validation-system)
+    - [Validator Exit Codes](#validator-exit-codes)
+    - [Validation Workflow](#validation-workflow)
+    - [Self-Testing](#self-testing)
 12. [Solution Testing](#solution-testing)
+    - [Execution Flow](#execution-flow)
+    - [Verdict Detection](#verdict-detection)
 13. [Checker Integration](#checker-integration)
+    - [Standard Checkers](#standard-checkers)
+    - [Custom Checkers](#custom-checkers)
+    - [Checker Execution](#checker-execution)
 14. [Generator System](#generator-system)
+    - [Generator Interface](#generator-interface)
+    - [Generation Flow](#generation-flow)
+    - [Special Generators](#special-generators)
 15. [Error Handling](#error-handling)
+    - [Error Flow](#error-flow)
+    - [Error Types](#error-types)
 16. [File Structure](#file-structure)
+    - [Template Structure](#template-structure)
+    - [Generated Project Structure](#generated-project-structure)
 17. [Development Guide](#development-guide)
+    - [Building from Source](#building-from-source)
+    - [Code Structure](#code-structure)
+    - [Adding New Features](#adding-new-features)
+    - [Testing](#testing)
+    - [ESLint Configuration](#eslint-configuration)
+18. [API Reference](#api-reference)
+    - [Key Exports](#key-exports)
+19. [Implementation Notes](#implementation-notes)
+    - [Performance Considerations](#performance-considerations)
+    - [Platform Differences](#platform-differences)
+    - [Security](#security)
+    - [Future Enhancements](#future-enhancements)
 
 ---
 
@@ -61,9 +117,13 @@ Polyman follows a layered architecture:
 
 ## Core Components
 
+Polyman's core architecture consists of a CLI layer that delegates to action functions, which coordinate helper modules for specific tasks.
+
 ### Entry Point: `src/cli.ts`
 
 The CLI interface uses Commander.js to define all user-facing commands:
+
+### Command Mapping
 
 **Commands:**
 
@@ -92,7 +152,9 @@ program
 
 ### Core Type Definitions: `src/types.d.ts`
 
-#### Solution Tags
+This section documents all TypeScript type definitions used throughout Polyman.
+
+### Solution Tags
 
 ```typescript
 type SolutionTag =
@@ -105,7 +167,9 @@ type SolutionTag =
   | 'RE'; // Runtime Error
 ```
 
-#### Source Types
+### Source Types
+
+Polyman supports multiple programming languages and compiler versions for solutions, while generators, validators, and checkers must use C++ with testlib.h.
 
 ```typescript
 type CppSourceType =
@@ -130,6 +194,10 @@ type SolutionSourceType = CppSourceType | JavaSourceType | PythonSourceType;
 
 type TestlibSourceType = CppSourceType;
 ```
+
+### Local Interfaces
+
+These interfaces define the structure of local configuration objects that reference files in your problem directory.
 
 #### LocalSolution Interface
 
@@ -211,7 +279,9 @@ interface LocalTestset {
 }
 ```
 
-#### Configuration File Interface
+### Configuration File Interface
+
+The main configuration file that defines all aspects of a competitive programming problem.
 
 ```typescript
 interface ConfigFile {
@@ -341,6 +411,8 @@ All Actions are separated into steps, each step calls relevant helper functions 
 
 High-level workflow orchestration functions that coordinate helper modules.
 
+### Template Management
+
 #### `createTemplate(directory: string)`
 
 Creates new problem directory structure from template.
@@ -354,6 +426,8 @@ Creates new problem directory structure from template.
 **Called by:** `polyman new <dir>`
 
 ---
+
+### Testlib Integration
 
 #### `downloadTestlib()`
 
@@ -378,6 +452,8 @@ fs.writeFileSync('testlib.h', testlibContent, 'utf-8');
 
 ---
 
+### Checker Listing
+
 #### `listAvailableCheckers()`
 
 Lists all standard checkers from `assets/checkers/`.
@@ -400,6 +476,8 @@ Lists all standard checkers from `assets/checkers/`.
 
 ---
 
+### Test Generation
+
 #### `generateTests(generatorName: string)`
 
 Runs generators to create test input files.
@@ -419,6 +497,8 @@ Runs generators to create test input files.
 
 ---
 
+### Test Validation
+
 #### `validateTests(target: string, modifier?: string)`
 
 Validates test input files using validator.
@@ -432,6 +512,8 @@ Validates test input files using validator.
 **Called by:** `polyman validate <target> [modifier]`
 
 ---
+
+### Solution Execution
 
 #### `solveTests(solutionName: string, testNumber: string)`
 
@@ -451,6 +533,8 @@ Executes solutions on test inputs.
 - `testNumber`: Test number or 'all'
 
 ---
+
+### Component Testing
 
 #### `testWhat(what: string)`
 
@@ -477,6 +561,8 @@ Tests validators, checkers, or solutions against expected behavior.
 **Called by:** `polyman test <what>`
 
 ---
+
+### Full Verification
 
 #### `fullVerification()`
 
@@ -508,11 +594,13 @@ Complete problem verification workflow.
 
 ## Helper Modules
 
+Helper modules contain domain-specific logic for generators, validators, checkers, solutions, and utilities.
+
 ### Utility Functions: `src/helpers/utils.ts`
 
 Core utility functions for compilation, configuration, and file operations.
 
-#### Compilation Functions
+### Compilation Functions
 
 **`compileCPP(sourcePath: string): Promise<string>`**
 
@@ -541,7 +629,7 @@ Compiles Java source using javac.
 
 ---
 
-#### Configuration Functions
+### Configuration Functions
 
 **`readConfigFile(): ConfigFile`**
 
@@ -559,7 +647,7 @@ Checks if string represents a number.
 
 ---
 
-#### File Operations
+### File Operations
 
 **`ensureDirectoryExists(dirName: string)`**
 
@@ -584,7 +672,7 @@ Reads first line from file (used for verdict detection).
 
 ---
 
-#### Error Handling
+### Error Handling
 
 **`logError(error: unknown)`**
 
@@ -1150,6 +1238,8 @@ Terminal output styling with Codeforces theme.
 - Success: `#4CAF50` (green)
 - Warning: `#FFC107` (yellow)
 
+### Output Methods
+
 #### Methods
 
 **`section(title: string)`**
@@ -1226,6 +1316,8 @@ Prints error box with X mark.
 
 ---
 
+### Utility Methods
+
 **Utility Methods:**
 
 - `primary(text: string)`: Blue color
@@ -1239,6 +1331,8 @@ Prints error box with X mark.
 ---
 
 ## Configuration Schema
+
+The `Config.json` file is the heart of every Polyman problem, defining all metadata, constraints, and components.
 
 ### Config.json Structure
 
@@ -1319,6 +1413,8 @@ Prints error box with X mark.
 }
 ```
 
+### Required Fields
+
 **Required Fields:**
 
 - `name`
@@ -1330,6 +1426,8 @@ Prints error box with X mark.
 - `checker`
 - `validator`
 - `testsets`
+
+### Optional Fields
 
 **Optional Fields:**
 
@@ -1574,6 +1672,8 @@ int main(int argc, char* argv[]) {
 ---
 
 ## Error Handling
+
+Polyman provides comprehensive error handling with formatted output and proper exit codes.
 
 ### Error Flow
 
@@ -1846,6 +1946,8 @@ For detailed API documentation of all functions, classes, and types, see the aut
 ---
 
 ## Implementation Notes
+
+Important considerations for development, deployment, and platform-specific behavior.
 
 ### Performance Considerations
 
