@@ -13,6 +13,20 @@
   "bin": {
     "polyman": "dist/cli.js"
   },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "dist/**/*.js.map",
+    "!dist/**/*.test.*",
+    "!dist/demo-logger.*",
+    "!dist/actions-old.*",
+    "!dist/actions-refactored.*",
+    "assets/checkers/*.cpp",
+    "template/**/*",
+    "!template/**/*.pdf",
+    "README.md",
+    "LICENCE"
+  ],
   "scripts": {
     "build": "tsc",
     "start": "node dist/cli.js",
