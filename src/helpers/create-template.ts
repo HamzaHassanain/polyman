@@ -45,7 +45,7 @@ export function logTemplateCreationSuccess(directory: string) {
     `    ${fmt.primary('6.')} Run ${fmt.highlight('polyman verify')} for full verification`
   );
   fmt.log(
-    `    ${fmt.primary('Full Guide ->')} Visit ${fmt.highlight('https://hamzahassanain.github.io/polyman/')}`
+    `    ${fmt.primary('Full Guide ->')} Visit ${fmt.highlight('https://github.com/HamzaHassanain/polyman/blob/master/template/GUIDE.md')}`
   );
   console.log();
 }

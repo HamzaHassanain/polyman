@@ -1,2 +1,70 @@
-node_modules
+# Dependencies
+node_modules/
+
+# Source files (TypeScript source - we ship compiled JS)
+src/
+tsconfig.json
+typedoc.json
+eslint.config.js
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# CI/CD files
+.github/
+
+# Code formatting and linting
+.prettierrc
+.prettierignore
+.editorconfig
+
+# Test files
+**/__tests__/
+**/*.test.js
+**/*.test.d.ts
+**/*.test.js.map
+**/*.test.d.ts.map
+
+# Demo and example files
+dist/demo-logger.*
+dist/**/demo*.*
+
+# Old/refactored files
+dist/actions-old.*
+dist/actions-refactored.*
+
+# Temporary files
+temp/
+tmp/
+
+# Large media files (not needed for CLI tool)
+logo.png
+*.png
+*.jpg
+*.jpeg
+*.gif
+
+# PDF documentation (use online docs instead)
+template/GUIDE.pdf
+*.pdf
+
+# Git files
+.gitattributes
+
+# Lock files (users should use their own)
+package-lock.json
+
+# Documentation that should only be online
 docs/
+DOCUMENTATION.md
+
+# Keep these files:
+# - README.md (package description)
+# - LICENCE (legal requirement)
+# - dist/ (compiled code)
+# - assets/ (checkers needed at runtime)
+# - template/ (needed for 'polyman new' command, except PDF)
