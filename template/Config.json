@@ -76,11 +76,13 @@
       "generatorScript": {
         "commands": [
           {
+            "index": 1,
             "type": "manual",
             "manualFile": "./tests/manual/sample1.txt",
             "group": "samples"
           },
           {
+            "index": 2,
             "type": "manual",
             "manualFile": "./tests/manual/sample2.txt",
             "group": "samples"
@@ -88,19 +90,19 @@
           {
             "type": "generator-single",
             "generator": "gen-random",
-            "number": 1,
+            "number": 3,
             "group": "main"
           },
           {
             "type": "generator-single",
             "generator": "gen-random",
-            "number": 2,
+            "number": 4,
             "group": "main"
           },
           {
             "type": "generator-range",
             "generator": "gen-random",
-            "range": [3, 10],
+            "range": [5, 10],
             "group": "main"
           }
         ]

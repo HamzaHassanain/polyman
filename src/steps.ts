@@ -245,7 +245,9 @@ export async function stepCompileGeneratorsForGroup(
 ): Promise<void> {
   fmt.step(stepNum, 'Compiling Generators');
   const allCommands = getGeneratorCommands(testset);
-  const groupCommands = allCommands.filter(cmd => cmd.group === groupName);
+  const groupCommands = allCommands.filter(
+    cmd => groupName === 'all' || cmd.group === groupName
+  );
   await compileAllGenerators(groupCommands, config.generators!);
   fmt.stepComplete('Generators compiled');
 }

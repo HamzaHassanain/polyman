@@ -10,7 +10,7 @@
 
     // For nodejs:
     "lib": ["esnext"],
-    "types": ["node", "jest"],
+    "types": ["node"],
     // Other Outputs
     "sourceMap": true,
     "declaration": true,
@@ -34,5 +34,6 @@
     "noUncheckedSideEffectImports": true,
     "moduleDetection": "force",
     "skipLibCheck": true
-  }
+  },
+  "exclude": ["node_modules", "dist", "src/md-to-pdf.ts"]
 }

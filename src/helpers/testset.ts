@@ -168,7 +168,9 @@ export async function generateTestsForGroup(
   const allCommands = getGeneratorCommands(testset);
 
   // Filter commands by group
-  const groupCommands = allCommands.filter(cmd => cmd.group === groupName);
+  const groupCommands = allCommands.filter(
+    cmd => groupName === 'all' || cmd.group === groupName
+  );
 
   if (groupCommands.length === 0) {
     const availableGroups = [

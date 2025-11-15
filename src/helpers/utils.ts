@@ -51,7 +51,7 @@ export async function compileCPP(sourcePath: string): Promise<void> {
   }
 
   const outputPath = absolutePath.replace('.cpp', '');
-  const compileCommand = `g++ -o ${outputPath} ${absolutePath} -O2 -std=c++23`;
+  const compileCommand = `g++ -o ${outputPath} ${absolutePath}`;
 
   await executor.execute(compileCommand, {
     timeout: DEFAULT_TIMEOUT,

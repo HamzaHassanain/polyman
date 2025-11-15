@@ -31,12 +31,12 @@ import { getGeneratorCommands } from './testset';
  * Wrapper around compileCPP with consistent error handling.
  *
  * @param {LocalValidator} validator - Validator configuration
- * @returns {Promise<string>} Path to compiled validator executable
+ * @returns {Promise<void>} Does not return anything on success
  *
  * @throws {Error} If compilation fails
  *
  * @example
- * const path = await compileValidator({ name: 'val', source: 'validator/val.cpp' });
+ * await compileValidator({ name: 'val', source: 'validator/val.cpp' });
  */
 export async function compileValidator(
   validator: LocalValidator

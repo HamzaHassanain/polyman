@@ -3,3 +3,7 @@ node_modules
 coverage
 *.log
 .DS_Store
+.vscode
+.github
+temp
+template/GUIDE.md

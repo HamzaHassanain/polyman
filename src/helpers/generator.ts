@@ -19,7 +19,6 @@ import {
 } from './utils';
 import { DEFAULT_TIMEOUT, DEFAULT_MEMORY_LIMIT } from './utils';
 import { fmt } from '../formatter';
-import { randomInt } from 'crypto';
 
 /**
  * Runs a generator program to create a test file.
@@ -252,22 +251,16 @@ export async function executeGeneratorScript(
     const compiledPath = getCompiledCommandToRun(generator);
     compiledGenerators.set(generator.name, compiledPath);
   }
-
+  let testNumber = 1;
   for (const command of commands) {
     try {
       if (command.type === 'manual' && command.manualFile) {
         // Copy manual test file
-        const testFilePath = path.join(
-          testsDir,
-          `test${command.index || randomInt(1, 10000)}.txt`
-        );
+        const testFilePath = path.join(testsDir, `test${testNumber++}.txt`);
         await copyManualTest(command.manualFile, testFilePath);
       } else if (command.type === 'generator-single' && command.generator) {
         // Run generator once
-        const testFilePath = path.join(
-          testsDir,
-          `test${command.number || command.index || randomInt(1, 10000)}.txt`
-        );
+        const testFilePath = path.join(testsDir, `test${testNumber++}.txt`);
         const compiledPath = compiledGenerators.get(command.generator);
         if (!compiledPath) {
           throw new Error(`Generator "${command.generator}" not compiled`);
@@ -290,8 +283,8 @@ export async function executeGeneratorScript(
         }
         const [start, end] = command.range;
         for (let i = start; i <= end; i++) {
-          const testFilePath = path.join(testsDir, `test${i}.txt`);
-          const args = [i.toString(), i.toString()];
+          const testFilePath = path.join(testsDir, `test${testNumber++}.txt`);
+          const args = [i.toString()];
           await runGenerator(compiledPath, args, testFilePath);
         }
       } else {
