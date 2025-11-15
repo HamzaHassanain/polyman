@@ -1,19 +1,11 @@
 {
   "tests": [
     {
-      "stdin": "5 10\n1 2 3 4 5\n",
+      "input": "5 10\n1 2 3 4 5\n",
       "expectedVerdict": "VALID"
     },
     {
-      "stdin": "0 0\n\n",
-      "expectedVerdict": "INVALID"
-    },
-    {
-      "stdin": "1001 5\n1 2 3 4 5\n",
-      "expectedVerdict": "INVALID"
-    },
-    {
-      "stdin": "5\n1 2 3 4 5 \n",
+      "input": "0 0\n\n",
       "expectedVerdict": "INVALID"
     }
   ]

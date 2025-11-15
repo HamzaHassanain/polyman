@@ -15,16 +15,16 @@
       "encoding": "UTF-8",
       "name": "My Problem Template",
       "legend": "./statements/english/legend.tex",
-      "input": "./statements/english/input.tex",
-      "output": "./statements/english/output.tex",
+      "input": "./statements/english/input-format.tex",
+      "output": "./statements/english/output-format.tex",
       "notes": "./statements/english/notes.tex"
     },
     "russian": {
       "encoding": "UTF-8",
       "name": "Шаблон моей проблемы",
       "legend": "./statements/russian/legend.tex",
-      "input": "./statements/russian/input.tex",
-      "output": "./statements/russian/output.tex",
+      "input": "./statements/russian/input-format.tex",
+      "output": "./statements/russian/output-format.tex",
       "notes": "./statements/russian/notes.tex"
     }
   },

@@ -525,7 +525,8 @@ interface GeneratorScriptCommand {
  *
  * @interface GeneratorScript
  * @property {GeneratorScriptCommand[]} [commands] - Array of generation commands
- *
+ * @property {string} [script] - Inline script definition (Polygon format)
+ * @property {string} [scriptFile] - Path to external script file
  * @example
  * // Using structured commands
  * {
@@ -552,8 +553,8 @@ interface GeneratorScriptCommand {
  */
 interface GeneratorScript {
   commands?: GeneratorScriptCommand[];
-  // script?: string;
-  // scriptFile?: string;
+  script?: string;
+  scriptFile?: string;
 }
 
 /**

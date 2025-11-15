@@ -9,15 +9,15 @@
 import { Command } from 'commander';
 
 import {
-  createTemplate,
-  downloadTestlib,
-  listAvailableCheckers,
+  createTemplateAction,
+  downloadTestlibAction,
+  listAvailableCheckersAction,
   listTestsetsAction,
   generateTestsAction,
   validateTestsAction,
   runSolutionAction,
-  testWhat,
-  fullVerification,
+  testWhatAction,
+  fullVerificationAction,
   // registerApiKeyAndSecret,
 } from './actions';
 
@@ -45,7 +45,7 @@ program
 program
   .command('new <directory>')
   .description('Create a new problem in the specified directory')
-  .action(createTemplate);
+  .action(createTemplateAction);
 
 /**
  * Command: download-testlib
@@ -58,7 +58,7 @@ program
 program
   .command('download-testlib')
   .description('download testlib.h in the current directory')
-  .action(downloadTestlib);
+  .action(downloadTestlibAction);
 
 /**
  * Command: list-checkers
@@ -71,7 +71,7 @@ program
 program
   .command('list-checkers')
   .description('List available checkers')
-  .action(listAvailableCheckers);
+  .action(listAvailableCheckersAction);
 
 /**
  * Command: list-testsets
@@ -204,7 +204,7 @@ program
   .description(
     'Test the Validator or the Checker against their tests or test a solution agains the main correct solution\n\tThe <what> can be "validator", "checker", or a solution name to run against the main correct solution and compare with the checker.'
   )
-  .action(testWhat);
+  .action(testWhatAction);
 
 /**
  * Command: verify
@@ -220,7 +220,7 @@ program
   .description(
     'Run full verification of the problem including test generation, validation, and solution testing'
   )
-  .action(fullVerification);
+  .action(fullVerificationAction);
 
 /**
  * Command: register <api-key> <secret>

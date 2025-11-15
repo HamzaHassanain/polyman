@@ -138,7 +138,7 @@ export async function executeGeneratorScript(
   startIndex: number = 1
 ) {
   let someFailed = false;
-  const testsDir = outputDir || path.resolve(process.cwd(), 'tests');
+  const testsDir = outputDir || path.resolve(process.cwd(), 'testsets');
   ensureDirectoryExists(testsDir);
 
   // Compile all generators first

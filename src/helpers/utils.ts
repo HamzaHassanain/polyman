@@ -7,7 +7,12 @@ import path from 'path';
 import { executor } from '../executor';
 import fs from 'fs';
 import { fmt } from '../formatter';
-import ConfigFile from '../types';
+import ConfigFile, {
+  LocalChecker,
+  LocalGenerator,
+  LocalSolution,
+  LocalValidator,
+} from '../types';
 
 /** Default compilation timeout in milliseconds */
 export const DEFAULT_TIMEOUT = 10000;
@@ -255,7 +260,7 @@ export function throwError(error: unknown, message = ''): never {
  * @param {string} dirName - Directory name/path relative to current working directory
  *
  * @example
- * ensureDirectoryExists('tests');
+ * ensureDirectoryExists('testsets');
  * ensureDirectoryExists('nested/path/to/dir');
  */
 export function ensureDirectoryExists(dirName: string) {
@@ -316,4 +321,11 @@ export function readFirstLine(filePath: string): Promise<string> {
       reject(err);
     });
   });
+}
+
+export function getCompiledPath(
+  object: LocalChecker | LocalValidator | LocalSolution | LocalGenerator
+): string {
+  const source = path.resolve(process.cwd(), object.source);
+  return source.replace(/\.cpp$/, '.o');
 }

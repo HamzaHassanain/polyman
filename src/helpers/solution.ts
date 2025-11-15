@@ -105,7 +105,7 @@ export function findMatchingSolutions(
  *   2000,
  *   256,
  *   'test1.txt',
- *   'tests'
+ *   'testsets'
  * );
  */
 async function runSolution(
@@ -125,7 +125,7 @@ async function runSolution(
   );
   const inputFilePath = path.resolve(
     process.cwd(),
-    'tests',
+    'testsets',
     testsetName,
     inputFile
   );
@@ -163,7 +163,7 @@ async function runSolution(
  * // Returns: '/path/to/project/solutions-outputs/main'
  *
  * @example
- * const dir = ensureOutputDirectory('main', 'tests');
+ * const dir = ensureOutputDirectory('main', 'testsets');
  * // Returns: '/path/to/project/solutions-outputs/main/tests'
  */
 function ensureOutputDirectory(
@@ -230,7 +230,7 @@ async function compileSolution(sourcePath: string): Promise<string> {
  * @throws {Error} If solution execution fails
  *
  * @example
- * await runSolutionOnSingleTest(solution, config, 'tests', 5);
+ * await runSolutionOnSingleTest(solution, config, 'testsets', 5);
  */
 export async function runSolutionOnSingleTest(
   solution: LocalSolution,
@@ -278,7 +278,7 @@ export async function runSolutionOnSingleTest(
  * @throws {Error} If solution fails on any test
  *
  * @example
- * await runSolutionOnTestset(solution, config, 'tests');
+ * await runSolutionOnTestset(solution, config, 'testsets');
  */
 export async function runSolutionOnTestset(
   solution: LocalSolution,
@@ -294,7 +294,7 @@ export async function runSolutionOnTestset(
     const compiledPath = await compileSolution(solution.source);
     ensureOutputDirectory(solution.name, testsetName);
 
-    const testsDir = path.resolve(process.cwd(), 'tests', testsetName);
+    const testsDir = path.resolve(process.cwd(), 'testsets', testsetName);
     const testFiles = getTestFiles(testsDir);
 
     for (const testFile of testFiles) {
@@ -680,7 +680,7 @@ export async function startTheComparisonProcess(
         targetSolution.name,
         testset.name
       );
-      const testsDir = path.resolve(process.cwd(), 'tests', testset.name);
+      const testsDir = path.resolve(process.cwd(), 'testsets', testset.name);
       const testFiles = getTestFiles(testsDir);
 
       for (const testFile of testFiles) {

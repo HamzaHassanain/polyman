@@ -103,7 +103,7 @@ export async function generateTestsForTestset(
   validateGeneratorCommands(commands, generatorNames);
 
   const testsDir =
-    outputDir || path.resolve(process.cwd(), 'tests', testset.name);
+    outputDir || path.resolve(process.cwd(), 'testsets', testset.name);
 
   ensureDirectoryExists(testsDir);
 
@@ -141,7 +141,7 @@ export async function generateSingleTest(
   const command = commands[testIndex - 1];
 
   const testsDir =
-    outputDir || path.resolve(process.cwd(), 'tests', testset.name);
+    outputDir || path.resolve(process.cwd(), 'testsets', testset.name);
 
   ensureDirectoryExists(testsDir);
 
@@ -183,7 +183,7 @@ export async function generateTestsForGroup(
   validateGeneratorCommands(groupCommands, generatorNames);
 
   const testsDir =
-    outputDir || path.resolve(process.cwd(), 'tests', testset.name);
+    outputDir || path.resolve(process.cwd(), 'testsets', testset.name);
 
   ensureDirectoryExists(testsDir);
 

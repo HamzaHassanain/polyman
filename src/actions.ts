@@ -12,6 +12,7 @@ import {
   validateGroup,
   validateAllTestsets,
   testValidatorItself,
+  compileValidator,
 } from './helpers/validator';
 
 import {
@@ -72,10 +73,10 @@ import fs from 'fs';
  *
  * @example
  * // From CLI: polyman new my-problem
- * createTemplate('my-problem');
+ * createTemplateAction('my-problem');
  * // Creates: my-problem/ with full template structure
  */
-export const createTemplate = (directory: string) => {
+export const createTemplateAction = (directory: string) => {
   fmt.section('📁 CREATE NEW PROBLEM TEMPLATE');
 
   try {
@@ -117,14 +118,14 @@ export const createTemplate = (directory: string) => {
  *
  * @example
  * // From CLI: polyman list-checkers
- * listAvailableCheckers();
+ * listAvailableCheckersAction();
  * // Displays:
  * //   1. acmp.cpp       → Almost-correct mode checker
  * //   2. fcmp.cpp       → Floating-point comparison
  * //   3. ncmp.cpp       → Number comparison
  * //   ... etc
  */
-export const listAvailableCheckers = () => {
+export const listAvailableCheckersAction = () => {
   fmt.section('📋 AVAILABLE CHECKERS');
 
   try {
@@ -175,7 +176,7 @@ export const listAvailableCheckers = () => {
 
     console.log();
     fmt.info(
-      `  ${fmt.infoIcon()} ${fmt.dim(`Use these checkers in your Config.json file under the "checker" section, with ${fmt.highlight('custom: false')}.`)}`
+      `  ${fmt.infoIcon()} ${fmt.dim(`Use these checkers in your Config.json file under the "checker" section, with ${fmt.highlight('isStandard: false')}.`)}`
     );
     console.log();
   } catch (error) {
@@ -199,11 +200,11 @@ export const listAvailableCheckers = () => {
  *
  * @example
  * // From CLI: polyman download-testlib
- * await downloadTestlib();
+ * await downloadTestlibAction();
  * // Downloads testlib.h to current directory
  * // Shows installation instructions for /usr/include or /usr/local/include
  */
-export const downloadTestlib = async () => {
+export const downloadTestlibAction = async () => {
   fmt.section('📥 DOWNLOAD TESTLIB.H');
 
   try {
@@ -285,18 +286,18 @@ export const downloadTestlib = async () => {
  *
  * @example
  * // From CLI: polyman validate tests
- * await validateTestsAction('tests');
- * // Validates testset named 'tests'
+ * await validateTestsAction('testsets');
+ * // Validates testset named 'testsets'
  *
  * @example
  * // From CLI: polyman validate tests samples
- * await validateTestsAction('tests', 'samples');
- * // Validates group 'samples' in testset 'tests'
+ * await validateTestsAction('testsets', 'samples');
+ * // Validates group 'samples' in testset 'testsets'
  *
  * @example
  * // From CLI: polyman validate tests 5
- * await validateTestsAction('tests', '5');
- * // Validates test 5 in testset 'tests'
+ * await validateTestsAction('testsets', '5');
+ * // Validates test 5 in testset 'testsets'
  */
 export const validateTestsAction = async (
   target: string,
@@ -313,19 +314,33 @@ export const validateTestsAction = async (
       // Validate all testsets
       fmt.section('✅ VALIDATING ALL TESTSETS');
 
-      fmt.step(stepNum++, 'Validating Configuration');
-      fmt.info(
-        `  ${fmt.infoIcon()} Validator: ${fmt.highlight(config.validator.source)} ${fmt.dim('(C++)')}`
-      );
-      fmt.info(
-        `  ${fmt.infoIcon()} Testsets: ${fmt.highlight(config.testsets.length.toString())}`
-      );
-      fmt.stepComplete('Configuration validated');
+      // step 1: Validate configuration
+      {
+        fmt.step(stepNum++, 'Validating Configuration');
+        fmt.info(
+          `  ${fmt.infoIcon()} Validator: ${fmt.highlight(config.validator.source)} ${fmt.dim('(C++)')}`
+        );
+        fmt.info(
+          `  ${fmt.infoIcon()} Testsets: ${fmt.highlight(config.testsets.length.toString())}`
+        );
+        fmt.stepComplete('Configuration validated');
+      }
 
-      fmt.step(stepNum++, 'Validating All Testsets');
-      await validateAllTestsets(config.validator, config.testsets);
-      fmt.stepComplete('All testsets validated');
+      // step 2: Compile validator
+      {
+        fmt.step(stepNum++, 'Compiling Validator');
+        await compileValidator(config.validator);
+        fmt.stepComplete('Validator compiled');
+      }
 
+      // step 3: Validate all testsets
+      {
+        fmt.step(stepNum++, 'Validating All Testsets');
+        await validateAllTestsets(config.validator, config.testsets);
+        fmt.stepComplete('All testsets validated');
+      }
+
+      // Final success message
       fmt.successBox('ALL TESTSETS PASSED VALIDATION!');
     } else {
       // Find the testset
@@ -338,14 +353,31 @@ export const validateTestsAction = async (
           `✅ VALIDATING TEST ${testIndex} IN TESTSET: ${target.toUpperCase()}`
         );
 
-        fmt.step(stepNum++, 'Validating Configuration');
-        fmt.info(`  ${fmt.infoIcon()} Testset: ${fmt.highlight(testset.name)}`);
-        fmt.info(`  ${fmt.infoIcon()} Test index: ${fmt.highlight(modifier)}`);
-        fmt.stepComplete('Configuration validated');
+        // step 1: Validate configuration
+        {
+          fmt.step(stepNum++, 'Validating Configuration');
+          fmt.info(
+            `  ${fmt.infoIcon()} Testset: ${fmt.highlight(testset.name)}`
+          );
+          fmt.info(
+            `  ${fmt.infoIcon()} Test index: ${fmt.highlight(modifier)}`
+          );
+          fmt.stepComplete('Configuration validated');
+        }
 
-        fmt.step(stepNum++, `Validating Test ${testIndex}`);
-        await validateSingleTest(config.validator, testset.name, testIndex);
-        fmt.stepComplete(`Test ${testIndex} validated`);
+        // step 2: compile validator
+        {
+          fmt.step(stepNum++, 'Compiling Validator');
+          await compileValidator(config.validator);
+          fmt.stepComplete('Validator compiled');
+        }
+
+        // step 3: Validate single test
+        {
+          fmt.step(stepNum++, `Validating Test ${testIndex}`);
+          await validateSingleTest(config.validator, testset.name, testIndex);
+          fmt.stepComplete(`Test ${testIndex} validated`);
+        }
 
         fmt.successBox(
           `TEST ${testIndex} IN ${target.toUpperCase()} PASSED VALIDATION!`
@@ -355,15 +387,29 @@ export const validateTestsAction = async (
         fmt.section(
           `✅ VALIDATING GROUP '${modifier}' IN TESTSET: ${target.toUpperCase()}`
         );
+        // step 1: Validate configuration
+        {
+          fmt.step(stepNum++, 'Validating Configuration');
+          fmt.info(
+            `  ${fmt.infoIcon()} Testset: ${fmt.highlight(testset.name)}`
+          );
+          fmt.info(`  ${fmt.infoIcon()} Group: ${fmt.highlight(modifier)}`);
+          fmt.stepComplete('Configuration validated');
+        }
 
-        fmt.step(stepNum++, 'Validating Configuration');
-        fmt.info(`  ${fmt.infoIcon()} Testset: ${fmt.highlight(testset.name)}`);
-        fmt.info(`  ${fmt.infoIcon()} Group: ${fmt.highlight(modifier)}`);
-        fmt.stepComplete('Configuration validated');
+        // step 2: compile validator
+        {
+          fmt.step(stepNum++, 'Compiling Validator');
+          await compileValidator(config.validator);
+          fmt.stepComplete('Validator compiled');
+        }
 
-        fmt.step(stepNum++, `Validating Group '${modifier}'`);
-        await validateGroup(config.validator, testset, modifier);
-        fmt.stepComplete(`Group '${modifier}' validated`);
+        // step 3: Validate group
+        {
+          fmt.step(stepNum++, `Validating Group '${modifier}'`);
+          await validateGroup(config.validator, testset, modifier);
+          fmt.stepComplete(`Group '${modifier}' validated`);
+        }
 
         fmt.successBox(
           `GROUP '${modifier}' IN ${target.toUpperCase()} PASSED VALIDATION!`
@@ -372,13 +418,28 @@ export const validateTestsAction = async (
         // Validate entire testset
         fmt.section(`✅ VALIDATING TESTSET: ${target.toUpperCase()}`);
 
-        fmt.step(stepNum++, 'Validating Configuration');
-        fmt.info(`  ${fmt.infoIcon()} Testset: ${fmt.highlight(testset.name)}`);
-        fmt.stepComplete('Configuration validated');
+        // step 1: Validate configuration
+        {
+          fmt.step(stepNum++, 'Validating Configuration');
+          fmt.info(
+            `  ${fmt.infoIcon()} Testset: ${fmt.highlight(testset.name)}`
+          );
+          fmt.stepComplete('Configuration validated');
+        }
 
-        fmt.step(stepNum++, 'Validating Tests');
-        await validateTestset(config.validator, testset.name);
-        fmt.stepComplete('Tests validated');
+        // step 2: compile validator
+        {
+          fmt.step(stepNum++, 'Compiling Validator');
+          await compileValidator(config.validator);
+          fmt.stepComplete('Validator compiled');
+        }
+
+        // step 3: Validate testset
+        {
+          fmt.step(stepNum++, 'Validating Tests');
+          await validateTestset(config.validator, testset.name);
+          fmt.stepComplete('Tests validated');
+        }
 
         fmt.successBox(`TESTSET ${target.toUpperCase()} PASSED VALIDATION!`);
       }
@@ -413,18 +474,18 @@ export const validateTestsAction = async (
  *
  * @example
  * // From CLI: polyman run-solution main tests
- * await runSolutionAction('main', 'tests');
- * // Runs main solution on testset 'tests'
+ * await runSolutionAction('main', 'testsets');
+ * // Runs main solution on testset 'testsets'
  *
  * @example
  * // From CLI: polyman run-solution main tests samples
- * await runSolutionAction('main', 'tests', 'samples');
- * // Runs main solution on group 'samples' in testset 'tests'
+ * await runSolutionAction('main', 'testsets', 'samples');
+ * // Runs main solution on group 'samples' in testset 'testsets'
  *
  * @example
  * // From CLI: polyman run-solution main tests 5
- * await runSolutionAction('main', 'tests', '5');
- * // Runs main solution on test 5 in testset 'tests'
+ * await runSolutionAction('main', 'testsets', '5');
+ * // Runs main solution on test 5 in testset 'testsets'
  */
 export const runSolutionAction = async (
   solutionName: string,
@@ -571,21 +632,21 @@ export const runSolutionAction = async (
  *
  * @example
  * // From CLI: polyman test validator
- * await testWhat('validator');
+ * await testWhatAction('validator');
  * // Runs validator self-tests from validator_tests.json
  *
  * @example
  * // From CLI: polyman test checker
- * await testWhat('checker');
+ * await testWhatAction('checker');
  * // Runs checker self-tests from checker_tests.json
  *
  * @example
  * // From CLI: polyman test wa-solution
- * await testWhat('wa-solution');
+ * await testWhatAction('wa-solution');
  * // Runs wa-solution and main solution, compares with checker
  * // Validates that wa-solution gets WA on at least one test
  */
-export const testWhat = async (what: string) => {
+export const testWhatAction = async (what: string) => {
   fmt.section(`🔍 TESTING: ${what.toUpperCase()}`);
 
   try {
@@ -670,7 +731,7 @@ export const testWhat = async (what: string) => {
  *
  * @example
  * // From CLI: polyman verify
- * await fullVerification();
+ * await fullVerificationAction();
  * // Runs complete verification workflow:
  * // - Generates tests
  * // - Validates tests
@@ -678,7 +739,7 @@ export const testWhat = async (what: string) => {
  * // - Runs all solutions
  * // - Verifies all solutions against main-correct
  */
-export const fullVerification = async () => {
+export const fullVerificationAction = async () => {
   fmt.section('🏆 POLYGON PROBLEM VERIFICATION');
 
   try {
@@ -829,18 +890,18 @@ export const listTestsetsAction = () => {
  *
  * @example
  * // From CLI: polyman generate tests
- * await generateTestsAction('tests');
- * // Generates testset named 'tests'
+ * await generateTestsAction('testsets');
+ * // Generates testset named 'testsets'
  *
  * @example
  * // From CLI: polyman generate tests samples
- * await generateTestsAction('tests', 'samples');
- * // Generates group 'samples' in testset 'tests'
+ * await generateTestsAction('testsets', 'samples');
+ * // Generates group 'samples' in testset 'testsets'
  *
  * @example
  * // From CLI: polyman generate tests 5
- * await generateTestsAction('tests', '5');
- * // Generates test 5 in testset 'tests'
+ * await generateTestsAction('testsets', '5');
+ * // Generates test 5 in testset 'testsets'
  */
 export const generateTestsAction = async (
   target: string,

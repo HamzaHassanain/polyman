@@ -20,6 +20,7 @@ import {
   ensureDirectoryExists,
   removeDirectoryRecursively,
   getTestFiles,
+  getCompiledPath,
 } from './utils';
 import { DEFAULT_TIMEOUT, DEFAULT_MEMORY_LIMIT } from './utils';
 import { fmt } from '../formatter';
@@ -118,7 +119,7 @@ async function runValidator(
  * @throws {Error} If test is invalid
  *
  * @example
- * await validateSingleTest(validator, 'tests', 5);
+ * await validateSingleTest(validator, 'testsets', 5);
  */
 export async function validateSingleTest(
   validator: LocalValidator,
@@ -126,8 +127,8 @@ export async function validateSingleTest(
   testIndex: number
 ) {
   try {
-    const compiledPath = await compileValidator(validator);
-    const testsDir = path.resolve(process.cwd(), 'tests', testsetName);
+    const compiledPath = getCompiledPath(validator);
+    const testsDir = path.resolve(process.cwd(), 'testsets', testsetName);
     const testFilePath = path.join(testsDir, `test${testIndex}.txt`);
 
     if (!fs.existsSync(testFilePath)) {
@@ -156,7 +157,7 @@ export async function validateSingleTest(
  * @throws {Error} If any test is invalid
  *
  * @example
- * await validateTestset(validator, 'tests');
+ * await validateTestset(validator, 'testsets');
  */
 export async function validateTestset(
   validator: LocalValidator,
@@ -164,8 +165,8 @@ export async function validateTestset(
 ) {
   let someFailed = false;
   try {
-    const compiledPath = await compileValidator(validator);
-    const testsDir = path.resolve(process.cwd(), 'tests', testsetName);
+    const compiledPath = getCompiledPath(validator);
+    const testsDir = path.resolve(process.cwd(), 'testsets', testsetName);
 
     if (!fs.existsSync(testsDir)) {
       throw new Error(`Testset directory not found: ${testsDir}`);
@@ -185,7 +186,7 @@ export async function validateTestset(
         someFailed = true;
         logError(
           new Error(
-            `Test ${testFile} failed validation:\n\t${error instanceof Error ? error.message : 'Unknown error'}`
+            `Test ${fmt.bold(`${testsetName}/${testFile}`)} failed validation:\n\t${error instanceof Error ? error.message : 'Unknown error'}`
           )
         );
       }
@@ -219,8 +220,8 @@ export async function validateGroup(
 ) {
   let someFailed = false;
   try {
-    const compiledPath = await compileValidator(validator);
-    const testsDir = path.resolve(process.cwd(), 'tests', testset.name);
+    const compiledPath = getCompiledPath(validator);
+    const testsDir = path.resolve(process.cwd(), 'testsets', testset.name);
 
     if (!fs.existsSync(testsDir)) {
       throw new Error(`Testset directory not found: ${testsDir}`);
@@ -299,12 +300,18 @@ export async function validateAllTestsets(
   validator: LocalValidator,
   testsets: LocalTestset[]
 ) {
+  let someFailed = false;
   for (const testset of testsets) {
     try {
       await validateTestset(validator, testset.name);
     } catch (error) {
-      throwError(error, `Failed to validate testset "${testset.name}"`);
+      logError(error);
+      someFailed = true;
     }
+  }
+
+  if (someFailed) {
+    throw new Error('Some testsets failed validation');
   }
 }
 
