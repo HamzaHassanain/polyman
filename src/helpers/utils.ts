@@ -188,9 +188,9 @@ export function isNumeric(value: string): boolean {
  *   logError(error);
  * }
  */
-export function logError(error: unknown) {
+export function logError(error: unknown, indent: number = 1) {
   const message = error instanceof Error ? error.message : String(error);
-  fmt.error(`  ${fmt.cross()} ${message}`);
+  fmt.error(`${' '.repeat(indent)} ${fmt.cross()} ${message}`);
 }
 
 /**
@@ -319,6 +319,17 @@ export function readFirstLine(filePath: string): Promise<string> {
 export function getCompiledCommandToRun(
   object: LocalChecker | LocalValidator | LocalSolution | LocalGenerator
 ): string {
+  if ('isStandard' in object && object.isStandard) {
+    const checkerName = object.source.replace('.cpp', '');
+    return path.resolve(
+      __dirname,
+      '../..',
+      'assets',
+      'checkers',
+      `${checkerName}`
+    );
+  }
+
   const source = path.resolve(process.cwd(), object.source);
   const extention = path.extname(source);
 

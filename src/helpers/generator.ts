@@ -19,6 +19,7 @@ import {
 } from './utils';
 import { DEFAULT_TIMEOUT, DEFAULT_MEMORY_LIMIT } from './utils';
 import { fmt } from '../formatter';
+import { randomInt } from 'crypto';
 
 /**
  * Runs a generator program to create a test file.
@@ -239,8 +240,7 @@ export async function compileGeneratorsForTestsets(
 export async function executeGeneratorScript(
   commands: GeneratorScriptCommand[],
   generators: LocalGenerator[],
-  outputDir: string,
-  startIndex: number = 1
+  outputDir: string
 ) {
   let someFailed = false;
   const testsDir = outputDir || path.resolve(process.cwd(), 'testsets');
@@ -253,18 +253,21 @@ export async function executeGeneratorScript(
     compiledGenerators.set(generator.name, compiledPath);
   }
 
-  // Execute commands
-  let testIndex = startIndex;
   for (const command of commands) {
     try {
       if (command.type === 'manual' && command.manualFile) {
         // Copy manual test file
-        const testFilePath = path.join(testsDir, `test${testIndex}.txt`);
+        const testFilePath = path.join(
+          testsDir,
+          `test${command.index || randomInt(1, 10000)}.txt`
+        );
         await copyManualTest(command.manualFile, testFilePath);
-        testIndex++;
       } else if (command.type === 'generator-single' && command.generator) {
         // Run generator once
-        const testFilePath = path.join(testsDir, `test${testIndex}.txt`);
+        const testFilePath = path.join(
+          testsDir,
+          `test${command.number || command.index || randomInt(1, 10000)}.txt`
+        );
         const compiledPath = compiledGenerators.get(command.generator);
         if (!compiledPath) {
           throw new Error(`Generator "${command.generator}" not compiled`);
@@ -274,7 +277,6 @@ export async function executeGeneratorScript(
           [command.number!.toString()],
           testFilePath
         );
-        testIndex++;
       } else if (command.type === 'generator-range' && command.generator) {
         // Run generator multiple times for a range
         const compiledPath = compiledGenerators.get(command.generator);
@@ -288,10 +290,9 @@ export async function executeGeneratorScript(
         }
         const [start, end] = command.range;
         for (let i = start; i <= end; i++) {
-          const testFilePath = path.join(testsDir, `test${testIndex}.txt`);
-          const args = [command.number!.toString(), i.toString()];
+          const testFilePath = path.join(testsDir, `test${i}.txt`);
+          const args = [i.toString(), i.toString()];
           await runGenerator(compiledPath, args, testFilePath);
-          testIndex++;
         }
       } else {
         throw new Error(`Invalid command type or missing required fields`);
@@ -299,9 +300,8 @@ export async function executeGeneratorScript(
     } catch (error) {
       someFailed = true;
       fmt.error(
-        `  ${fmt.cross()} Test ${testIndex} generation failed:\n\t${(error as Error).message}`
+        `  ${fmt.cross()} Test ${command.index} generation failed:\n\t${(error as Error).message}`
       );
-      testIndex++;
     }
   }
 

@@ -489,6 +489,7 @@ interface LocalValidator {
  * @property {'generator-single' | 'manual' | "generator-range"} type - Command type
  * @property {string} [generator] - Generator name (for type='generator')
  * @property {string[]} [args] - Arguments to pass to generator
+ * @property {number} [number] - Test number (for type='generator-single' or 'manual')
  * @property {string} [manualFile] - Path to manual test file (for type='manual')
  * @property {string} [group] - Test group assignment
  * @property {number} [points] - Points for this test
@@ -513,6 +514,7 @@ interface GeneratorScriptCommand {
   type: 'generator-single' | 'manual' | 'generator-range';
   generator?: string;
   number?: number;
+  index?: number;
   manualFile?: string;
   group?: string;
   points?: number;

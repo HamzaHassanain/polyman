@@ -129,7 +129,16 @@ export function ensureCheckerExists(
 export async function testCheckerItself() {
   try {
     const config = readConfigFile();
-    ensureCheckerExists(config.checker);
+
+    if (config.checker.isStandard) {
+      fmt.warning(
+        `   ⚠️  Using standard checker: ${fmt.highlight(config.checker.source)}`
+      );
+      fmt.info(
+        `   ${fmt.bold('Note:')} Standard checkers are assumed to be correct and are not tested against custom test suites.`
+      );
+      return;
+    }
 
     if (!config.checker.testsFilePath) {
       throw new Error(

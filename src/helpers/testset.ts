@@ -145,7 +145,7 @@ export async function generateSingleTest(
 
   ensureDirectoryExists(testsDir);
 
-  await executeGeneratorScript([command], generators, testsDir, testIndex);
+  await executeGeneratorScript([command], generators, testsDir);
 }
 
 /**

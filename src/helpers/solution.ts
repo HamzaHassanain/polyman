@@ -336,7 +336,7 @@ export async function runSolutionOnTestset(
       } catch (error) {
         const message =
           error instanceof Error
-            ? error.message + ` (test: ${testFile})`
+            ? error.message + ` (${testsetName}/${testFile})`
             : String(error);
         thrownErrors.add(message);
       }
@@ -475,10 +475,6 @@ export async function runSolutionOnAllTestsets(
   config: ConfigFile,
   testsets: LocalTestset[]
 ) {
-  fmt.info(
-    `  ${fmt.infoIcon()} Running solution: ${fmt.highlight(solution.name)} on all testsets`
-  );
-
   const failedTestsets = new Set<string>();
 
   for (const testset of testsets) {
@@ -990,14 +986,14 @@ function validateExpectedVerdicts(
   if (verdictTracker.didTLE) {
     if (!isTLTag(targetSolution.tag)) {
       throw new Error(
-        `Solution ${fmt.highlight(targetSolution.name)} marked as ${targetSolution.tag} but had Time Limit Exceeded on some tests`
+        `Solution ${fmt.highlight(targetSolution.name)} marked as ${fmt.highlight(targetSolution.tag)} but got ${fmt.bold('Time Limit Exceeded')} on some tests`
       );
     }
   }
   if (verdictTracker.didMLE) {
     if (!isMLTag(targetSolution.tag)) {
       throw new Error(
-        `Solution ${fmt.highlight(targetSolution.name)} marked as ${targetSolution.tag} but got Memory Limit Exceeded on some tests`
+        `Solution ${fmt.highlight(targetSolution.name)} marked as ${fmt.highlight(targetSolution.tag)} but got ${fmt.bold('Memory Limit Exceeded')} on some tests`
       );
     }
   }
@@ -1005,7 +1001,7 @@ function validateExpectedVerdicts(
   if (verdictTracker.didRTE) {
     if (!isRTETag(targetSolution.tag)) {
       throw new Error(
-        `Solution ${fmt.highlight(targetSolution.name)} marked as ${fmt.highlight(targetSolution.tag)} but got Runtime Error on some tests`
+        `Solution ${fmt.highlight(targetSolution.name)} marked as ${fmt.highlight(targetSolution.tag)} but got ${fmt.bold('Runtime Error')} on some tests`
       );
     }
   }
@@ -1013,25 +1009,25 @@ function validateExpectedVerdicts(
   if (verdictTracker.didWA) {
     if (!isWATag(targetSolution.tag)) {
       throw new Error(
-        `Solution ${fmt.highlight(targetSolution.name)} marked as ${fmt.highlight(targetSolution.tag)} but got Wrong Answer on some tests`
+        `Solution ${fmt.highlight(targetSolution.name)} marked as ${fmt.highlight(targetSolution.tag)} but got ${fmt.bold('Wrong Answer')} on some tests`
       );
     }
   }
   if (targetSolution.tag === 'TL' && !verdictTracker.didTLE) {
     throw new Error(
-      `Target Solution ${fmt.highlight(targetSolution.name)} is marked as ${fmt.highlight(targetSolution.tag)} but did not time out on any test`
+      `Solution ${fmt.highlight(targetSolution.name)} marked as ${fmt.highlight(targetSolution.tag)} but did not get ${fmt.bold('Time Limit Exceeded')} on any test`
     );
   }
 
   if (targetSolution.tag === 'ML' && !verdictTracker.didMLE) {
     throw new Error(
-      `Target Solution ${fmt.highlight(targetSolution.name)} is marked as ${fmt.highlight(targetSolution.tag)} but did not exceed memory limit on any test`
+      `Solution ${fmt.highlight(targetSolution.name)} marked as ${fmt.highlight(targetSolution.tag)} but did not get ${fmt.bold('Memory Limit Exceeded')} on any test`
     );
   }
 
   if (targetSolution.tag === 'WA' && !verdictTracker.didWA) {
     throw new Error(
-      `Target Solution ${fmt.highlight(targetSolution.name)} is marked as ${fmt.highlight(targetSolution.tag)} but passed all tests correctly`
+      `Solution ${fmt.highlight(targetSolution.name)} marked as ${fmt.highlight(targetSolution.tag)} but did not get ${fmt.bold('Wrong Answer')} on any test`
     );
   }
   if (
@@ -1042,7 +1038,7 @@ function validateExpectedVerdicts(
     !verdictTracker.didWA
   ) {
     throw new Error(
-      `Target Solution ${fmt.highlight(targetSolution.name)} is marked as ${targetSolution.tag} but passed all tests correctly`
+      `Solution ${fmt.highlight(targetSolution.name)} marked as ${fmt.highlight(targetSolution.tag)} but passed all tests correctly`
     );
   }
 }

@@ -46,7 +46,7 @@ import {
 } from './helpers/solution';
 import { copyTemplate } from './helpers/create-template';
 import { downloadFile } from './helpers/testlib-download';
-import { readConfigFile } from './helpers/utils';
+import { logError, readConfigFile } from './helpers/utils';
 import path from 'path';
 import fs from 'fs';
 import type ConfigFile from './types';
@@ -318,8 +318,13 @@ export async function stepRunSolutionsOnAllTestsets(
   solutions: LocalSolution[]
 ): Promise<void> {
   fmt.step(stepNum, 'Running Solutions on All Testsets');
+
   for (const solution of solutions) {
-    await runSolutionOnAllTestsets(solution, config, config.testsets!);
+    try {
+      await runSolutionOnAllTestsets(solution, config, config.testsets!);
+    } catch {
+      //
+    }
   }
   fmt.stepComplete('All solutions completed');
 }
@@ -332,7 +337,11 @@ export async function stepRunSolutionsOnTestset(
 ): Promise<void> {
   fmt.step(stepNum, `Running Solutions on Testset ${testsetName}`);
   for (const solution of solutions) {
-    await runSolutionOnTestset(solution, config, testsetName);
+    try {
+      await runSolutionOnTestset(solution, config, testsetName);
+    } catch {
+      //
+    }
   }
   fmt.stepComplete('Solutions completed');
 }
@@ -377,6 +386,17 @@ export async function stepCompileChecker(
   ensureCheckerExists(config.checker);
   await compileChecker(config.checker);
   fmt.stepComplete('Checker compiled');
+}
+export function stepValidateConfigForChecker(
+  stepNum: number,
+  config: ConfigFile
+): void {
+  fmt.step(stepNum, 'Validating Checker Configuration');
+  ensureCheckerExists(config.checker);
+  fmt.info(
+    `  ${fmt.infoIcon()} Checker: ${fmt.highlight(config.checker.source)} ${fmt.dim('(C++)')}`
+  );
+  fmt.stepComplete('Checker configuration validated');
 }
 
 export async function stepTestChecker(stepNum: number): Promise<void> {
@@ -486,15 +506,18 @@ export async function stepRunSolutionsForVerification(
     `  ${fmt.infoIcon()} Main solution: ${fmt.primary(mainSolution.name)} ${fmt.dim(`(${mainSolution.tag})`)}`
   );
   await runSolutionOnAllTestsets(mainSolution, config, config.testsets!);
-
-  try {
-    for (const solution of otherSolutions) {
+  let someFailed = false;
+  for (const solution of otherSolutions) {
+    try {
       await runSolutionOnAllTestsets(solution, config, config.testsets!);
+    } catch {
+      someFailed = true;
     }
-    fmt.stepComplete('All solutions ran on all testsets');
-  } catch {
-    fmt.stepComplete('Some solutions failed on tests (may be expected)');
   }
+  if (someFailed) {
+    fmt.warning('  Some Solutions Failed, may be expected');
+  }
+  fmt.stepComplete('All solutions have run');
 }
 
 export async function stepVerifySolutionsAgainstMainCorrect(
@@ -507,70 +530,30 @@ export async function stepVerifySolutionsAgainstMainCorrect(
     s => s.name !== mainSolution.name
   );
 
+  let didFail = false;
   for (const solution of otherSolutions) {
     fmt.log(
       `    ${fmt.dim('→')} Checking ${fmt.highlight(solution.name)} ${fmt.dim(`(${solution.tag})`)}`
     );
-    await startTheComparisonProcess(
-      config.checker,
-      mainSolution,
-      solution,
-      config.testsets!
-    );
+    try {
+      await startTheComparisonProcess(
+        config.checker,
+        mainSolution,
+        solution,
+        config.testsets!
+      );
+      fmt.success(
+        `    ${fmt.dim('→')} ${fmt.checkmark()} ${fmt.highlight(solution.name)} Behaves as expected`
+      );
+    } catch (error) {
+      didFail = true;
+      logError(error, 4);
+    }
+  }
+  if (didFail) {
+    throw new Error('Some solutions did not behave as expected');
+  } else {
     fmt.success(`      ${fmt.checkmark()} Behaves as expected`);
   }
   fmt.stepComplete('All solutions verified');
 }
-
-export default {
-  // Create Template
-  stepCreateDirectoryStructure,
-  stepCopyTemplateFiles,
-
-  // Download Testlib
-  stepDownloadTestlib,
-  stepSaveTestlibToDirectory,
-
-  // Validation
-  stepValidateConfigForValidator,
-  stepCompileValidator,
-  stepValidateAllTestsets,
-  stepValidateSingleTest,
-  stepValidateGroup,
-  stepValidateTestset,
-
-  // Generation
-  stepValidateConfigForGeneration,
-  stepCompileGeneratorsForTestsets,
-  stepGenerateAllTestsets,
-  stepCompileGeneratorsForSingleTest,
-  stepGenerateSingleTest,
-  stepCompileGeneratorsForGroup,
-  stepGenerateTestsForGroup,
-  stepCompileGeneratorsForTestset,
-  stepGenerateTestsForTestset,
-
-  // Solutions
-  stepValidateConfigForSolutions,
-  stepCompileSolutions,
-  stepRunSolutionsOnAllTestsets,
-  stepRunSolutionsOnTestset,
-  stepRunSolutionsOnTest,
-  stepRunSolutionsOnGroup,
-
-  // Checker
-  stepCompileChecker,
-  stepTestChecker,
-
-  // Test Solution
-  stepValidateConfigForSolutionTest,
-  stepTestSolutionBehavior,
-
-  // Full Verification
-  stepGenerateTestsForVerification,
-  stepTestValidator,
-  stepValidateGeneratedTests,
-  stepCompileSolutionsForVerification,
-  stepRunSolutionsForVerification,
-  stepVerifySolutionsAgainstMainCorrect,
-};

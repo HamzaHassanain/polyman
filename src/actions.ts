@@ -31,6 +31,7 @@ import {
   stepRunSolutionsOnTestset,
   stepRunSolutionsOnTest,
   stepRunSolutionsOnGroup,
+  stepValidateConfigForChecker,
   stepCompileChecker,
   stepTestChecker,
   stepValidateConfigForSolutionTest,
@@ -715,7 +716,9 @@ export const testWhatAction = async (what: string) => {
         {
           const config = readConfigFile();
 
-          // step 1: Validate configuration (handled in stepCompileChecker)
+          // step 1: Validate configuration
+          stepValidateConfigForChecker(stepNum++, config);
+
           // step 2: Compile checker
           await stepCompileChecker(stepNum++, config);
 
