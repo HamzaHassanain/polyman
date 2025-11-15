@@ -3,11 +3,20 @@
  * Provides functions to run test generators and create test files.
  */
 
-import type { LocalGenerator, GeneratorScriptCommand } from '../types';
+import type {
+  LocalGenerator,
+  GeneratorScriptCommand,
+  LocalTestset,
+} from '../types';
 import { executor } from '../executor';
 import path from 'path';
 import fs from 'fs';
-import { compileCPP, throwError, ensureDirectoryExists } from './utils';
+import {
+  compileCPP,
+  throwError,
+  ensureDirectoryExists,
+  getCompiledCommandToRun,
+} from './utils';
 import { DEFAULT_TIMEOUT, DEFAULT_MEMORY_LIMIT } from './utils';
 import { fmt } from '../formatter';
 
@@ -111,8 +120,104 @@ export async function compileGenerator(generator: LocalGenerator) {
 }
 
 /**
+ * Compiles all generators needed for the given commands.
+ * Returns a map of generator names to compiled paths.
+ *
+ * @param {GeneratorScriptCommand[]} commands - Generator commands to analyze
+ * @param {LocalGenerator[]} generators - Available generators
+ * @returns {Promise<Map<string, string>>} Map of generator name to compiled path
+ *
+ * @throws {Error} If any generator compilation fails
+ * @throws {Error} If a required generator is not found
+ *
+ * @example
+ * const compiledPaths = await compileAllGenerators(commands, generators);
+ * const genPath = compiledPaths.get('gen-random');
+ */
+export async function compileAllGenerators(
+  commands: GeneratorScriptCommand[],
+  generators: LocalGenerator[]
+): Promise<Map<string, string>> {
+  const compiledGenerators = new Map<string, string>();
+
+  for (const command of commands) {
+    if (
+      (command.type === 'generator-single' ||
+        command.type === 'generator-range') &&
+      command.generator
+    ) {
+      if (!compiledGenerators.has(command.generator)) {
+        const generator = generators.find(g => g.name === command.generator);
+        if (!generator) {
+          throw new Error(
+            `Generator "${command.generator}" not found in configuration`
+          );
+        }
+        try {
+          await compileGenerator(generator);
+          compiledGenerators.set(
+            command.generator,
+            getCompiledCommandToRun(generator)
+          );
+        } catch (error) {
+          throwError(error, `Failed to compile generator ${command.generator}`);
+        }
+      }
+    }
+  }
+
+  return compiledGenerators;
+}
+
+/**
+ * Compiles all unique generators used across all testsets.
+ *
+ * @param {LocalTestset[]} testsets - Testsets to analyze for generator usage
+ * @param {LocalGenerator[]} generators - Available generators
+ * @returns {Promise<void>} Resolves when all generators are compiled
+ *
+ * @throws {Error} If any generator compilation fails
+ *
+ * @example
+ * await compileGeneratorsForTestsets(config.testsets, config.generators);
+ */
+export async function compileGeneratorsForTestsets(
+  testsets: LocalTestset[],
+  generators: LocalGenerator[]
+): Promise<void> {
+  const uniqueGeneratorNames = new Set<string>();
+
+  // Collect all unique generator names from all testsets
+  for (const testset of testsets) {
+    if (testset.generatorScript?.commands) {
+      for (const command of testset.generatorScript.commands) {
+        if (
+          (command.type === 'generator-single' ||
+            command.type === 'generator-range') &&
+          command.generator
+        ) {
+          uniqueGeneratorNames.add(command.generator);
+        }
+      }
+    }
+  }
+
+  // Compile each unique generator
+  for (const generatorName of uniqueGeneratorNames) {
+    const generator = generators.find(g => g.name === generatorName);
+    if (!generator) {
+      throw new Error(
+        `Generator "${generatorName}" not found in configuration`
+      );
+    }
+    await compileGenerator(generator);
+  }
+}
+
+/**
  * Executes generation script commands to create test files.
  * Processes each command in the script, handling both manual and generated tests.
+ * Requires generators to be pre-compiled (use compileAllGenerators first).
  *
  * @param {GeneratorScriptCommand[]} commands - Array of generation commands
  * @param {LocalGenerator[]} generators - Available generators
@@ -141,29 +246,11 @@ export async function executeGeneratorScript(
   const testsDir = outputDir || path.resolve(process.cwd(), 'testsets');
   ensureDirectoryExists(testsDir);
 
-  // Compile all generators first
+  // Get compiled paths for all generators
   const compiledGenerators = new Map<string, string>();
-  for (const command of commands) {
-    if (
-      (command.type === 'generator-single' ||
-        command.type === 'generator-range') &&
-      command.generator
-    ) {
-      if (!compiledGenerators.has(command.generator)) {
-        const generator = generators.find(g => g.name === command.generator);
-        if (!generator) {
-          throw new Error(
-            `Generator "${command.generator}" not found in configuration`
-          );
-        }
-        try {
-          const compiledPath = await compileGenerator(generator);
-          compiledGenerators.set(command.generator, compiledPath);
-        } catch (error) {
-          throwError(error, `Failed to compile generator ${command.generator}`);
-        }
-      }
-    }
+  for (const generator of generators) {
+    const compiledPath = getCompiledCommandToRun(generator);
+    compiledGenerators.set(generator.name, compiledPath);
   }
 
   // Execute commands

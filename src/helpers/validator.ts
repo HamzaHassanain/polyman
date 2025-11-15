@@ -20,7 +20,7 @@ import {
   ensureDirectoryExists,
   removeDirectoryRecursively,
   getTestFiles,
-  getCompiledPath,
+  getCompiledCommandToRun,
 } from './utils';
 import { DEFAULT_TIMEOUT, DEFAULT_MEMORY_LIMIT } from './utils';
 import { fmt } from '../formatter';
@@ -38,13 +38,14 @@ import { getGeneratorCommands } from './testset';
  * @example
  * const path = await compileValidator({ name: 'val', source: 'validator/val.cpp' });
  */
-export async function compileValidator(validator: LocalValidator) {
+export async function compileValidator(
+  validator: LocalValidator
+): Promise<void> {
   try {
     if (!validator.source) {
       throw new Error('Validator has no source file specified');
     }
-    const compiledPath = await compileCPP(validator.source);
-    return compiledPath;
+    await compileCPP(validator.source);
   } catch (error) {
     throw error instanceof Error
       ? error
@@ -127,7 +128,7 @@ export async function validateSingleTest(
   testIndex: number
 ) {
   try {
-    const compiledPath = getCompiledPath(validator);
+    const compiledPath = getCompiledCommandToRun(validator);
     const testsDir = path.resolve(process.cwd(), 'testsets', testsetName);
     const testFilePath = path.join(testsDir, `test${testIndex}.txt`);
 
@@ -165,7 +166,7 @@ export async function validateTestset(
 ) {
   let someFailed = false;
   try {
-    const compiledPath = getCompiledPath(validator);
+    const compiledPath = getCompiledCommandToRun(validator);
     const testsDir = path.resolve(process.cwd(), 'testsets', testsetName);
 
     if (!fs.existsSync(testsDir)) {
@@ -220,7 +221,7 @@ export async function validateGroup(
 ) {
   let someFailed = false;
   try {
-    const compiledPath = getCompiledPath(validator);
+    const compiledPath = getCompiledCommandToRun(validator);
     const testsDir = path.resolve(process.cwd(), 'testsets', testset.name);
 
     if (!fs.existsSync(testsDir)) {
@@ -416,14 +417,16 @@ export async function runValidatorTests(validator: LocalValidator) {
   let someFailed = false;
   try {
     const validatorTests = await parseValidatorTests(validator.testsFilePath!);
-    const compiledPath = await compileCPP(validator.source);
-
     const testsDir = path.resolve(process.cwd(), 'validator_tests');
 
     for (const [index, { expectedVerdict }] of validatorTests.entries()) {
       const testFileDir = path.join(testsDir, `test${index + 1}.txt`);
       try {
-        await runValidator(compiledPath, testFileDir, expectedVerdict);
+        await runValidator(
+          getCompiledCommandToRun(validator),
+          testFileDir,
+          expectedVerdict
+        );
       } catch (error) {
         someFailed = true;
         fmt.error(

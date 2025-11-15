@@ -20,7 +20,11 @@ import {
   copyTemplate,
 } from './helpers/create-template';
 
-import { ensureGeneratorsExist } from './helpers/generator';
+import {
+  ensureGeneratorsExist,
+  compileGeneratorsForTestsets,
+  compileAllGenerators,
+} from './helpers/generator';
 import {
   ensureTestsetsExist,
   findTestset,
@@ -29,6 +33,7 @@ import {
   generateTestsForGroup,
   generateAllTestsets,
   listTestsets,
+  getGeneratorCommands,
 } from './helpers/testset';
 
 import {
@@ -42,9 +47,14 @@ import {
   runSolutionOnGroup,
   runSolutionOnAllTestsets,
   findMatchingSolutions,
+  compileAllSolutions,
 } from './helpers/solution';
 
-import { testCheckerItself } from './helpers/checker';
+import {
+  testCheckerItself,
+  compileChecker,
+  ensureCheckerExists,
+} from './helpers/checker';
 
 import {
   readConfigFile,
@@ -82,21 +92,28 @@ export const createTemplateAction = (directory: string) => {
   try {
     let stepNum = 1;
 
-    // Create directory structure
-    fmt.step(stepNum++, 'Creating Directory Structure');
-    const problemDir = path.resolve(process.cwd(), directory);
-    const templateDir = path.resolve(__dirname, '../template');
-    fmt.info(
-      `  ${fmt.infoIcon()} Target directory: ${fmt.highlight(directory)}`
-    );
-    fs.mkdirSync(problemDir, { recursive: true });
-    fmt.stepComplete('Directory created');
+    // step 1: Create directory structure
+    {
+      fmt.step(stepNum++, 'Creating Directory Structure');
+      const problemDir = path.resolve(process.cwd(), directory);
+      fmt.info(
+        `  ${fmt.infoIcon()} Target directory: ${fmt.highlight(directory)}`
+      );
+      fs.mkdirSync(problemDir, { recursive: true });
+      fmt.stepComplete('Directory created');
+    }
 
-    // Copy template files
-    fmt.step(stepNum++, 'Copying Template Files');
-    copyTemplate(templateDir, problemDir);
-    fmt.stepComplete('Template files copied');
+    // step 2: Copy template files
+    {
+      fmt.step(stepNum++, 'Copying Template Files');
+      copyTemplate(
+        path.resolve(__dirname, '../template'),
+        path.resolve(process.cwd(), directory)
+      );
+      fmt.stepComplete('Template files copied');
+    }
 
+    // Final success message
     fmt.successBox('TEMPLATE CREATED SUCCESSFULLY!');
     logTemplateCreationSuccess(directory);
   } catch (error) {
@@ -179,6 +196,8 @@ export const listAvailableCheckersAction = () => {
       `  ${fmt.infoIcon()} ${fmt.dim(`Use these checkers in your Config.json file under the "checker" section, with ${fmt.highlight('isStandard: false')}.`)}`
     );
     console.log();
+
+    // Listing complete
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     fmt.errorBox('FAILED TO LIST CHECKERS!');
@@ -209,26 +228,34 @@ export const downloadTestlibAction = async () => {
 
   try {
     let stepNum = 1;
+    let testlibContent: string;
 
-    fmt.step(stepNum++, 'Downloading testlib.h');
-    const testlibUrl =
-      'https://raw.githubusercontent.com/MikeMirzayanov/testlib/master/testlib.h';
-    fmt.info(
-      `  ${fmt.infoIcon()} Source: ${fmt.dim('github.com/MikeMirzayanov/testlib')}`
-    );
+    // step 1: Download testlib.h
+    {
+      fmt.step(stepNum++, 'Downloading testlib.h');
+      const testlibUrl =
+        'https://raw.githubusercontent.com/MikeMirzayanov/testlib/master/testlib.h';
+      fmt.info(
+        `  ${fmt.infoIcon()} Source: ${fmt.dim('github.com/MikeMirzayanov/testlib')}`
+      );
 
-    const testlibContent = await downloadFile(testlibUrl);
-    fmt.stepComplete('Downloaded successfully');
+      testlibContent = await downloadFile(testlibUrl);
+      fmt.stepComplete('Downloaded successfully');
+    }
 
-    fmt.step(stepNum++, 'Saving to Current Directory');
-    const targetPath = path.join(process.cwd(), 'testlib.h');
-    fs.writeFileSync(targetPath, testlibContent, 'utf-8');
-    fmt.stepComplete('File saved');
+    // step 2: Save to current directory
+    {
+      fmt.step(stepNum++, 'Saving to Current Directory');
+      const targetPath = path.join(process.cwd(), 'testlib.h');
+      fs.writeFileSync(targetPath, testlibContent, 'utf-8');
+      fmt.stepComplete('File saved');
+    }
 
+    // Final success message
     fmt.successBox('TESTLIB.H DOWNLOADED SUCCESSFULLY!');
     console.log();
     fmt.info(
-      `  ${fmt.infoIcon()} ${fmt.dim('File saved to:')} ${fmt.highlight(targetPath)}`
+      `  ${fmt.infoIcon()} ${fmt.dim('File saved to:')} ${fmt.highlight(path.join(process.cwd(), 'testlib.h'))}`
     );
     console.log();
 
@@ -262,6 +289,202 @@ export const downloadTestlibAction = async () => {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     fmt.errorBox('TESTLIB DOWNLOAD FAILED!');
+    fmt.error(`${message}`);
+    console.log();
+    process.exit(1);
+  }
+};
+
+/**
+ * Generates tests based on testset/group/test specification.
+ * Supports: all testsets, single testset, single group, or single test.
+ *
+ * @param {string} target - Target specification (testset name, group, or test index)
+ * @param {string} [modifier] - Optional modifier (group name or test index)
+ *
+ * @throws {Error} If Config.json is invalid
+ * @throws {Error} If testset/group/test not found
+ * @throws {Error} If test generation fails
+ *
+ * @example
+ * // From CLI: polyman generate all
+ * await generateTestsAction('all');
+ * // Generates all testsets
+ *
+ * @example
+ * // From CLI: polyman generate tests
+ * await generateTestsAction('testsets');
+ * // Generates testset named 'testsets'
+ *
+ * @example
+ * // From CLI: polyman generate tests samples
+ * await generateTestsAction('testsets', 'samples');
+ * // Generates group 'samples' in testset 'testsets'
+ *
+ * @example
+ * // From CLI: polyman generate tests 5
+ * await generateTestsAction('testsets', '5');
+ * // Generates test 5 in testset 'testsets'
+ */
+export const generateTestsAction = async (
+  target: string,
+  modifier?: string
+) => {
+  try {
+    const config = readConfigFile();
+    ensureTestsetsExist(config.testsets);
+    ensureGeneratorsExist(config.generators);
+
+    let stepNum = 1;
+
+    if (target === 'all') {
+      // Generate all testsets
+      fmt.section('⚙️  GENERATING ALL TESTSETS');
+
+      // step 1: Validate configuration
+      {
+        fmt.step(stepNum++, 'Validating Configuration');
+        fmt.info(
+          `  ${fmt.infoIcon()} Testsets: ${fmt.highlight(config.testsets.length.toString())}`
+        );
+        fmt.info(
+          `  ${fmt.infoIcon()} Generators: ${fmt.highlight(config.generators.length.toString())}`
+        );
+        fmt.stepComplete('Configuration validated');
+      }
+
+      // step 2: Compile generators
+      {
+        fmt.step(stepNum++, 'Compiling Generators');
+        await compileGeneratorsForTestsets(config.testsets, config.generators);
+        fmt.stepComplete('Generators compiled');
+      }
+
+      // step 3: Generate tests for all testsets
+      {
+        fmt.step(stepNum++, 'Generating Tests for All Testsets');
+        await generateAllTestsets(config.testsets, config.generators);
+        fmt.stepComplete('All testsets generated');
+      }
+
+      // Final success message
+      fmt.successBox('ALL TESTSETS GENERATED!');
+    } else {
+      // Find the testset
+      const testset = findTestset(config.testsets, target);
+
+      if (modifier && isNumeric(modifier)) {
+        // Generate single test
+        const testIndex = parseInt(modifier, 10);
+        fmt.section(
+          `⚙️  GENERATING TEST ${testIndex} IN TESTSET: ${target.toUpperCase()}`
+        );
+
+        // step 1: Validate configuration
+        {
+          fmt.step(stepNum++, 'Validating Configuration');
+          fmt.info(
+            `  ${fmt.infoIcon()} Testset: ${fmt.highlight(testset.name)}`
+          );
+          fmt.info(
+            `  ${fmt.infoIcon()} Test index: ${fmt.highlight(modifier)}`
+          );
+          fmt.stepComplete('Configuration validated');
+        }
+
+        // step 2: Compile generators
+        {
+          fmt.step(stepNum++, 'Compiling Generators');
+          const commands = getGeneratorCommands(testset);
+          const command = commands[testIndex - 1];
+          await compileAllGenerators([command], config.generators);
+          fmt.stepComplete('Generators compiled');
+        }
+
+        // step 3: Generate test
+        {
+          fmt.step(stepNum++, `Generating Test ${testIndex}`);
+          await generateSingleTest(testset, testIndex, config.generators);
+          fmt.stepComplete(`Test ${testIndex} generated`);
+        }
+
+        // Final success message
+        fmt.successBox(
+          `TEST ${testIndex} GENERATED IN ${target.toUpperCase()}!`
+        );
+      } else if (modifier) {
+        // Generate group
+        fmt.section(
+          `⚙️  GENERATING GROUP '${modifier}' IN TESTSET: ${target.toUpperCase()}`
+        );
+
+        // step 1: Validate configuration
+        {
+          fmt.step(stepNum++, 'Validating Configuration');
+          fmt.info(
+            `  ${fmt.infoIcon()} Testset: ${fmt.highlight(testset.name)}`
+          );
+          fmt.info(`  ${fmt.infoIcon()} Group: ${fmt.highlight(modifier)}`);
+          fmt.stepComplete('Configuration validated');
+        }
+
+        // step 2: Compile generators
+        {
+          fmt.step(stepNum++, 'Compiling Generators');
+          const allCommands = getGeneratorCommands(testset);
+          const groupCommands = allCommands.filter(
+            cmd => cmd.group === modifier
+          );
+          await compileAllGenerators(groupCommands, config.generators);
+          fmt.stepComplete('Generators compiled');
+        }
+
+        // step 3: Generate group
+        {
+          fmt.step(stepNum++, `Generating Group '${modifier}'`);
+          await generateTestsForGroup(testset, modifier, config.generators);
+          fmt.stepComplete(`Group '${modifier}' generated`);
+        }
+
+        // Final success message
+        fmt.successBox(
+          `GROUP '${modifier}' GENERATED IN ${target.toUpperCase()}!`
+        );
+      } else {
+        // Generate entire testset
+        fmt.section(`⚙️  GENERATING TESTSET: ${target.toUpperCase()}`);
+
+        // step 1: Validate configuration
+        {
+          fmt.step(stepNum++, 'Validating Configuration');
+          fmt.info(
+            `  ${fmt.infoIcon()} Testset: ${fmt.highlight(testset.name)}`
+          );
+          fmt.stepComplete('Configuration validated');
+        }
+
+        // step 2: Compile generators
+        {
+          fmt.step(stepNum++, 'Compiling Generators');
+          const commands = getGeneratorCommands(testset);
+          await compileAllGenerators(commands, config.generators);
+          fmt.stepComplete('Generators compiled');
+        }
+
+        // step 3: Generate tests
+        {
+          fmt.step(stepNum++, 'Generating Tests');
+          await generateTestsForTestset(testset, config.generators);
+          fmt.stepComplete('Tests generated');
+        }
+
+        // Final success message
+        fmt.successBox(`TESTSET ${target.toUpperCase()} GENERATED!`);
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    fmt.errorBox('TEST GENERATION FAILED!');
     fmt.error(`${message}`);
     console.log();
     process.exit(1);
@@ -508,21 +731,35 @@ export const runSolutionAction = async (
       // Run on all testsets
       fmt.section(`🚀 RUNNING ${solutionName.toUpperCase()} ON ALL TESTSETS`);
 
-      fmt.step(stepNum++, 'Validating Configuration');
-      fmt.info(
-        `  ${fmt.infoIcon()} Solutions: ${fmt.highlight(matchingSolutions.length.toString())}`
-      );
-      fmt.info(
-        `  ${fmt.infoIcon()} Testsets: ${fmt.highlight(config.testsets.length.toString())}`
-      );
-      fmt.stepComplete('Configuration validated');
-
-      fmt.step(stepNum++, 'Running Solutions on All Testsets');
-      for (const solution of matchingSolutions) {
-        await runSolutionOnAllTestsets(solution, config, config.testsets);
+      // step 1: Validate configuration
+      {
+        fmt.step(stepNum++, 'Validating Configuration');
+        fmt.info(
+          `  ${fmt.infoIcon()} Solutions: ${fmt.highlight(matchingSolutions.length.toString())}`
+        );
+        fmt.info(
+          `  ${fmt.infoIcon()} Testsets: ${fmt.highlight(config.testsets.length.toString())}`
+        );
+        fmt.stepComplete('Configuration validated');
       }
-      fmt.stepComplete('All solutions completed');
 
+      // step 2: Compile solutions
+      {
+        fmt.step(stepNum++, 'Compiling Solutions');
+        await compileAllSolutions(matchingSolutions);
+        fmt.stepComplete('Solutions compiled');
+      }
+
+      // step 3: Run solutions on all testsets
+      {
+        fmt.step(stepNum++, 'Running Solutions on All Testsets');
+        for (const solution of matchingSolutions) {
+          await runSolutionOnAllTestsets(solution, config, config.testsets);
+        }
+        fmt.stepComplete('All solutions completed');
+      }
+
+      // Final success message
       fmt.successBox(`${solutionName.toUpperCase()} RAN ON ALL TESTSETS!`);
     } else {
       // Find the testset
@@ -534,19 +771,35 @@ export const runSolutionAction = async (
           `🚀 RUNNING ${solutionName.toUpperCase()} ON TESTSET: ${testset.name.toUpperCase()}`
         );
 
-        fmt.step(stepNum++, 'Validating Configuration');
-        fmt.info(
-          `  ${fmt.infoIcon()} Solutions: ${fmt.highlight(matchingSolutions.length.toString())}`
-        );
-        fmt.info(`  ${fmt.infoIcon()} Testset: ${fmt.highlight(testset.name)}`);
-        fmt.stepComplete('Configuration validated');
-
-        fmt.step(stepNum++, `Running Solutions on Testset ${testset.name}`);
-        for (const solution of matchingSolutions) {
-          await runSolutionOnTestset(solution, config, testset.name);
+        // step 1: Validate configuration
+        {
+          fmt.step(stepNum++, 'Validating Configuration');
+          fmt.info(
+            `  ${fmt.infoIcon()} Solutions: ${fmt.highlight(matchingSolutions.length.toString())}`
+          );
+          fmt.info(
+            `  ${fmt.infoIcon()} Testset: ${fmt.highlight(testset.name)}`
+          );
+          fmt.stepComplete('Configuration validated');
         }
-        fmt.stepComplete('Solutions completed');
 
+        // step 2: Compile solutions
+        {
+          fmt.step(stepNum++, 'Compiling Solutions');
+          await compileAllSolutions(matchingSolutions);
+          fmt.stepComplete('Solutions compiled');
+        }
+
+        // step 3: Run solutions on testset
+        {
+          fmt.step(stepNum++, `Running Solutions on Testset ${testset.name}`);
+          for (const solution of matchingSolutions) {
+            await runSolutionOnTestset(solution, config, testset.name);
+          }
+          fmt.stepComplete('Solutions completed');
+        }
+
+        // Final success message
         fmt.successBox(
           `${solutionName.toUpperCase()} RAN ON TESTSET ${testset.name.toUpperCase()}!`
         );
@@ -557,27 +810,43 @@ export const runSolutionAction = async (
           `🚀 RUNNING ${solutionName.toUpperCase()} ON TEST ${testIndex} IN ${testset.name.toUpperCase()}`
         );
 
-        fmt.step(stepNum++, 'Validating Configuration');
-        fmt.info(
-          `  ${fmt.infoIcon()} Solutions: ${fmt.highlight(matchingSolutions.length.toString())}`
-        );
-        fmt.info(`  ${fmt.infoIcon()} Testset: ${fmt.highlight(testset.name)}`);
-        fmt.info(
-          `  ${fmt.infoIcon()} Test: ${fmt.highlight(testIndex.toString())}`
-        );
-        fmt.stepComplete('Configuration validated');
-
-        fmt.step(stepNum++, `Running Solutions on Test ${testIndex}`);
-        for (const solution of matchingSolutions) {
-          await runSolutionOnSingleTest(
-            solution,
-            config,
-            testset.name,
-            testIndex
+        // step 1: Validate configuration
+        {
+          fmt.step(stepNum++, 'Validating Configuration');
+          fmt.info(
+            `  ${fmt.infoIcon()} Solutions: ${fmt.highlight(matchingSolutions.length.toString())}`
           );
+          fmt.info(
+            `  ${fmt.infoIcon()} Testset: ${fmt.highlight(testset.name)}`
+          );
+          fmt.info(
+            `  ${fmt.infoIcon()} Test: ${fmt.highlight(testIndex.toString())}`
+          );
+          fmt.stepComplete('Configuration validated');
         }
-        fmt.stepComplete('Solutions completed');
 
+        // step 2: Compile solutions
+        {
+          fmt.step(stepNum++, 'Compiling Solutions');
+          await compileAllSolutions(matchingSolutions);
+          fmt.stepComplete('Solutions compiled');
+        }
+
+        // step 3: Run solutions on test
+        {
+          fmt.step(stepNum++, `Running Solutions on Test ${testIndex}`);
+          for (const solution of matchingSolutions) {
+            await runSolutionOnSingleTest(
+              solution,
+              config,
+              testset.name,
+              testIndex
+            );
+          }
+          fmt.stepComplete('Solutions completed');
+        }
+
+        // Final success message
         fmt.successBox(
           `${solutionName.toUpperCase()} RAN ON TEST ${testIndex}!`
         );
@@ -588,20 +857,36 @@ export const runSolutionAction = async (
           `🚀 RUNNING ${solutionName.toUpperCase()} ON GROUP: ${groupName.toUpperCase()} IN ${testset.name.toUpperCase()}`
         );
 
-        fmt.step(stepNum++, 'Validating Configuration');
-        fmt.info(
-          `  ${fmt.infoIcon()} Solutions: ${fmt.highlight(matchingSolutions.length.toString())}`
-        );
-        fmt.info(`  ${fmt.infoIcon()} Testset: ${fmt.highlight(testset.name)}`);
-        fmt.info(`  ${fmt.infoIcon()} Group: ${fmt.highlight(groupName)}`);
-        fmt.stepComplete('Configuration validated');
-
-        fmt.step(stepNum++, `Running Solutions on Group ${groupName}`);
-        for (const solution of matchingSolutions) {
-          await runSolutionOnGroup(solution, config, testset, groupName);
+        // step 1: Validate configuration
+        {
+          fmt.step(stepNum++, 'Validating Configuration');
+          fmt.info(
+            `  ${fmt.infoIcon()} Solutions: ${fmt.highlight(matchingSolutions.length.toString())}`
+          );
+          fmt.info(
+            `  ${fmt.infoIcon()} Testset: ${fmt.highlight(testset.name)}`
+          );
+          fmt.info(`  ${fmt.infoIcon()} Group: ${fmt.highlight(groupName)}`);
+          fmt.stepComplete('Configuration validated');
         }
-        fmt.stepComplete('Solutions completed');
 
+        // step 2: Compile solutions
+        {
+          fmt.step(stepNum++, 'Compiling Solutions');
+          await compileAllSolutions(matchingSolutions);
+          fmt.stepComplete('Solutions compiled');
+        }
+
+        // step 3: Run solutions on group
+        {
+          fmt.step(stepNum++, `Running Solutions on Group ${groupName}`);
+          for (const solution of matchingSolutions) {
+            await runSolutionOnGroup(solution, config, testset, groupName);
+          }
+          fmt.stepComplete('Solutions completed');
+        }
+
+        // Final success message
         fmt.successBox(
           `${solutionName.toUpperCase()} RAN ON GROUP ${groupName.toUpperCase()}!`
         );
@@ -654,46 +939,120 @@ export const testWhatAction = async (what: string) => {
 
     switch (what) {
       case 'validator':
-        fmt.step(stepNum++, 'Running Validator Self-Tests');
-        await testValidatorItself();
-        fmt.stepComplete('Validator tests passed');
+        {
+          // step 1: Validate configuration
+          {
+            fmt.step(stepNum++, 'Validating Configuration');
+            const config = readConfigFile();
+            ensureValidatorExists(config.validator);
+            fmt.info(
+              `  ${fmt.infoIcon()} Validator: ${fmt.highlight(config.validator.source)} ${fmt.dim('(C++)')}`
+            );
+            fmt.stepComplete('Configuration validated');
+          }
+
+          // step 2: Compile validator
+          {
+            fmt.step(stepNum++, 'Compiling Validator');
+            const config = readConfigFile();
+            await compileValidator(config.validator);
+            fmt.stepComplete('Validator compiled');
+          }
+
+          // step 3: Run validator self-tests
+          {
+            fmt.step(stepNum++, 'Running Validator Self-Tests');
+            await testValidatorItself();
+            fmt.stepComplete('Validator tests passed');
+          }
+        }
 
         fmt.successBox('VALIDATOR TESTS PASSED!');
         break;
 
       case 'checker':
-        fmt.step(stepNum++, 'Running Checker Self-Tests');
-        await testCheckerItself();
-        fmt.stepComplete('Checker tests passed');
+        {
+          // step 1: Validate configuration
+          {
+            fmt.step(stepNum++, 'Validating Configuration');
+            const config = readConfigFile();
+            ensureCheckerExists(config.checker);
+            fmt.info(
+              `  ${fmt.infoIcon()} Checker: ${fmt.highlight(config.checker.source)} ${fmt.dim(config.checker.isStandard ? '(Standard)' : '(C++)')}`
+            );
+            fmt.stepComplete('Configuration validated');
+          }
+
+          // step 2: Compile checker
+          {
+            fmt.step(stepNum++, 'Compiling Checker');
+            const config = readConfigFile();
+            await compileChecker(config.checker);
+            fmt.stepComplete('Checker compiled');
+          }
+
+          // step 3: Run checker self-tests
+          {
+            fmt.step(stepNum++, 'Running Checker Self-Tests');
+            await testCheckerItself();
+            fmt.stepComplete('Checker tests passed');
+          }
+        }
 
         fmt.successBox('CHECKER TESTS PASSED!');
         break;
       default: {
         // Testing a solution against main-correct
-        fmt.step(stepNum++, 'Validating Configuration');
-        const config = readConfigFile();
-        validateSolutionsExist(config.solutions);
-        ensureMainSolutionExists(config.solutions);
 
-        const mainSolution = getMainSolution(config.solutions);
-        const targetSolution = config.solutions.find(s => s.name === what);
+        // step 1: Validate configuration
+        {
+          fmt.step(stepNum++, 'Validating Configuration');
+          const config = readConfigFile();
+          validateSolutionsExist(config.solutions);
+          ensureMainSolutionExists(config.solutions);
 
-        if (!targetSolution) {
-          throw new Error(`No solution named "${what}" found.`);
+          const mainSolution = getMainSolution(config.solutions);
+          const targetSolution = config.solutions.find(s => s.name === what);
+
+          if (!targetSolution) {
+            throw new Error(`No solution named "${what}" found.`);
+          }
+
+          fmt.info(
+            `  ${fmt.infoIcon()} Main solution: ${fmt.primary(mainSolution.name)} ${fmt.dim(`(${mainSolution.tag})`)}`
+          );
+          fmt.info(
+            `  ${fmt.infoIcon()} Target solution: ${fmt.highlight(targetSolution.name)} ${fmt.dim(`(${targetSolution.tag})`)}`
+          );
+          fmt.stepComplete('Configuration validated');
         }
 
-        fmt.info(
-          `  ${fmt.infoIcon()} Main solution: ${fmt.primary(mainSolution.name)} ${fmt.dim(`(${mainSolution.tag})`)}`
-        );
-        fmt.info(
-          `  ${fmt.infoIcon()} Target solution: ${fmt.highlight(targetSolution.name)} ${fmt.dim(`(${targetSolution.tag})`)}`
-        );
-        fmt.stepComplete('Configuration validated');
+        // step 2: Compile solutions
+        {
+          fmt.step(stepNum++, 'Compiling Solutions');
+          const config = readConfigFile();
+          const mainSolution = getMainSolution(config.solutions);
+          const targetSolution = config.solutions.find(s => s.name === what)!;
+          await compileAllSolutions([mainSolution, targetSolution]);
+          fmt.stepComplete('Solutions compiled');
+        }
 
-        fmt.step(stepNum++, 'Testing Solution Behavior');
-        await testSolutionAgainstMainCorrect(what);
-        fmt.stepComplete('Solution verified');
+        // step 3: Compile checker
+        {
+          fmt.step(stepNum++, 'Compiling Checker');
+          const config = readConfigFile();
+          await compileChecker(config.checker);
+          fmt.stepComplete('Checker compiled');
+        }
 
+        // step 4: Test solution behavior
+        {
+          fmt.step(stepNum++, 'Testing Solution Behavior');
+          await testSolutionAgainstMainCorrect(what);
+          fmt.stepComplete('Solution verified');
+        }
+
+        // Final success message
         fmt.successBox(`${what.toUpperCase()} BEHAVES AS EXPECTED!`);
         break;
       }
@@ -746,77 +1105,123 @@ export const fullVerificationAction = async () => {
     const config = readConfigFile();
     let stepNum = 1;
 
-    // Generate Tests
-    fmt.step(stepNum++, 'Generating Tests');
-    ensureGeneratorsExist(config.generators);
-    ensureTestsetsExist(config.testsets);
-    fmt.info(
-      `  ${fmt.infoIcon()} Found ${fmt.highlight(config.generators.length.toString())} generator(s)`
-    );
-    fmt.info(
-      `  ${fmt.infoIcon()} Found ${fmt.highlight(config.testsets.length.toString())} testset(s)`
-    );
-    await generateAllTestsets(config.testsets, config.generators);
-    fmt.stepComplete('All tests generated successfully');
+    // step 1: Compile generators
+    {
+      fmt.step(stepNum++, 'Compiling Generators');
+      ensureGeneratorsExist(config.generators);
+      ensureTestsetsExist(config.testsets);
+      await compileGeneratorsForTestsets(config.testsets, config.generators);
+      fmt.stepComplete('Generators compiled');
+    }
 
-    // Validate Tests - Validator Self-Test
-    fmt.step(stepNum++, 'Testing Validator');
-    await testValidatorItself();
-    fmt.stepComplete('Validator tests passed');
+    // step 2: Generate tests
+    {
+      fmt.step(stepNum++, 'Generating Tests');
+      fmt.info(
+        `  ${fmt.infoIcon()} Found ${fmt.highlight(config.generators.length.toString())} generator(s)`
+      );
+      fmt.info(
+        `  ${fmt.infoIcon()} Found ${fmt.highlight(config.testsets.length.toString())} testset(s)`
+      );
+      await generateAllTestsets(config.testsets, config.generators);
+      fmt.stepComplete('All tests generated successfully');
+    }
 
-    // Validate Generated Tests
-    fmt.step(stepNum++, 'Validating Generated Tests');
-    await validateAllTestsets(config.validator, config.testsets);
-    fmt.stepComplete('All generated tests are valid');
+    // step 3: Compile validator
+    {
+      fmt.step(stepNum++, 'Compiling Validator');
+      ensureValidatorExists(config.validator);
+      await compileValidator(config.validator);
+      fmt.stepComplete('Validator compiled');
+    }
 
-    // Checker Self-Test
-    fmt.step(stepNum++, 'Testing Checker');
-    await testCheckerItself();
-    fmt.stepComplete('Checker tests passed');
+    // step 4: Test validator
+    {
+      fmt.step(stepNum++, 'Testing Validator');
+      await testValidatorItself();
+      fmt.stepComplete('Validator tests passed');
+    }
 
-    // Run Solutions
-    fmt.step(stepNum++, 'Running Solutions');
-    validateSolutionsExist(config.solutions);
-    ensureMainSolutionExists(config.solutions);
-    fmt.info(
-      `  ${fmt.infoIcon()} Found ${fmt.highlight(config.solutions.length.toString())} solution(s)`
-    );
+    // step 5: Validate generated tests
+    {
+      fmt.step(stepNum++, 'Validating Generated Tests');
+      await validateAllTestsets(config.validator, config.testsets);
+      fmt.stepComplete('All generated tests are valid');
+    }
 
-    const mainSolution = getMainSolution(config.solutions);
-    const otherSolutions = config.solutions.filter(
-      s => s.name !== mainSolution.name
-    );
-    fmt.info(
-      `  ${fmt.infoIcon()} Main solution: ${fmt.primary(mainSolution.name)} ${fmt.dim(`(${mainSolution.tag})`)}`
-    );
-    await runSolutionOnAllTestsets(mainSolution, config, config.testsets);
+    // step 6: Compile checker
+    {
+      fmt.step(stepNum++, 'Compiling Checker');
+      ensureCheckerExists(config.checker);
+      await compileChecker(config.checker);
+      fmt.stepComplete('Checker compiled');
+    }
 
-    try {
-      for (const solution of otherSolutions) {
-        await runSolutionOnAllTestsets(solution, config, config.testsets);
+    // step 7: Test checker
+    {
+      fmt.step(stepNum++, 'Testing Checker');
+      await testCheckerItself();
+      fmt.stepComplete('Checker tests passed');
+    }
+
+    // step 8: Compile solutions
+    {
+      fmt.step(stepNum++, 'Compiling Solutions');
+      validateSolutionsExist(config.solutions);
+      ensureMainSolutionExists(config.solutions);
+      fmt.info(
+        `  ${fmt.infoIcon()} Found ${fmt.highlight(config.solutions.length.toString())} solution(s)`
+      );
+      await compileAllSolutions(config.solutions);
+      fmt.stepComplete('Solutions compiled');
+    }
+
+    // step 9: Run solutions
+    {
+      fmt.step(stepNum++, 'Running Solutions');
+      const mainSolution = getMainSolution(config.solutions);
+      const otherSolutions = config.solutions.filter(
+        s => s.name !== mainSolution.name
+      );
+      fmt.info(
+        `  ${fmt.infoIcon()} Main solution: ${fmt.primary(mainSolution.name)} ${fmt.dim(`(${mainSolution.tag})`)}`
+      );
+      await runSolutionOnAllTestsets(mainSolution, config, config.testsets);
+
+      try {
+        for (const solution of otherSolutions) {
+          await runSolutionOnAllTestsets(solution, config, config.testsets);
+        }
+        fmt.stepComplete('All solutions ran on all testsets');
+      } catch {
+        fmt.stepComplete('Some solutions failed on tests (may be expected)');
       }
-      fmt.stepComplete('All solutions ran on all testsets');
-    } catch {
-      fmt.stepComplete('Some solutions failed on tests (may be expected)');
     }
 
-    // Validate Solutions Against Main Correct
-    fmt.step(stepNum++, 'Verifying Solutions Against Main Correct');
+    // step 10: Verify solutions against main correct
+    {
+      fmt.step(stepNum++, 'Verifying Solutions Against Main Correct');
+      const mainSolution = getMainSolution(config.solutions);
+      const otherSolutions = config.solutions.filter(
+        s => s.name !== mainSolution.name
+      );
 
-    for (const solution of otherSolutions) {
-      fmt.log(
-        `    ${fmt.dim('→')} Checking ${fmt.highlight(solution.name)} ${fmt.dim(`(${solution.tag})`)}`
-      );
-      await startTheComparisonProcess(
-        config.checker,
-        mainSolution,
-        solution,
-        config.testsets
-      );
-      fmt.success(`      ${fmt.checkmark()} Behaves as expected`);
+      for (const solution of otherSolutions) {
+        fmt.log(
+          `    ${fmt.dim('→')} Checking ${fmt.highlight(solution.name)} ${fmt.dim(`(${solution.tag})`)}`
+        );
+        await startTheComparisonProcess(
+          config.checker,
+          mainSolution,
+          solution,
+          config.testsets
+        );
+        fmt.success(`      ${fmt.checkmark()} Behaves as expected`);
+      }
+      fmt.stepComplete('All solutions verified');
     }
-    fmt.stepComplete('All solutions verified');
 
+    // Final success message
     fmt.successBox('VERIFICATION COMPLETED SUCCESSFULLY!');
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -863,134 +1268,11 @@ export const listTestsetsAction = () => {
     }
 
     console.log();
+
+    // Listing complete
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     fmt.errorBox('FAILED TO LIST TESTSETS!');
-    fmt.error(`${message}`);
-    console.log();
-    process.exit(1);
-  }
-};
-
-/**
- * Generates tests based on testset/group/test specification.
- * Supports: all testsets, single testset, single group, or single test.
- *
- * @param {string} target - Target specification (testset name, group, or test index)
- * @param {string} [modifier] - Optional modifier (group name or test index)
- *
- * @throws {Error} If Config.json is invalid
- * @throws {Error} If testset/group/test not found
- * @throws {Error} If test generation fails
- *
- * @example
- * // From CLI: polyman generate all
- * await generateTestsAction('all');
- * // Generates all testsets
- *
- * @example
- * // From CLI: polyman generate tests
- * await generateTestsAction('testsets');
- * // Generates testset named 'testsets'
- *
- * @example
- * // From CLI: polyman generate tests samples
- * await generateTestsAction('testsets', 'samples');
- * // Generates group 'samples' in testset 'testsets'
- *
- * @example
- * // From CLI: polyman generate tests 5
- * await generateTestsAction('testsets', '5');
- * // Generates test 5 in testset 'testsets'
- */
-export const generateTestsAction = async (
-  target: string,
-  modifier?: string
-) => {
-  try {
-    const config = readConfigFile();
-    ensureTestsetsExist(config.testsets);
-    ensureGeneratorsExist(config.generators);
-
-    let stepNum = 1;
-
-    if (target === 'all') {
-      // Generate all testsets
-      fmt.section('⚙️  GENERATING ALL TESTSETS');
-
-      fmt.step(stepNum++, 'Validating Configuration');
-      fmt.info(
-        `  ${fmt.infoIcon()} Testsets: ${fmt.highlight(config.testsets.length.toString())}`
-      );
-      fmt.info(
-        `  ${fmt.infoIcon()} Generators: ${fmt.highlight(config.generators.length.toString())}`
-      );
-      fmt.stepComplete('Configuration validated');
-
-      fmt.step(stepNum++, 'Generating Tests for All Testsets');
-      await generateAllTestsets(config.testsets, config.generators);
-      fmt.stepComplete('All testsets generated');
-
-      fmt.successBox('ALL TESTSETS GENERATED!');
-    } else {
-      // Find the testset
-      const testset = findTestset(config.testsets, target);
-
-      if (modifier && isNumeric(modifier)) {
-        // Generate single test
-        const testIndex = parseInt(modifier, 10);
-        fmt.section(
-          `⚙️  GENERATING TEST ${testIndex} IN TESTSET: ${target.toUpperCase()}`
-        );
-
-        fmt.step(stepNum++, 'Validating Configuration');
-        fmt.info(`  ${fmt.infoIcon()} Testset: ${fmt.highlight(testset.name)}`);
-        fmt.info(`  ${fmt.infoIcon()} Test index: ${fmt.highlight(modifier)}`);
-        fmt.stepComplete('Configuration validated');
-
-        fmt.step(stepNum++, `Generating Test ${testIndex}`);
-        await generateSingleTest(testset, testIndex, config.generators);
-        fmt.stepComplete(`Test ${testIndex} generated`);
-
-        fmt.successBox(
-          `TEST ${testIndex} GENERATED IN ${target.toUpperCase()}!`
-        );
-      } else if (modifier) {
-        // Generate group
-        fmt.section(
-          `⚙️  GENERATING GROUP '${modifier}' IN TESTSET: ${target.toUpperCase()}`
-        );
-
-        fmt.step(stepNum++, 'Validating Configuration');
-        fmt.info(`  ${fmt.infoIcon()} Testset: ${fmt.highlight(testset.name)}`);
-        fmt.info(`  ${fmt.infoIcon()} Group: ${fmt.highlight(modifier)}`);
-        fmt.stepComplete('Configuration validated');
-
-        fmt.step(stepNum++, `Generating Group '${modifier}'`);
-        await generateTestsForGroup(testset, modifier, config.generators);
-        fmt.stepComplete(`Group '${modifier}' generated`);
-
-        fmt.successBox(
-          `GROUP '${modifier}' GENERATED IN ${target.toUpperCase()}!`
-        );
-      } else {
-        // Generate entire testset
-        fmt.section(`⚙️  GENERATING TESTSET: ${target.toUpperCase()}`);
-
-        fmt.step(stepNum++, 'Validating Configuration');
-        fmt.info(`  ${fmt.infoIcon()} Testset: ${fmt.highlight(testset.name)}`);
-        fmt.stepComplete('Configuration validated');
-
-        fmt.step(stepNum++, 'Generating Tests');
-        await generateTestsForTestset(testset, config.generators);
-        fmt.stepComplete('Tests generated');
-
-        fmt.successBox(`TESTSET ${target.toUpperCase()} GENERATED!`);
-      }
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    fmt.errorBox('TEST GENERATION FAILED!');
     fmt.error(`${message}`);
     console.log();
     process.exit(1);

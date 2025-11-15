@@ -14,12 +14,12 @@ import { executor } from '../executor';
 import path from 'path';
 import fs from 'fs';
 import {
-  logErrorAndExit,
   compileCPP,
   readConfigFile,
   throwError,
   ensureDirectoryExists,
   removeDirectoryRecursively,
+  getCompiledCommandToRun,
 } from './utils';
 import { DEFAULT_TIMEOUT, DEFAULT_MEMORY_LIMIT } from './utils';
 import { fmt } from '../formatter';
@@ -190,7 +190,7 @@ async function makeCheckerTests(testsFilePath: string) {
 
 /**
  * Runs all checker self-tests and validates results.
- * Compiles the checker and runs it against all test cases.
+ * Uses pre-compiled checker via getCompiledCommandToRun.
  * Fails fast - throws on first test failure.
  *
  * @param {LocalChecker} checker - Checker configuration
@@ -206,7 +206,7 @@ export async function runCheckerTests(checker: LocalChecker) {
   let someFailed = false;
   try {
     const checkerTests = await parseCheckerTests(checker.testsFilePath!);
-    const compiledPath = await compileChecker(checker);
+    const compiledPath = getCompiledCommandToRun(checker);
 
     const testsDir = path.resolve(process.cwd(), 'checker_tests');
 
@@ -231,7 +231,7 @@ export async function runCheckerTests(checker: LocalChecker) {
       }
     }
   } catch (error) {
-    throwError(error, 'Failed to compile checker');
+    throwError(error, 'Failed to run checker tests');
   } finally {
     executor.cleanup();
   }
@@ -286,11 +286,12 @@ function parseCheckerTests(testsFilePath: string): Promise<CheckerTest[]> {
 /**
  * Compiles a checker program.
  * Handles both custom checkers and standard testlib checkers.
+ * Wrapper around compileCPP with consistent error handling.
  *
  * @param {LocalChecker} checker - Checker configuration
  * @returns {Promise<string>} Path to compiled checker executable
  *
- * @throws {Error} If compilation fails (exits process)
+ * @throws {Error} If compilation fails
  *
  * @example
  * // Custom checker
@@ -300,7 +301,7 @@ function parseCheckerTests(testsFilePath: string): Promise<CheckerTest[]> {
  * // Standard checker
  * const path = await compileChecker({ name: 'wcmp', source: 'wcmp.cpp', isStandard: true });
  */
-export async function compileChecker(checker: LocalChecker) {
+export async function compileChecker(checker: LocalChecker): Promise<void> {
   try {
     const checkerSource = checker.isStandard
       ? path.resolve(
@@ -311,11 +312,11 @@ export async function compileChecker(checker: LocalChecker) {
           `${checker.source}`
         )
       : checker.source;
-    const compiledPath = await compileCPP(checkerSource);
-    return compiledPath;
+    await compileCPP(checkerSource);
   } catch (error) {
-    logErrorAndExit(error);
-    return ''; // to satisfy TypeScript
+    throw error instanceof Error
+      ? error
+      : new Error('Failed to compile checker');
   }
 }
 

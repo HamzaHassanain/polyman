@@ -43,7 +43,7 @@ export const API_KEY_LOCATION =
  * const executablePath = await compileCPP('solutions/main.cpp');
  * // Returns: '/path/to/solutions/main'
  */
-export async function compileCPP(sourcePath: string): Promise<string> {
+export async function compileCPP(sourcePath: string): Promise<void> {
   const absolutePath = path.resolve(process.cwd(), sourcePath);
 
   if (path.extname(absolutePath) !== '.cpp') {
@@ -57,8 +57,6 @@ export async function compileCPP(sourcePath: string): Promise<string> {
     timeout: DEFAULT_TIMEOUT,
     silent: true,
   });
-
-  return outputPath;
 }
 
 /**
@@ -73,18 +71,13 @@ export async function compileCPP(sourcePath: string): Promise<string> {
  * const javaCommand = await compileJava('solutions/Solution.java');
  * // Returns: 'java -cp /path/to/solutions Solution'
  */
-export async function compileJava(sourcePath: string): Promise<string> {
+export async function compileJava(sourcePath: string): Promise<void> {
   const absolutePath = path.resolve(sourcePath);
-  const directory = path.dirname(absolutePath);
-  const fileName = path.basename(absolutePath);
-  const className = fileName.replace('.java', '');
 
   await executor.execute(`javac ${absolutePath}`, {
     timeout: DEFAULT_TIMEOUT,
     silent: true,
   });
-
-  return `java -cp ${directory} ${className}`;
 }
 
 /**
@@ -323,9 +316,26 @@ export function readFirstLine(filePath: string): Promise<string> {
   });
 }
 
-export function getCompiledPath(
+export function getCompiledCommandToRun(
   object: LocalChecker | LocalValidator | LocalSolution | LocalGenerator
 ): string {
   const source = path.resolve(process.cwd(), object.source);
-  return source.replace(/\.cpp$/, '.o');
+  const extention = path.extname(source);
+
+  switch (extention) {
+    case '.cpp':
+      return source.replace('.cpp', '');
+    case '.java': {
+      const dir = path.dirname(source);
+      const fileName = path.basename(source);
+      const className = fileName.replace('.java', '');
+      return `java -cp ${dir} ${className}`;
+    }
+    case '.py':
+      return `python ${source}`;
+    case '.js':
+      return `node ${source}`;
+    default:
+      throw new Error(`Unsupported source file extension: ${extention}`);
+  }
 }

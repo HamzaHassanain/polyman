@@ -19,13 +19,13 @@ import {
   readConfigFile,
   readFirstLine,
   getTestFiles,
+  getCompiledCommandToRun,
 } from './utils';
 import { fmt } from '../formatter';
 import {
   ensureCheckerExists,
   runChecker,
   getExpectedCheckerVerdict,
-  compileChecker,
 } from './checker';
 import type { LocalChecker } from '../types';
 import { getGeneratorCommands } from './testset';
@@ -187,46 +187,69 @@ function ensureOutputDirectory(
 /**
  * Compiles a solution based on file extension.
  * Supports C++ (.cpp), Python (.py), and Java (.java).
+ * For interpreted languages, returns the interpreter command.
  *
- * @private
  * @param {string} sourcePath - Path to solution source file
- * @returns {Promise<string>} Command to execute the solution
+ * @returns {Promise<void>} Resolves when compilation completes
  *
+ * @throws {Error} If compilation fails
  * @throws {Error} If file extension is not supported
  *
  * @example
  * await compileSolution('Solution.cpp')
- * // Returns: '/path/to/Solution' (compiled executable)
+ * // Compiles to ./Solution executable
  *
  * @example
  * await compileSolution('Solution.py')
- * // Returns: 'python3 Solution.py' (interpreter command)
+ * // No compilation needed (interpreted)
  */
-async function compileSolution(sourcePath: string): Promise<string> {
+export async function compileSolution(sourcePath: string): Promise<void> {
   const ext = path.extname(sourcePath);
 
   switch (ext) {
     case '.cpp':
-      return await compileCPP(sourcePath);
+      await compileCPP(sourcePath);
+      break;
     case '.py':
-      return `python3 ${sourcePath}`;
+      // No compilation needed for Python
+      break;
     case '.java':
-      return await compileJava(sourcePath);
+      await compileJava(sourcePath);
+      break;
     default:
       throw new Error(`Unsupported solution file extension: ${ext}`);
   }
 }
 
 /**
+ * Compiles all matching solutions.
+ * Compiles each solution based on file extension.
+ *
+ * @param {LocalSolution[]} solutions - Array of solutions to compile
+ * @returns {Promise<void>} Resolves when all compilations complete
+ *
+ * @throws {Error} If any compilation fails
+ *
+ * @example
+ * await compileAllSolutions(config.solutions);
+ * // Compiles all solutions in parallel
+ */
+export async function compileAllSolutions(
+  solutions: LocalSolution[]
+): Promise<void> {
+  await Promise.all(solutions.map(s => compileSolution(s.source)));
+}
+
+/**
  * Runs a single solution on a single test within a testset.
- * Compiles the solution and executes it on the specified test.
+ * Executes it on the specified test using pre-compiled executable.
+ * Note: Solution must be compiled before calling this function.
  *
  * @param {LocalSolution} solution - Solution configuration
  * @param {ConfigFile} config - Configuration containing time/memory limits
  * @param {string} testsetName - Name of testset containing the test
  * @param {number} testIndex - Test index (1-based)
  *
- * @throws {Error} If solution compilation fails
  * @throws {Error} If solution execution fails
  *
  * @example
@@ -243,7 +266,7 @@ export async function runSolutionOnSingleTest(
   );
 
   try {
-    const compiledPath = await compileSolution(solution.source);
+    const compiledPath = getCompiledCommandToRun(solution);
     ensureOutputDirectory(solution.name, testsetName);
 
     const testFile = `test${testIndex}.txt`;
@@ -268,13 +291,13 @@ export async function runSolutionOnSingleTest(
 
 /**
  * Runs a single solution on an entire testset.
- * Compiles the solution and executes it on all tests in the testset.
+ * Executes it on all tests in the testset using pre-compiled executable.
+ * Note: Solution must be compiled before calling this function.
  *
  * @param {LocalSolution} solution - Solution configuration
  * @param {ConfigFile} config - Configuration containing time/memory limits
  * @param {string} testsetName - Name of testset to run on
  *
- * @throws {Error} If solution compilation fails
  * @throws {Error} If solution fails on any test
  *
  * @example
@@ -291,7 +314,7 @@ export async function runSolutionOnTestset(
   const thrownErrors = new Set<string>();
 
   try {
-    const compiledPath = await compileSolution(solution.source);
+    const compiledPath = getCompiledCommandToRun(solution);
     ensureOutputDirectory(solution.name, testsetName);
 
     const testsDir = path.resolve(process.cwd(), 'testsets', testsetName);
@@ -321,7 +344,7 @@ export async function runSolutionOnTestset(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     thrownErrors.add(
-      `Failed to compile solution ${solution.name}:\n\t${message}`
+      `Failed to get compiled solution ${solution.name}:\n\t${message}`
     );
   }
 
@@ -346,14 +369,14 @@ export async function runSolutionOnTestset(
 
 /**
  * Runs a single solution on a specific group within a testset.
- * Compiles the solution and executes it on all tests in the group.
+ * Executes it on all tests in the group using pre-compiled executable.
+ * Note: Solution must be compiled before calling this function.
  *
  * @param {LocalSolution} solution - Solution configuration
  * @param {ConfigFile} config - Configuration containing time/memory limits
  * @param {LocalTestset} testset - Testset configuration
  * @param {string} groupName - Name of group to run on
  *
- * @throws {Error} If solution compilation fails
  * @throws {Error} If solution fails on any test in the group
  *
  * @example
@@ -371,7 +394,7 @@ export async function runSolutionOnGroup(
   const thrownErrors = new Set<string>();
 
   try {
-    const compiledPath = await compileSolution(solution.source);
+    const compiledPath = getCompiledCommandToRun(solution);
     ensureOutputDirectory(solution.name, testset.name);
 
     const commands = getGeneratorCommands(testset);
@@ -412,7 +435,7 @@ export async function runSolutionOnGroup(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     thrownErrors.add(
-      `Failed to compile solution ${solution.name}:\n\t${message}`
+      `Failed to get compiled solution ${solution.name}:\n\t${message}`
     );
   }
 
@@ -478,6 +501,7 @@ export async function runSolutionOnAllTestsets(
  * Tests a solution against the main correct solution using the checker.
  * Runs both solutions on all testsets, then compares outputs with the checker.
  * Validates that the solution behaves according to its expected type (TLE, WA, etc.).
+ * Note: Solutions and checker must be compiled before calling this function.
  *
  * @param {string} solutionName - Name of solution to test
  *
@@ -642,13 +666,13 @@ export function getMainSolution(solutions: LocalSolution[]): LocalSolution {
  * Compares target solution outputs against main solution using checker.
  * Runs checker on all test cases in all testsets and tracks verdicts (WA, TLE, MLE, RTE).
  * Validates that verdicts match the target solution's expected tag.
+ * Note: Checker must be compiled before calling this function.
  *
  * @param {LocalChecker} checker - Checker configuration
  * @param {LocalSolution} mainSolution - Main correct solution
  * @param {LocalSolution} targetSolution - Solution to validate
  * @param {LocalTestset[]} testsets - Array of testsets to check
  *
- * @throws {Error} If checker compilation fails
  * @throws {Error} If verdict validation fails
  * @throws {Error} If main solution has unexpected errors
  *
@@ -668,7 +692,7 @@ export async function startTheComparisonProcess(
   testsets: LocalTestset[]
 ) {
   try {
-    const compiledCheckerPath = await compileChecker(checker);
+    const compiledCheckerPath = getCompiledCommandToRun(checker);
     const verdictTracker = createVerdictTracker();
 
     for (const testset of testsets) {
