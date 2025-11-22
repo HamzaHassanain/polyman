@@ -80,6 +80,31 @@ interface Statement {
   tutorial?: string;
 }
 
+/**
+ * Statement configuration in Config.json (with file paths)
+ * @interface StatementConfig
+ * @property {string} encoding - Text encoding (e.g., 'UTF-8')
+ * @property {string} name - Problem title in this language
+ * @property {string} [legend] - Path to legend.tex file
+ * @property {string} [input] - Path to input-format.tex file
+ * @property {string} [output] - Path to output-format.tex file
+ * @property {string} [scoring] - Path to scoring.tex file
+ * @property {string} [interaction] - Path to interaction.tex file
+ * @property {string} [notes] - Path to notes.tex file
+ * @property {string} [tutorial] - Path to tutorial.tex file
+ */
+interface StatementConfig {
+  encoding: string;
+  name: string;
+  legend?: string;
+  input?: string;
+  output?: string;
+  scoring?: string;
+  interaction?: string;
+  notes?: string;
+  tutorial?: string;
+}
+
 // ==================== Files ====================
 
 /**
@@ -391,7 +416,7 @@ interface ConfigFile {
 
   // Statements
   statements: {
-    [language: string]: Statement;
+    [language: string]: StatementConfig;
   };
 
   // Solutions
@@ -512,9 +537,9 @@ interface LocalValidator {
  */
 interface GeneratorScriptCommand {
   type: 'generator-single' | 'manual' | 'generator-range';
+  useInStatements?: boolean;
   generator?: string;
   number?: number;
-  index?: number;
   manualFile?: string;
   group?: string;
   points?: number;
@@ -604,6 +629,41 @@ interface LocalTestset {
 }
 
 /**
+ * Options for adding or updating a test via the Polygon API.
+ * @interface TestOptions
+ * @property {boolean} [checkExisting] - Whether to check if test already exists
+ * @property {string} [testGroup] - Name of the test group
+ * @property {number} [testPoints] - Points assigned to the test
+ * @property {string} [testDescription] - Description of the test
+ * @property {boolean} [testUseInStatements] - Whether to use test in statements
+ * @property {string} [testInputForStatements] - Input to show in statements
+ * @property {string} [testOutputForStatements] - Output to show in statements
+ * @property {boolean} [verifyInputOutputForStatements] - Verify I/O for statements
+ * @example
+ * const options: TestOptions = {
+ *   checkExisting: true,
+ *   testGroup: 'samples',
+ *   testPoints: 10,
+ *   testDescription: 'Sample test case 1',
+ *   testUseInStatements: true,
+ *   testInputForStatements: '1 2 3',
+ *   testOutputForStatements: '6',
+ *   verifyInputOutputForStatements: true
+ * };
+ */
+
+interface TestOptions {
+  checkExisting?: boolean;
+  testGroup?: string;
+  testPoints?: number;
+  testDescription?: string;
+  testUseInStatements?: boolean;
+  testInputForStatements?: string;
+  testOutputForStatements?: string;
+  verifyInputOutputForStatements?: boolean;
+}
+
+/**
  * Local test group configuration.
  * @interface LocalTestGroup
  * @property {string} name - Group name
@@ -646,6 +706,7 @@ export {
   ProblemInfo,
   // Statements
   Statement,
+  StatementConfig,
   // Files
   ResourceAdvancedProperties,
   File,
@@ -661,6 +722,7 @@ export {
   Solution,
   // Tests
   Test,
+  TestOptions,
   TestGroup,
   PointsPolicy,
   FeedbackPolicy,

@@ -42,6 +42,40 @@ import {
   stepCompileSolutionsForVerification,
   stepRunSolutionsForVerification,
   stepVerifySolutionsAgainstMainCorrect,
+  stepReadCredentials,
+  stepInitializeSDK,
+  stepListProblems,
+  stepDisplayProblems,
+  stepGetProblemId,
+  stepFetchProblemInfo,
+  stepFetchStatements,
+  stepFetchSolutions,
+  stepFetchFiles,
+  stepFetchPackages,
+  stepFetchChecker,
+  stepFetchValidator,
+  stepFetchGenerators,
+  stepFetchSampleTests,
+  stepDisplayProblemView,
+  stepCommitChanges,
+  stepValidatePackageType,
+  stepBuildPackage,
+  stepCreatePulledProblemDirectory,
+  stepDownloadProblemFilesAndSetUpConfig,
+  stepDownloadTests,
+  stepReadConfig,
+  stepUpdateProblemInfo,
+  stepUploadSolutions,
+  stepUploadChecker,
+  stepUploadValidator,
+  stepUploadGenerators,
+  stepUploadStatements,
+  stepUploadMetadata,
+  stepUploadTestsets,
+  stepPromptCreateProblem,
+  stepGetValidProblemName,
+  stepCreateProblemOnPolygon,
+  stepUpdateConfigWithProblemId,
 } from './steps';
 
 import { logTemplateCreationSuccess } from './helpers/create-template';
@@ -102,7 +136,7 @@ export const createTemplateAction = (directory: string) => {
  * @throws {Error} If reading checker files fails
  *
  * @example
- * // From CLI: polyman list-checkers
+ * // From CLI: polyman list checkers
  * listAvailableCheckersAction();
  * // Displays:
  * //   1. acmp.cpp       → Almost-correct mode checker
@@ -855,7 +889,7 @@ export const fullVerificationAction = async () => {
  * @throws {Error} If Config.json is invalid or missing testsets
  *
  * @example
- * // From CLI: polyman list-testsets
+ * // From CLI: polyman list testsets
  * await listTestsetsAction();
  * // Displays:
  * //   1. tests: 15 tests, groups: samples, main
@@ -891,12 +925,801 @@ export const listTestsetsAction = () => {
   }
 };
 
-// export const registerApiKeyAndSecret = async (
-//   apiKey: string,
-//   secret: string
-// ) => {
-//   try {
-//   } catch (error) {
-//     logErrorAndExit(error);
-//   }
-// };
+/**
+ * Lists all available solutions in the configuration.
+ * Shows solution names, source files, and tags (MA/OK/WA/TLE/etc).
+ *
+ * @returns {void}
+ *
+ * @throws {Error} If Config.json is invalid or missing solutions
+ *
+ * @example
+ * // From CLI: polyman list solutions
+ * listSolutionsAction();
+ * // Displays:
+ * //   1. main       → ./solutions/acc.cpp        (MA - Main Accepted)
+ * //   2. wa-sol     → ./solutions/wa.cpp         (WA - Wrong Answer)
+ * //   3. tle-sol    → ./solutions/tle.py         (TL - Time Limit)
+ */
+export const listSolutionsAction = () => {
+  fmt.section('📋 AVAILABLE SOLUTIONS');
+
+  try {
+    const config = readConfigFile();
+
+    if (!config.solutions || config.solutions.length === 0) {
+      fmt.warning(`${fmt.warningIcon()} No solutions found in Config.json`);
+      console.log();
+      return;
+    }
+
+    fmt.info(
+      `  ${fmt.infoIcon()} Found ${fmt.highlight(config.solutions.length.toString())} solution(s)`
+    );
+    console.log();
+
+    const tagDescriptions: Record<string, string> = {
+      MA: 'Main Accepted',
+      OK: 'Accepted',
+      RJ: 'Rejected',
+      WA: 'Wrong Answer',
+      PE: 'Presentation Error',
+      TL: 'Time Limit',
+      ML: 'Memory Limit',
+      RE: 'Runtime Error',
+      CE: 'Compilation Error',
+    };
+
+    for (const [index, solution] of config.solutions.entries()) {
+      const tagDesc = tagDescriptions[solution.tag] || solution.tag;
+      const tagInfo = `(${solution.tag} - ${tagDesc})`;
+
+      fmt.log(
+        `  ${fmt.primary((index + 1).toString().padStart(2, ' ') + '.')} ${fmt.highlight(solution.name.padEnd(15))} ${fmt.dim('→')} ${solution.source.padEnd(30)} ${fmt.dim(tagInfo)}`
+      );
+    }
+
+    console.log();
+
+    // Listing complete
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    fmt.errorBox('FAILED TO LIST SOLUTIONS!');
+    fmt.error(`${message}`);
+    console.log();
+    process.exit(1);
+  }
+};
+
+/**
+ * Lists all available generators in the configuration.
+ * Shows generator names and source files.
+ *
+ * @returns {void}
+ *
+ * @throws {Error} If Config.json is invalid or missing generators
+ *
+ * @example
+ * // From CLI: polyman list generators
+ * listGeneratorsAction();
+ * // Displays:
+ * //   1. gen-random    → ./generators/gen-random.cpp
+ * //   2. gen-max       → ./generators/gen-max.cpp
+ * //   3. gen-special   → ./generators/gen-special.py
+ */
+export const listGeneratorsAction = () => {
+  fmt.section('📋 AVAILABLE GENERATORS');
+
+  try {
+    const config = readConfigFile();
+
+    if (!config.generators || config.generators.length === 0) {
+      fmt.warning(`${fmt.warningIcon()} No generators found in Config.json`);
+      console.log();
+      return;
+    }
+
+    fmt.info(
+      `  ${fmt.infoIcon()} Found ${fmt.highlight(config.generators.length.toString())} generator(s)`
+    );
+    console.log();
+
+    for (const [index, generator] of config.generators.entries()) {
+      fmt.log(
+        `  ${fmt.primary((index + 1).toString().padStart(2, ' ') + '.')} ${fmt.highlight(generator.name.padEnd(20))} ${fmt.dim('→')} ${generator.source}`
+      );
+    }
+
+    console.log();
+
+    // Listing complete
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    fmt.errorBox('FAILED TO LIST GENERATORS!');
+    fmt.error(`${message}`);
+    console.log();
+    process.exit(1);
+  }
+};
+
+/**
+ * Registers Polygon API credentials locally for use in remote commands.
+ * Stores the API key and secret in user's home directory (~/.polyman/).
+ * This data is only stored locally and used for authenticated Polygon API requests.
+ *
+ * @param {string} apiKey - Polygon API key from user's Polygon settings
+ * @param {string} secret - Polygon API secret
+ * @returns {Promise<void>} Resolves when credentials are saved
+ *
+ * @throws {Error} If file system operations fail
+ *
+ * @example
+ * // From CLI: polyman register <api-key> <secret>
+ * await registerApiKeyAndSecretAction('991d9b...', 'a4c7c2f...');
+ * // Saves credentials to ~/.polyman/api_key and ~/.polyman/secret_key
+ */
+export const registerApiKeyAndSecretAction = (
+  apiKey: string,
+  secret: string
+) => {
+  fmt.section('🔐 REGISTER POLYGON API CREDENTIALS');
+
+  try {
+    const homeDir = process.env['HOME'] || process.env['USERPROFILE'] || '';
+    const polymanDir = path.join(homeDir, '.polyman');
+
+    // Create .polyman directory if it doesn't exist
+    if (!fs.existsSync(polymanDir)) {
+      fs.mkdirSync(polymanDir, { recursive: true });
+      fmt.info(`  ${fmt.infoIcon()} Created directory: ${polymanDir}`);
+    }
+
+    // Save API key
+    const apiKeyPath = path.join(polymanDir, 'api_key');
+    fs.writeFileSync(apiKeyPath, apiKey, 'utf-8');
+    fmt.success(`  ${fmt.checkmark()} API key saved to: ${apiKeyPath}`);
+
+    // Save secret
+    const secretPath = path.join(polymanDir, 'secret_key');
+    fs.writeFileSync(secretPath, secret, 'utf-8');
+    fmt.success(`  ${fmt.checkmark()} Secret saved to: ${secretPath}`);
+
+    console.log();
+    fmt.successBox('CREDENTIALS REGISTERED SUCCESSFULLY!');
+    fmt.info(
+      '  You can now use remote commands like: polyman remote-list, remote-pull, remote-push'
+    );
+    console.log();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    fmt.errorBox('REGISTRATION FAILED!');
+    fmt.error(`${message}`);
+    console.log();
+    process.exit(1);
+  }
+};
+
+/**
+ * Lists all problems accessible to the authenticated user on Polygon.
+ * Displays problem ID, name, owner, and access level.
+ * Requires registered API credentials.
+ *
+ * @returns {void} Resolves when listing completes
+ *
+ * @throws {Error} If credentials are not registered
+ * @throws {Error} If Polygon API request fails
+ *
+ * @param {string} [owner] - Optional owner username to filter problems
+ *
+ * @example
+ * // From CLI: polyman remote-list
+ * await remoteListProblemsAction();
+ * // Displays:
+ * //   1. [123456] My Problem (owner: username, access: OWNER)
+ * //   2. [789012] Another Problem (owner: other, access: READ)
+ *
+ * @example
+ * // From CLI: polyman remote-list --owner tourist
+ * await remoteListProblemsAction('tourist');
+ * // Displays only problems owned by 'tourist'
+ */
+export const remoteListProblemsAction = async (
+  owner?: string
+): Promise<void> => {
+  fmt.section('📋 LIST POLYGON PROBLEMS');
+
+  try {
+    let stepNum = 1;
+
+    // step 1: Read API credentials
+    const credentials = stepReadCredentials(stepNum++);
+
+    // step 2: Initialize SDK
+    const sdk = stepInitializeSDK(stepNum++, credentials);
+
+    // step 3: List problems
+    const problems = await stepListProblems(stepNum++, sdk);
+
+    // step 4: Filter by owner if specified
+    const filteredProblems = owner
+      ? problems.filter(p => p.owner.toLowerCase() === owner.toLowerCase())
+      : problems;
+
+    if (owner && filteredProblems.length === 0) {
+      fmt.warning(`  ⚠️  No problems found for owner: ${owner}`);
+    }
+
+    // step 5: Display problems
+    stepDisplayProblems(stepNum++, filteredProblems);
+
+    // Final success message
+    fmt.successBox('PROBLEMS LISTED SUCCESSFULLY!');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    fmt.errorBox('FAILED TO LIST PROBLEMS!');
+    fmt.error(`${message}`);
+    console.log();
+    process.exit(1);
+  }
+};
+
+/**
+ * Pulls a problem from Polygon and saves it in Polyman's template structure.
+ * Downloads all problem files including solutions, tests, checker, validator, etc.
+ * If local problem exists with same ID, prompts user to merge or overwrite.
+ *
+ * @param {string} problemIdOrPath - Problem ID or path to directory with Config.json
+ * @param {string} savePath - Directory path where problem should be saved
+ * @param {object} options - Pull options for selective download
+ * @returns {void} Resolves when pull completes
+ *
+ * @throws {Error} If credentials are not registered
+ * @throws {Error} If problem not found on Polygon
+ * @throws {Error} If file operations fail
+ *
+ * @example
+ * // From CLI: polyman remote-pull 123456 ./my-problem
+ * await remotePullProblemAction('123456', './my-problem');
+ * // Downloads problem 123456 to ./my-problem/
+ *
+ * @example
+ * // Pull to current directory
+ * await remotePullProblemAction('.', '.');
+ * // Uses problem ID from Config.json in current directory
+ */
+export const remotePullProblemAction = async (
+  problemIdOrPath: string,
+  savePath: string,
+  options?: {
+    all?: boolean;
+    solutions?: boolean;
+    checker?: boolean;
+    validator?: boolean;
+    generators?: boolean;
+    statements?: boolean;
+    tests?: string;
+    metadata?: boolean;
+    info?: boolean;
+  }
+): Promise<void> => {
+  fmt.section('⬇️  PULL PROBLEM FROM POLYGON');
+
+  try {
+    let stepNum = 1;
+
+    // Determine what to pull
+    const hasSpecificOptions =
+      options &&
+      (options.solutions ||
+        options.checker ||
+        options.validator ||
+        options.generators ||
+        options.statements ||
+        options.tests ||
+        options.metadata ||
+        options.info);
+
+    const pullAll = !hasSpecificOptions || options?.all;
+    const pullTests = pullAll || options?.tests;
+    const pullInfo = pullAll || options?.info;
+
+    // step 1: Read API credentials
+    const credentials = stepReadCredentials(stepNum++);
+
+    // step 2: Initialize SDK
+    const sdk = stepInitializeSDK(stepNum++, credentials);
+
+    // step 3: Get problem ID
+    const problemId = stepGetProblemId(stepNum++, problemIdOrPath);
+
+    // step 4: Fetch problem info
+    if (pullInfo) {
+      await stepFetchProblemInfo(stepNum++, sdk, problemId);
+    }
+
+    // step 5: Create directory structure
+    stepCreatePulledProblemDirectory(stepNum++, savePath);
+
+    // step 6: Download problem files and create Config.json
+    // Note: Currently pulls all files - selective pull will be implemented in future
+    await stepDownloadProblemFilesAndSetUpConfig(
+      stepNum++,
+      sdk,
+      problemId,
+      savePath
+    );
+
+    // step 7: Download test files
+    if (pullTests) {
+      const testsets = options!.tests;
+      if (!testsets) {
+        await stepDownloadTests(stepNum++, sdk, problemId, 'tests', savePath);
+      } else {
+        const testsetsArr = testsets.split(',');
+        for (const testset of testsetsArr) {
+          await stepDownloadTests(stepNum++, sdk, problemId, testset, savePath);
+        }
+      }
+    }
+
+    console.log();
+    fmt.successBox('PROBLEM PULLED SUCCESSFULLY!');
+    fmt.info(
+      `  ${fmt.infoIcon()} Problem saved to: ${fmt.highlight(savePath)}`
+    );
+    fmt.info(
+      `  ${fmt.infoIcon()} Review Config.json and update solution tags as needed`
+    );
+    console.log();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    fmt.errorBox('FAILED TO PULL PROBLEM!');
+    fmt.error(`${message}`);
+    console.log();
+    process.exit(1);
+  }
+};
+
+/**
+ * Pushes local problem to Polygon.
+ * Creates new problem if Config.json doesn't contain problem ID.
+ * Updates existing problem if ID is present.
+ * Uploads all files including solutions, tests, checker, validator, statements.
+ *
+ * @param {string} problemPath - Path to problem directory with Config.json
+ * @returns {void} Resolves when push completes
+ *
+ * @throws {Error} If credentials are not registered
+ * @throws {Error} If Config.json is invalid or missing
+ * @throws {Error} If Polygon API request fails
+ *
+ * @example
+ * // From CLI: polyman remote-push ./my-problem
+ * await remotePushProblemAction('./my-problem');
+ * // Creates new problem or updates existing one
+ */
+export const remotePushProblemAction = async (
+  problemPath: string,
+  options?: {
+    all?: boolean;
+    solutions?: boolean;
+    checker?: boolean;
+    validator?: boolean;
+    generators?: boolean;
+    statements?: boolean;
+    tests?: boolean;
+    metadata?: boolean;
+    info?: boolean;
+  }
+): Promise<void> => {
+  fmt.section('⬆️  PUSH PROBLEM TO POLYGON');
+
+  try {
+    let stepNum = 1;
+
+    // Determine what to push
+    const hasSpecificOptions =
+      options &&
+      (options.solutions ||
+        options.checker ||
+        options.validator ||
+        options.generators ||
+        options.statements ||
+        options.tests ||
+        options.metadata ||
+        options.info);
+
+    const pushAll = !hasSpecificOptions || options?.all;
+    const pushSolutions = pushAll || options?.solutions;
+    const pushChecker = pushAll || options?.checker;
+    const pushValidator = pushAll || options?.validator;
+    const pushGenerators = pushAll || options?.generators;
+    const pushStatements = pushAll || options?.statements;
+    const pushTests = pushAll || options?.tests;
+    const pushMetadata = pushAll || options?.metadata;
+    const pushInfo = pushAll || options?.info;
+
+    // step 1: Read API credentials
+    const credentials = stepReadCredentials(stepNum++);
+
+    // step 2: Initialize SDK
+    const sdk = stepInitializeSDK(stepNum++, credentials);
+
+    // step 3: Read Config.json
+    const problemDir = path.resolve(process.cwd(), problemPath);
+    const config = stepReadConfig(stepNum++, problemDir);
+
+    // step 4: Get problem ID (or create new problem)
+    let problemId = config.problemId;
+
+    if (!problemId) {
+      // Prompt user to create new problem
+      const shouldProceed = await stepPromptCreateProblem(stepNum++);
+
+      if (!shouldProceed) {
+        console.log();
+        fmt.info('  Push cancelled.');
+        console.log();
+        return;
+      }
+
+      // Validate and get problem name
+      const problemName = await stepGetValidProblemName(
+        stepNum++,
+        sdk,
+        config.name
+      );
+
+      // Create the problem on Polygon
+      problemId = await stepCreateProblemOnPolygon(stepNum++, sdk, problemName);
+
+      // Update Config.json with new problem ID and name
+      stepUpdateConfigWithProblemId(
+        stepNum++,
+        problemDir,
+        config,
+        problemId,
+        problemName
+      );
+      console.log();
+    }
+
+    // step 5: Update problem information
+    if (pushInfo) {
+      await stepUpdateProblemInfo(stepNum++, sdk, problemId, config);
+    }
+
+    // step 6: Upload solutions
+    if (pushSolutions) {
+      if (config.solutions && config.solutions.length > 0) {
+        await stepUploadSolutions(
+          stepNum++,
+          sdk,
+          problemId,
+          problemDir,
+          config
+        );
+      } else if (!pushAll) {
+        fmt.error(`   ${fmt.cross()} Solutions not found in Config.json`);
+      } else {
+        fmt.warning(`   ${fmt.warningIcon()} No solutions to upload`);
+      }
+    }
+
+    // step 7: Upload checker
+    if (pushChecker) {
+      if (config.checker) {
+        await stepUploadChecker(stepNum++, sdk, problemId, problemDir, config);
+      } else if (!pushAll) {
+        fmt.error(`   ${fmt.cross()} Checker not found in Config.json`);
+      } else {
+        fmt.warning(`   ${fmt.warningIcon()} No checker to upload`);
+      }
+    }
+
+    // step 8: Upload validator
+    if (pushValidator) {
+      if (config.validator) {
+        await stepUploadValidator(
+          stepNum++,
+          sdk,
+          problemId,
+          problemDir,
+          config
+        );
+      } else if (!pushAll) {
+        fmt.error(`   ${fmt.cross()} Validator not found in Config.json`);
+      } else {
+        fmt.warning(`   ${fmt.warningIcon()} No validator to upload`);
+      }
+    }
+
+    // step 9: Upload generators
+    if (pushGenerators) {
+      if (config.generators && config.generators.length > 0) {
+        await stepUploadGenerators(
+          stepNum++,
+          sdk,
+          problemId,
+          problemDir,
+          config
+        );
+      } else if (!pushAll) {
+        fmt.error(`   ${fmt.cross()}  Generators not found in Config.json`);
+      } else {
+        fmt.warning(`   ${fmt.warningIcon()} No generators to upload`);
+      }
+    }
+
+    // step 10: Upload statements
+    if (pushStatements) {
+      if (config.statements) {
+        await stepUploadStatements(
+          stepNum++,
+          sdk,
+          problemId,
+          problemDir,
+          config
+        );
+      } else if (!pushAll) {
+        fmt.error(`   ${fmt.cross()}  Statements not found in Config.json`);
+      } else {
+        fmt.warning(`   ${fmt.warningIcon()} No statements to upload`);
+      }
+    }
+
+    // step 11: Upload metadata
+    if (pushMetadata) {
+      await stepUploadMetadata(stepNum++, sdk, problemId, config);
+    }
+
+    // step 12: Upload testsets and tests
+    if (pushTests) {
+      if (config.testsets && config.testsets.length > 0) {
+        await stepUploadTestsets(stepNum++, sdk, problemId, problemDir, config);
+      } else if (!pushAll) {
+        fmt.error(`${fmt.cross()}  Testsets not found in Config.json`);
+      } else {
+        fmt.warning(`${fmt.warningIcon()} No testsets to upload`);
+      }
+    }
+
+    console.log();
+    fmt.successBox('PROBLEM PUSHED SUCCESSFULLY!');
+    fmt.info(
+      `  ${fmt.infoIcon()} Problem ID: ${fmt.highlight(problemId.toString())}`
+    );
+    fmt.info(
+      `  ${fmt.infoIcon()} Don't forget to commit your changes on Polygon using: ${fmt.highlight('polyman remote commit')}`
+    );
+    console.log();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    fmt.errorBox('FAILED TO PUSH PROBLEM!');
+    fmt.error(`${message}`);
+    console.log();
+    process.exit(1);
+  }
+};
+
+/**
+ * Displays detailed information about a Polygon problem.
+ * Shows problem metadata, files, solutions, tests, and current status.
+ * Can read problem ID from Config.json or accept it as argument.
+ *
+ * @param {string} problemIdOrPath - Problem ID or path to directory with Config.json
+ * @returns {void} Resolves when view completes
+ *
+ * @throws {Error} If credentials are not registered
+ * @throws {Error} If problem not found on Polygon
+ *
+ * @example
+ * // From CLI: polyman remote-view 123456
+ * await remoteViewProblemAction('123456');
+ * // Displays problem details in formatted UI
+ *
+ * @example
+ * // View problem in current directory
+ * await remoteViewProblemAction('.');
+ * // Uses problem ID from Config.json
+ */
+export const remoteViewProblemAction = async (
+  problemIdOrPath: string
+): Promise<void> => {
+  fmt.section('👁️  VIEW PROBLEM ON POLYGON');
+
+  try {
+    let stepNum = 1;
+
+    // step 1: Read API credentials
+    const credentials = stepReadCredentials(stepNum++);
+
+    // step 2: Initialize SDK
+    const sdk = stepInitializeSDK(stepNum++, credentials);
+
+    // step 3: Get problem ID
+    const problemId = stepGetProblemId(stepNum++, problemIdOrPath);
+
+    // step 4: Fetch problem info
+    const info = await stepFetchProblemInfo(stepNum++, sdk, problemId);
+
+    // step 5: Fetch statements
+    const statements = await stepFetchStatements(stepNum++, sdk, problemId);
+
+    // step 6: Fetch solutions
+    const solutions = await stepFetchSolutions(stepNum++, sdk, problemId);
+
+    // step 7: Fetch files
+    const files = await stepFetchFiles(stepNum++, sdk, problemId);
+
+    // step 8: Fetch packages
+    const packages = await stepFetchPackages(stepNum++, sdk, problemId);
+
+    // step 9: Fetch checker
+    const checker = await stepFetchChecker(stepNum++, sdk, problemId);
+
+    // step 10: Fetch validator
+    const validator = await stepFetchValidator(stepNum++, sdk, problemId);
+
+    // step 11: Identify generators from source files
+    const generators = stepFetchGenerators(
+      stepNum++,
+      files,
+      checker,
+      validator
+    );
+
+    // step 12: Fetch sample tests
+    const samples = await stepFetchSampleTests(stepNum++, sdk, problemId);
+
+    // step 13: Display comprehensive view
+    stepDisplayProblemView(
+      stepNum++,
+      info,
+      statements,
+      solutions,
+      files,
+      packages,
+      checker,
+      validator,
+      generators,
+      samples
+    );
+
+    // Final success message
+    fmt.successBox('PROBLEM DETAILS RETRIEVED!');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    fmt.errorBox('FAILED TO VIEW PROBLEM!');
+    fmt.error(`${message}`);
+    console.log();
+    process.exit(1);
+  }
+};
+
+/**
+ * Commits local changes to Polygon problem.
+ * Similar to git commit - creates new revision on Polygon.
+ * Requires problem ID in Config.json or as argument.
+ *
+ * @param {string} problemIdOrPath - Problem ID or path to directory with Config.json
+ * @param {string} commitMessage - Commit message describing changes
+ * @returns {void} Resolves when commit completes
+ *
+ * @throws {Error} If credentials are not registered
+ * @throws {Error} If problem not found or no uncommitted changes
+ * @throws {Error} If Polygon API request fails
+ *
+ * @example
+ * // From CLI: polyman remote-commit ./my-problem "Updated time limits"
+ * await remoteCommitProblemAction('./my-problem', 'Updated time limits');
+ * // Commits changes with message
+ */
+export const remoteCommitProblemAction = async (
+  problemIdOrPath: string,
+  commitMessage: string
+): Promise<void> => {
+  fmt.section('💾 COMMIT CHANGES TO POLYGON');
+
+  try {
+    let stepNum = 1;
+
+    // step 1: Read API credentials
+    const credentials = stepReadCredentials(stepNum++);
+
+    // step 2: Initialize SDK
+    const sdk = stepInitializeSDK(stepNum++, credentials);
+
+    // step 3: Get problem ID
+    const problemId = stepGetProblemId(stepNum++, problemIdOrPath);
+
+    // step 4: Commit changes
+    await stepCommitChanges(stepNum++, sdk, problemId, commitMessage);
+
+    // Final success message
+    fmt.successBox('CHANGES COMMITTED SUCCESSFULLY!');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    fmt.errorBox('FAILED TO COMMIT CHANGES!');
+    fmt.error(`${message}`);
+    console.log();
+    process.exit(1);
+  }
+};
+
+/**
+ * Builds and downloads problem package from Polygon.
+ * Package types: 'standard' (for contests) or 'full' (complete problem data).
+ * Downloaded package is saved to current directory.
+ *
+ * @param {string} problemIdOrPath - Problem ID or path to directory with Config.json
+ * @param {string} packageType - Package type: 'standard', 'full', 'linux', 'windows'
+ * @returns {void} Resolves when package is downloaded
+ *
+ * @throws {Error} If credentials are not registered
+ * @throws {Error} If problem not found on Polygon
+ * @throws {Error} If package build fails
+ *
+ * @example
+ * // From CLI: polyman remote-package ./my-problem standard
+ * await remotePackageProblemAction('./my-problem', 'standard');
+ * // Builds and downloads standard package
+ *
+ * @example
+ * // Full package with all data
+ * await remotePackageProblemAction('123456', 'full');
+ */
+export const remotePackageProblemAction = async (
+  problemIdOrPath: string,
+  packageType: string
+): Promise<void> => {
+  fmt.section('📦 BUILD AND DOWNLOAD PACKAGE');
+
+  try {
+    let stepNum = 1;
+
+    // step 1: Read API credentials
+    const credentials = stepReadCredentials(stepNum++);
+
+    // step 2: Initialize SDK
+    const sdk = stepInitializeSDK(stepNum++, credentials);
+
+    // step 3: Get problem ID
+    const problemId = stepGetProblemId(stepNum++, problemIdOrPath);
+
+    // step 4: Validate package type
+    stepValidatePackageType(stepNum++, packageType);
+
+    // step 5: Build package and wait for completion
+    const packageInfo = await stepBuildPackage(
+      stepNum++,
+      sdk,
+      problemId,
+      packageType
+    );
+
+    console.log();
+    // Final success message
+
+    if (packageInfo.state === 'FAILED') {
+      fmt.errorBox('PACKAGE BUILD FAILED!');
+    } else {
+      fmt.successBox('PACKAGE BUILT SUCCESSFULLY!');
+    }
+    fmt.info(
+      `  ${fmt.infoIcon()} Package ID: ${fmt.highlight(packageInfo.id.toString())}`
+    );
+    fmt.info(`  ${fmt.infoIcon()} State: ${fmt.highlight(packageInfo.state)}`);
+    if (packageInfo.comment) {
+      fmt.info(`  ${fmt.infoIcon()} Message: ${packageInfo.comment}`);
+    }
+    // fmt.info(`  ${fmt.infoIcon()} You can download the package from Polygon`);
+    console.log();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    fmt.errorBox('PACKAGE OPERATION FAILED!');
+    fmt.error(`${message}`);
+    console.log();
+    process.exit(1);
+  }
+};

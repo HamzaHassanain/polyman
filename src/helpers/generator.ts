@@ -293,7 +293,7 @@ export async function executeGeneratorScript(
     } catch (error) {
       someFailed = true;
       fmt.error(
-        `  ${fmt.cross()} Test ${command.index} generation failed:\n\t${(error as Error).message}`
+        `  ${fmt.cross()} Test ${testNumber} generation failed:\n\t${(error as Error).message}`
       );
     }
   }

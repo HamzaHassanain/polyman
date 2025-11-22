@@ -18,6 +18,7 @@ import type {
   Package,
   ValidatorTest,
   CheckerTest,
+  TestOptions,
 } from './types';
 
 // Re-export types for convenience
@@ -25,6 +26,7 @@ export type {
   Problem,
   ProblemInfo,
   Statement,
+  StatementConfig,
   ResourceAdvancedProperties,
   File,
   FilesResponse,
@@ -594,6 +596,7 @@ export class PolygonSDK {
     const params: Record<string, string | number | boolean> = {
       problemId,
       checker,
+      autoUpdate: false,
     };
     if (pin) params['pin'] = pin;
     await this.request('problem.setChecker', params);
@@ -1339,25 +1342,16 @@ export class PolygonSDK {
     testset: string,
     testIndex: number,
     testInput: string,
-    options?: {
-      checkExisting?: boolean;
-      testGroup?: string;
-      testPoints?: number;
-      testDescription?: string;
-      testUseInStatements?: boolean;
-      testInputForStatements?: string;
-      testOutputForStatements?: string;
-      verifyInputOutputForStatements?: boolean;
-    },
+    options?: TestOptions,
     pin?: string
   ): Promise<void> {
     const params: Record<string, string | number | boolean> = {
       problemId,
       testset,
       testIndex,
-      testInput,
       ...(options || {}),
     };
+    if (testInput) params['testInput'] = testInput;
     if (pin) params['pin'] = pin;
     await this.request('problem.saveTest', params);
   }

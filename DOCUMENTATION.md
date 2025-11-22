@@ -26,7 +26,9 @@ A TypeScript-based CLI tool for Codeforces problem setters that automates proble
    - [Solution Execution](#solvetestssolutionname-string-testnumber-string)
    - [Component Testing](#testwhatwhat-string)
    - [Full Verification](#fullverification)
+   - [Remote Operations](#remote-operations)
 6. [Helper Modules](#helper-modules)
+   - [Remote Helper Modules](#remote-helper-modules)
    - [Utility Functions](#utility-functions-srchelpersutilsts)
    - [Generator Module](#generator-module-srchelpersgeratorts)
    - [Validator Module](#validator-module-srchelpersvalidatorts)
@@ -63,18 +65,23 @@ A TypeScript-based CLI tool for Codeforces problem setters that automates proble
 15. [Error Handling](#error-handling)
     - [Error Flow](#error-flow)
     - [Error Types](#error-types)
-16. [File Structure](#file-structure)
+16. [Polygon Integration](#polygon-integration)
+    - [Polygon SDK](#polygon-sdk)
+    - [API Authentication](#api-authentication)
+    - [Remote Operations Flow](#remote-operations-flow)
+17. [File Structure](#file-structure)
     - [Template Structure](#template-structure)
     - [Generated Project Structure](#generated-project-structure)
-17. [Development Guide](#development-guide)
+18. [Development Guide](#development-guide)
     - [Building from Source](#building-from-source)
     - [Code Structure](#code-structure)
     - [Adding New Features](#adding-new-features)
     - [Testing](#testing)
     - [ESLint Configuration](#eslint-configuration)
-18. [API Reference](#api-reference)
+19. [API Reference](#api-reference)
     - [Key Exports](#key-exports)
-19. [Implementation Notes](#implementation-notes)
+    - [Polygon SDK API](#polygon-sdk-api)
+20. [Implementation Notes](#implementation-notes)
     - [Performance Considerations](#performance-considerations)
     - [Platform Differences](#platform-differences)
     - [Security](#security)
@@ -129,13 +136,13 @@ The CLI interface uses Commander.js to define all user-facing commands:
 
 - `new <directory>` → `createTemplate`
 - `download-testlib` → `downloadTestlib`
-- `list-checkers` → `listAvailableCheckers`
-- `generate <target> [modifier]` → `generateTests`
-- `validate <target> [modifier]` → `validateTests`
-- `run-solution <name> <target> [modifier]` → `solveTests`
+- `list checkers` → `listAvailableCheckers`
+- `generate [options]` → `generateTests`
+- `validate [options]` → `validateTests`
+- `run <solution-name> [options]` → `solveTests`
 - `test <what>` → `testWhat`
 - `verify` → `fullVerification`
-- `list-testsets` → Lists all testsets from configuration
+- `list testsets` → Lists all testsets from configuration
 
 **Example:**
 
@@ -360,32 +367,38 @@ program
 
 // Lists available standard checkers
 program
-  .command('list-checkers')
+  .command('list checkers')
   .description('List all available standard checkers')
   .action(listAvailableCheckers);
 
 // Runs generators to create test files
 program
-  .command('generate <target> [modifier]')
-  .description(
-    'Run generators for tests (target: all|testset-name, modifier: group|test-number)'
-  )
+  .command('generate')
+  .description('Generate tests for testsets')
+  .option('-a, --all', 'Generate all testsets')
+  .option('-t, --testset <name>', 'Generate specific testset')
+  .option('-g, --group <name>', 'Generate specific group within testset')
+  .option('-i, --index <number>', 'Generate specific test by index')
   .action(generateTests);
 
 // Validates test inputs
 program
-  .command('validate <target> [modifier]')
-  .description(
-    'Validate test files (target: all|testset-name, modifier: group|test-number)'
-  )
+  .command('validate')
+  .description('Validate tests using validator')
+  .option('-a, --all', 'Validate all testsets')
+  .option('-t, --testset <name>', 'Validate specific testset')
+  .option('-g, --group <name>', 'Validate specific group within testset')
+  .option('-i, --index <number>', 'Validate specific test by index')
   .action(validateTests);
 
 // Executes solutions on tests
 program
-  .command('run-solution <solution-name> <target> [modifier]')
-  .description(
-    'Run solution on tests (target: all|testset-name, modifier: group|test-number)'
-  )
+  .command('run <solution-name>')
+  .description('Run solution on tests')
+  .option('-a, --all', 'Run on all testsets')
+  .option('-t, --testset <name>', 'Run on specific testset')
+  .option('-g, --group <name>', 'Run on specific group within testset')
+  .option('-i, --index <number>', 'Run on specific test by index')
   .action(solveTests);
 
 // Tests validators/checkers/solutions
@@ -464,7 +477,7 @@ Lists all standard checkers from `assets/checkers/`.
 2. Parses description from C++ comments (`// Description:`)
 3. Formats output with `fmt`
 
-**Called by:** `polyman list-checkers`
+**Called by:** `polyman list checkers`
 
 **Output Format:**
 
@@ -488,12 +501,14 @@ Runs generators to create test input files.
 2. Validates generators exist via `ensureGeneratorsExist`
 3. Runs matching generators via `runMatchingGenerators`
 
-**Called by:** `polyman generate <target> [modifier]`
+**Called by:** `polyman generate [options]`
 
-**Parameters:**
+**Options:**
 
-- `target`: Testset name or 'all'
-- `modifier`: (Optional) Group name or test number
+- `--all`: Generate all testsets
+- `--testset <name>`: Testset name
+- `--group <name>`: (Optional) Group name within testset
+- `--index <number>`: (Optional) Test number within testset
 
 ---
 
@@ -509,7 +524,14 @@ Validates test input files using validator.
 2. Ensures validator exists via `ensureValidatorExists`
 3. Validates tests via `validateSingleTest` or `validateAllTests`
 
-**Called by:** `polyman validate <target> [modifier]`
+**Called by:** `polyman validate [options]`
+
+**Options:**
+
+- `--all`: Validate all testsets
+- `--testset <name>`: Testset name
+- `--group <name>`: (Optional) Group name within testset
+- `--index <number>`: (Optional) Test number within testset
 
 ---
 
@@ -525,12 +547,14 @@ Executes solutions on test inputs.
 2. Validates solutions exist via `validateSolutionsExist`
 3. Runs solutions via `runSingleSolutionOnTests` or `runMatchingSolutionsOnTests`
 
-**Called by:** `polyman run-solution <name> <test>`
+**Called by:** `polyman run <name> [options]`
 
-**Parameters:**
+**Options:**
 
-- `solutionName`: Solution name or 'all'
-- `testNumber`: Test number or 'all'
+- `--all`: Run on all testsets
+- `--testset <name>`: Testset name
+- `--group <name>`: (Optional) Group name within testset
+- `--index <number>`: (Optional) Test number within testset
 
 ---
 
@@ -592,9 +616,703 @@ Complete problem verification workflow.
 
 ---
 
+### Remote Operations
+
+Polyman provides comprehensive Polygon integration for remote problem management. All remote commands are namespaced under `polyman remote`.
+
+#### `registerApiKeyAndSecretAction(apiKey: string, secret: string)`
+
+Registers Polygon API credentials locally for future use.
+
+**Workflow:**
+
+1. Validates credentials format
+2. Stores in home directory (`~/.polyman/credentials.json`)
+3. Encrypts sensitive data
+4. Logs success message
+
+**Called by:** `polyman remote register <api-key> <secret>`
+
+**Storage Location:**
+
+- Linux/macOS: `~/.polyman/credentials.json`
+- Windows: `%USERPROFILE%\.polyman\credentials.json`
+
+---
+
+#### `remoteListProblemsAction(owner?: string)`
+
+Lists all problems from Polygon accessible to the user.
+
+**Workflow:**
+
+1. **Step 1:** Read API credentials via `stepReadCredentials`
+2. **Step 2:** Initialize Polygon SDK via `stepInitializeSDK`
+3. **Step 3:** List problems via `stepListProblems`
+4. **Step 4:** Display problems via `stepDisplayProblems`
+
+**Called by:**
+
+- `polyman remote list`
+- `polyman remote list --owner <username>`
+
+**Output Format:**
+
+```
+╔════════════════════════════════════════════════════════════════╗
+║  YOUR PROBLEMS ON POLYGON                                       ║
+╚════════════════════════════════════════════════════════════════╝
+
+ID      | Name                | Owner    | Access | Modified
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+123456  | A Plus B            | tourist  | WRITE  | Yes
+789012  | Graph Problem       | you      | OWNER  | No
+```
+
+---
+
+#### `remotePullProblemAction(problemId: string, directory: string, options: PullOptions)`
+
+Downloads a problem from Polygon to local directory.
+
+**Workflow:**
+
+1. **Step 1:** Read API credentials
+2. **Step 2:** Initialize Polygon SDK
+3. **Step 3:** Fetch problem information (time/memory limits, I/O files)
+4. **Step 4:** Create local directory structure
+5. **Step 5:** Download problem files:
+   - Solutions (all languages)
+   - Checker (with self-tests)
+   - Validator (with self-tests)
+   - Generators (all source files)
+   - Statements (all languages as .tex files)
+   - Tests (manual tests, fetched in parallel)
+   - Metadata (description, tags)
+6. **Step 6:** Generate `Config.json` with complete configuration
+7. **Step 7:** Normalize line endings (Windows → Unix)
+
+**Called by:** `polyman remote pull <problem-id> <directory> [options]`
+
+**Options:**
+
+```typescript
+interface PullOptions {
+  all?: boolean; // Pull all components (default)
+  solutions?: boolean; // Pull solutions only
+  checker?: boolean; // Pull checker only
+  validator?: boolean; // Pull validator only
+  generators?: boolean; // Pull generators only
+  statements?: boolean; // Pull statements only
+  tests?: string; // Pull tests (optionally specify testsets)
+  metadata?: boolean; // Pull description and tags
+  info?: boolean; // Pull problem info (limits)
+}
+```
+
+**Examples:**
+
+```bash
+# Pull everything (default)
+polyman remote pull 123456 ./my-problem
+
+# Pull only solutions and checker
+polyman remote pull 123456 ./my-problem -s -c
+
+# Pull specific testsets
+polyman remote pull 123456 ./my-problem -t samples,tests
+```
+
+**Line Ending Normalization:**
+
+All text files are automatically converted from Windows (CRLF) to Unix (LF) line endings during pull.
+
+---
+
+#### `remotePushProblemAction(directory: string, options: PushOptions)`
+
+Uploads local problem changes to Polygon.
+
+**Workflow:**
+
+1. **Step 1:** Read API credentials
+2. **Step 2:** Initialize Polygon SDK
+3. **Step 3:** Read `Config.json` to get problem ID
+4. **Step 4:** Update problem information (time/memory limits, I/O files)
+5. **Step 5:** Upload solutions with tags
+6. **Step 6:** Upload and set checker
+7. **Step 7:** Upload and set validator (with self-tests)
+8. **Step 8:** Upload generators
+9. **Step 9:** Upload statements (all languages)
+10. **Step 10:** Upload metadata (description, tags)
+11. **Step 11:** Upload testsets:
+    - Enable groups if configured
+    - Upload manual tests in parallel
+    - Upload generation script
+12. **Step 12:** Normalize line endings (Unix → Windows for Polygon)
+
+**Called by:** `polyman remote push <directory> [options]`
+
+**Options:**
+
+```typescript
+interface PushOptions {
+  all?: boolean; // Push all components (default)
+  solutions?: boolean; // Push solutions
+  checker?: boolean; // Push checker
+  validator?: boolean; // Push validator
+  generators?: boolean; // Push generators
+  statements?: boolean; // Push statements
+  tests?: boolean; // Push testsets and tests
+  metadata?: boolean; // Push description and tags
+  info?: boolean; // Update problem info (limits)
+}
+```
+
+**Examples:**
+
+```bash
+# Push everything (default)
+polyman remote push ./my-problem
+
+# Push only solutions and checker
+polyman remote push ./my-problem -s -c
+
+# Push only tests
+polyman remote push ./my-problem -t
+```
+
+**Important Notes:**
+
+- Line endings are automatically normalized (Unix → Windows)
+- Manual tests are uploaded in parallel for performance
+- Changes are NOT automatically committed (use `polyman remote commit`)
+
+---
+
+#### `remoteViewProblemAction(problemIdOrPath: string)`
+
+Displays comprehensive information about a problem on Polygon.
+
+**Workflow:**
+
+1. **Step 1:** Read API credentials
+2. **Step 2:** Initialize Polygon SDK
+3. **Step 3:** Get problem ID (from argument or Config.json)
+4. **Step 4:** Fetch problem information
+5. **Step 5:** Fetch statements
+6. **Step 6:** Fetch solutions
+7. **Step 7:** Fetch files (checker, validator, generators)
+8. **Step 8:** Fetch packages
+9. **Step 9:** Display comprehensive overview
+
+**Called by:**
+
+- `polyman remote view <problem-id>`
+- `polyman remote view ./my-problem`
+
+**Output Format:**
+
+```
+╔════════════════════════════════════════════════════════════════╗
+║  PROBLEM DETAILS                                                ║
+╚════════════════════════════════════════════════════════════════╝
+
+Basic Information:
+  ID: 123456
+  Name: A Plus B
+  Owner: tourist
+  Access: WRITE
+  Modified: Yes
+  Revision: 42
+
+Limits:
+  Time Limit: 1000 ms
+  Memory Limit: 256 MB
+  Input: stdin
+  Output: stdout
+  Interactive: No
+
+Components:
+  Solutions: 5 files
+  Checker: custom_checker.cpp
+  Validator: validator.cpp
+  Generators: 3 files
+  Statements: 2 languages (english, russian)
+
+Packages:
+  Latest Package: Revision 40 (Available)
+  Total Packages: 12
+```
+
+---
+
+#### `remoteCommitProblemAction(problemIdOrPath: string, commitMessage: string)`
+
+Commits pending changes to Polygon problem.
+
+**Workflow:**
+
+1. **Step 1:** Read API credentials
+2. **Step 2:** Initialize Polygon SDK
+3. **Step 3:** Get problem ID (from argument or Config.json)
+4. **Step 4:** Commit changes with message via SDK
+
+**Called by:**
+
+- `polyman remote commit <problem-id> <message>`
+- `polyman remote commit ./my-problem <message>`
+
+**Examples:**
+
+```bash
+# Commit with problem ID
+polyman remote commit 123456 "Updated test cases"
+
+# Commit using directory path
+polyman remote commit ./my-problem "Fixed validator"
+```
+
+**API Call:**
+
+```typescript
+await sdk.commitChanges(problemId, {
+  message: commitMessage,
+});
+```
+
+---
+
+#### `remotePackageProblemAction(problemIdOrPath: string, packageType: string)`
+
+Builds a problem package on Polygon and waits for completion.
+
+**Workflow:**
+
+1. **Step 1:** Read API credentials
+2. **Step 2:** Initialize Polygon SDK
+3. **Step 3:** Get problem ID
+4. **Step 4:** Validate package type (standard, linux, windows, full)
+5. **Step 5:** Build package and poll for completion:
+   - Get initial package count
+   - Trigger build via SDK
+   - Poll every 60 seconds
+   - Detect new package creation
+   - Wait for READY or FAILED state
+   - Maximum wait: 30 minutes
+6. **Step 6:** Display package information
+
+**Called by:**
+
+- `polyman remote package <problem-id> <type>`
+- `polyman remote package ./my-problem <type>`
+
+**Package Types:**
+
+- `standard` - Windows executables, no generated tests
+- `linux` - Generated tests, no binaries
+- `windows` - Generated tests, Windows binaries
+- `full` - All three types above
+
+**Examples:**
+
+```bash
+# Build standard package
+polyman remote package 123456 standard
+
+# Build full package
+polyman remote package ./my-problem full
+```
+
+**Polling Logic:**
+
+```typescript
+while (attempts < maxAttempts) {
+  await new Promise(resolve => setTimeout(resolve, 60000)); // Wait 1 minute
+  const currentPackages = await sdk.listPackages(problemId);
+
+  if (currentPackages.length > initialCount) {
+    const latestPackage = /* get latest package */;
+    if (latestPackage.state === 'READY' || latestPackage.state === 'FAILED') {
+      break;
+    }
+  }
+}
+```
+
+---
+
 ## Helper Modules
 
 Helper modules contain domain-specific logic for generators, validators, checkers, solutions, and utilities.
+
+### Remote Helper Modules
+
+Polyman includes specialized helper modules for Polygon integration located in `src/helpers/remote/`.
+
+#### Pulling Module: `src/helpers/remote/pulling.ts`
+
+Handles downloading problem components from Polygon.
+
+**Key Functions:**
+
+**`downloadSolutions(sdk: PolygonSDK, problemId: number, problemDir: string)`**
+
+Downloads all solutions from Polygon.
+
+**Workflow:**
+
+1. Fetches solution list via SDK
+2. Downloads each solution source code
+3. Normalizes line endings (Windows → Unix)
+4. Saves to `solutions/` directory
+5. Returns solution metadata for Config.json
+
+**Returns:**
+
+```typescript
+{
+  data: Array<{
+    name: string;
+    source: string;
+    tag: SolutionTag;
+  }>;
+  count: number;
+}
+```
+
+---
+
+**`downloadChecker(sdk: PolygonSDK, problemId: number, problemDir: string)`**
+
+Downloads checker from Polygon.
+
+**Workflow:**
+
+1. Fetches checker name via SDK
+2. Checks if standard checker (contains `std::`)
+3. If custom:
+   - Downloads checker source
+   - Normalizes line endings
+   - Downloads checker tests
+   - Normalizes test data
+4. Returns checker metadata
+
+**Returns:**
+
+```typescript
+{
+  data: {
+    name: string;
+    source: string;
+    isStandard: boolean;
+    testsFilePath?: string;
+  };
+  count: number;
+}
+```
+
+---
+
+**`downloadValidator(sdk: PolygonSDK, problemId: number, problemDir: string)`**
+
+Downloads validator from Polygon.
+
+**Workflow:**
+
+1. Fetches validator source
+2. Normalizes line endings
+3. Downloads validator tests
+4. Normalizes test inputs
+5. Returns validator metadata
+
+---
+
+**`downloadGenerators(sdk: PolygonSDK, problemId: number, problemDir: string, validatorName: string)`**
+
+Downloads all generator source files.
+
+**Workflow:**
+
+1. Fetches all source files
+2. Filters out checker, validator, and solutions
+3. Downloads each generator
+4. Normalizes line endings
+5. Returns generator metadata
+
+---
+
+**`downloadStatements(sdk: PolygonSDK, problemId: number, problemDir: string)`**
+
+Downloads problem statements in all languages.
+
+**Workflow:**
+
+1. Fetches statements for all languages
+2. For each language:
+   - Creates language directory
+   - Saves legend, input, output, notes, tutorial as .tex files
+   - Normalizes line endings
+3. Returns statement configuration
+
+---
+
+**`fetchProblemMetadata(sdk: PolygonSDK, problemId: number)`**
+
+Fetches problem description and tags.
+
+**Returns:**
+
+```typescript
+{
+  description: string;
+  tags: string[];
+}
+```
+
+---
+
+**`downloadTestsetAndBuildGenerationScripts(sdk: PolygonSDK, problemId: number, problemDir: string, testsetName: string, generators: LocalGenerator[])`**
+
+Downloads tests and builds testset configuration.
+
+**Workflow:**
+
+1. Fetches test metadata (without inputs for speed)
+2. Identifies manual tests
+3. **Fetches manual test inputs in parallel** for performance
+4. Normalizes line endings
+5. Saves to `manual/<testset>/` directory
+6. Fetches generation script
+7. Parses script to extract generator commands
+8. Builds testset configuration with groups
+
+**Performance Optimization:**
+
+Manual test inputs are fetched in parallel using `Promise.all()`:
+
+```typescript
+const manualTestPromises = manualTests.map(async test => {
+  const input = await sdk.getTestInput(problemId, testsetName, test.index);
+  return { test, input };
+});
+
+const results = await Promise.all(manualTestPromises);
+```
+
+**Returns:**
+
+```typescript
+{
+  testset: LocalTestset;
+  manualCount: number;
+}
+```
+
+---
+
+#### Pushing Module: `src/helpers/remote/pushing.ts`
+
+Handles uploading problem components to Polygon.
+
+**Key Functions:**
+
+**`uploadSolutions(sdk: PolygonSDK, problemId: number, problemDir: string, config: ConfigFile)`**
+
+Uploads all solutions to Polygon.
+
+**Workflow:**
+
+1. For each solution:
+   - Reads source file
+   - Normalizes line endings (Unix → Windows)
+   - Uploads via SDK with tag
+2. Returns count of uploaded solutions
+
+---
+
+**`uploadChecker(sdk: PolygonSDK, problemId: number, problemDir: string, config: ConfigFile)`**
+
+Uploads checker to Polygon.
+
+**Workflow:**
+
+1. If custom checker:
+   - Reads source file
+   - Normalizes line endings
+   - Uploads source
+   - Uploads checker tests (normalized)
+2. Sets checker via SDK
+3. Returns count of uploaded files
+
+---
+
+**`uploadValidator(sdk: PolygonSDK, problemId: number, problemDir: string, config: ConfigFile)`**
+
+Uploads validator to Polygon.
+
+**Workflow:**
+
+1. Reads validator source
+2. Normalizes line endings
+3. Uploads source
+4. Uploads validator tests (normalized)
+5. Sets validator via SDK
+6. Returns count of uploaded files
+
+---
+
+**`uploadGenerators(sdk: PolygonSDK, problemId: number, problemDir: string, config: ConfigFile)`**
+
+Uploads all generators to Polygon.
+
+**Workflow:**
+
+1. For each generator:
+   - Reads source file
+   - Normalizes line endings
+   - Uploads via SDK
+2. Returns count of uploaded files
+
+---
+
+**`uploadStatements(sdk: PolygonSDK, problemId: number, problemDir: string, config: ConfigFile)`**
+
+Uploads problem statements to Polygon.
+
+**Workflow:**
+
+1. For each language:
+   - Reads all statement files (.tex)
+   - Normalizes line endings
+   - Builds statement object
+   - Uploads via SDK
+2. Returns count of uploaded statements
+
+---
+
+**`uploadMetadata(sdk: PolygonSDK, problemId: number, config: ConfigFile)`**
+
+Uploads problem description and tags.
+
+---
+
+**`uploadTestsets(sdk: PolygonSDK, problemId: number, problemDir: string, config: ConfigFile)`**
+
+Uploads testsets and tests to Polygon.
+
+**Workflow:**
+
+1. For each testset:
+   - Clears existing tests
+   - Enables groups if configured
+   - **Uploads manual tests in parallel** for performance
+   - Builds and uploads generation script
+2. Returns test counts
+
+**Performance Optimization:**
+
+Manual tests are uploaded in parallel:
+
+```typescript
+const manualTestsPromises = createManualTestsPromises(
+  sdk,
+  problemId,
+  problemDir,
+  testset,
+  indices
+);
+
+await Promise.all(manualTestsPromises);
+```
+
+**Test Upload:**
+
+Each manual test:
+
+- Reads file content
+- Normalizes line endings (Unix → Windows)
+- Uploads via `sdk.saveTest()` with options (group, points, useInStatements)
+
+---
+
+**`updateProblemInfo(sdk: PolygonSDK, problemId: number, config: ConfigFile)`**
+
+Updates problem information (limits, I/O files).
+
+**API Call:**
+
+```typescript
+await sdk.updateProblemInfo(problemId, {
+  inputFile: config.inputFile,
+  outputFile: config.outputFile,
+  interactive: config.interactive,
+  timeLimit: config.timeLimit,
+  memoryLimit: config.memoryLimit,
+});
+```
+
+---
+
+#### Utils Module: `src/helpers/remote/utils.ts`
+
+Utility functions for remote operations.
+
+**Key Functions:**
+
+**`normalizeLineEndingsFromWinToUnix(content: string): string`**
+
+Converts Windows line endings (CRLF) to Unix (LF).
+
+```typescript
+return content.replace(/\r\n/g, '\n');
+```
+
+**Used during:** Pull operations
+
+---
+
+**`normalizeLineEndingsFromUnixToWin(content: string): string`**
+
+Converts Unix line endings (LF) to Windows (CRLF).
+
+```typescript
+return content.replace(/\n/g, '\r\n');
+```
+
+**Used during:** Push operations
+
+---
+
+**`readCredentialsFromHomeDirectory(): { apiKey: string; secret: string }`**
+
+Reads stored API credentials.
+
+**Location:**
+
+- Linux/macOS: `~/.polyman/credentials.json`
+- Windows: `%USERPROFILE%\.polyman\credentials.json`
+
+---
+
+**`saveCredentialsToHomeDirectory(apiKey: string, secret: string)`**
+
+Stores API credentials securely.
+
+---
+
+**`getProblemIdFromPath(path: string): number`**
+
+Extracts problem ID from Config.json in directory.
+
+**Usage:**
+
+```typescript
+// User provides directory path instead of problem ID
+const problemId = getProblemIdFromPath('./my-problem');
+```
+
+---
 
 ### Utility Functions: `src/helpers/utils.ts`
 
@@ -1719,6 +2437,313 @@ Polyman provides comprehensive error handling with formatted output and proper e
 
 ---
 
+## Polygon Integration
+
+Polyman provides comprehensive integration with the Codeforces Polygon system through a type-safe TypeScript SDK and remote operations.
+
+### Polygon SDK
+
+**Location:** `src/polygon.ts`
+
+The Polygon SDK is a complete TypeScript implementation of the Polygon API v1, providing type-safe methods for all Polygon operations.
+
+#### SDK Architecture
+
+```typescript
+class PolygonSDK {
+  private apiKey: string;
+  private apiSecret: string;
+  private baseUrl: string;
+
+  constructor(config: PolygonConfig) {
+    this.apiKey = config.apiKey;
+    this.apiSecret = config.apiSecret;
+    this.baseUrl = config.baseUrl || 'https://polygon.codeforces.com/api';
+  }
+
+  // 54+ API methods for complete Polygon integration
+}
+```
+
+#### Key SDK Methods
+
+**Problem Management:**
+
+- `listProblems(options?)` - List all accessible problems
+- `getProblemInfo(problemId)` - Get problem details
+- `updateProblemInfo(problemId, info)` - Update limits and settings
+- `updateWorkingCopy(problemId)` - Update working copy from repository
+- `discardWorkingCopy(problemId)` - Discard uncommitted changes
+- `commitChanges(problemId, options)` - Commit changes with message
+
+**Statements:**
+
+- `getStatements(problemId)` - Get statements in all languages
+- `saveStatement(problemId, lang, statement)` - Upload/update statement
+- `getStatementResources(problemId)` - List statement resources
+- `saveStatementResource(problemId, name, file)` - Upload resource file
+
+**Solutions:**
+
+- `getSolutions(problemId)` - List all solutions
+- `viewSolution(problemId, name)` - Get solution source code
+- `saveSolution(problemId, name, file, tag)` - Upload solution with tag
+- `editSolutionExtraTags(problemId, name, tags)` - Update solution tags
+
+**Checker & Validator:**
+
+- `getChecker(problemId)` - Get current checker name
+- `setChecker(problemId, checker)` - Set problem checker
+- `getValidator(problemId)` - Get current validator name
+- `setValidator(problemId, validator)` - Set problem validator
+- `getCheckerTests(problemId)` - Get checker self-tests
+- `saveCheckerTest(problemId, test)` - Add/edit checker test
+- `getValidatorTests(problemId)` - Get validator self-tests
+- `saveValidatorTest(problemId, test)` - Add/edit validator test
+
+**Generators:**
+
+- `getFiles(problemId)` - List all problem files
+- `viewFile(problemId, type, name)` - Get file content
+- `saveFile(problemId, type, name, file)` - Upload file
+- `getScript(problemId, testset)` - Get generation script
+- `saveScript(problemId, testset, script)` - Update generation script
+
+**Tests:**
+
+- `getTests(problemId, testset, noInputs?)` - List tests
+- `getTestInput(problemId, testset, index)` - Get test input
+- `getTestAnswer(problemId, testset, index)` - Get test answer
+- `saveTest(problemId, testset, index, input, options)` - Add/edit test
+- `setTestGroup(problemId, testset, group, indices)` - Assign tests to group
+- `enableGroups(problemId, testset, enable)` - Enable/disable test groups
+- `enablePoints(problemId, testset, enable)` - Enable/disable points
+- `viewTestGroup(problemId, testset, group)` - Get group info
+- `saveTestGroup(problemId, testset, group, options)` - Create/edit group
+
+**Metadata:**
+
+- `viewTags(problemId)` - Get problem tags
+- `saveTags(problemId, tags)` - Update tags
+- `viewGeneralDescription(problemId)` - Get description
+- `saveGeneralDescription(problemId, description)` - Update description
+- `viewGeneralTutorial(problemId)` - Get tutorial
+- `saveGeneralTutorial(problemId, tutorial)` - Update tutorial
+
+**Packages:**
+
+- `listPackages(problemId)` - List all built packages
+- `downloadPackage(problemId, packageId, type)` - Download package zip
+- `buildPackage(problemId, full, verify)` - Build new package
+
+**Contests:**
+
+- `getContestProblems(contestId)` - List problems in contest
+
+### API Authentication
+
+Polygon API uses SHA-512 signature-based authentication.
+
+#### Authentication Flow
+
+1. **API Credentials:**
+
+   ```typescript
+   {
+     apiKey: 'your-api-key',
+     apiSecret: 'your-api-secret'
+   }
+   ```
+
+2. **Request Signing:**
+
+   ```typescript
+   // Generate 6-character random prefix
+   const rand = generateRandomString(6);
+
+   // Sort parameters alphabetically
+   const sortedParams = Object.keys(params).sort();
+
+   // Build signature string
+   const sigString = `${rand}/${methodName}?${paramString}#${apiSecret}`;
+
+   // Compute SHA-512 hash
+   const hash = crypto.createHash('sha512').update(sigString).digest('hex');
+
+   // Final signature
+   const apiSig = rand + hash;
+   ```
+
+3. **Request Parameters:**
+   - `apiKey` - Your API key
+   - `time` - Current Unix timestamp
+   - `apiSig` - Computed signature
+   - Method-specific parameters
+
+4. **API Call:**
+
+   ```
+   POST https://polygon.codeforces.com/api/{method}
+   Content-Type: application/x-www-form-urlencoded
+
+   apiKey=xxx&time=xxx&apiSig=xxx&problemId=xxx&...
+   ```
+
+#### Security Considerations
+
+- API credentials stored in `~/.polyman/credentials.json`
+- File permissions set to 600 (owner read/write only)
+- Credentials never logged or displayed
+- Signature includes timestamp to prevent replay attacks
+- Each request has unique random prefix
+
+### Remote Operations Flow
+
+#### Pull Operation Flow
+
+```
+User Command
+    ↓
+polyman remote pull 123456 ./my-problem
+    ↓
+remotePullProblemAction
+    ↓
+┌────────────────────────────────────┐
+│ Step 1: Read Credentials           │
+│ - Load from ~/.polyman/            │
+└────────────────────────────────────┘
+    ↓
+┌────────────────────────────────────┐
+│ Step 2: Initialize SDK              │
+│ - Create PolygonSDK instance        │
+│ - Configure authentication          │
+└────────────────────────────────────┘
+    ↓
+┌────────────────────────────────────┐
+│ Step 3: Fetch Problem Info          │
+│ - Get limits, I/O files             │
+│ - Get problem metadata              │
+└────────────────────────────────────┘
+    ↓
+┌────────────────────────────────────┐
+│ Step 4: Create Directory            │
+│ - Create problem directory          │
+│ - Create subdirectories             │
+└────────────────────────────────────┘
+    ↓
+┌────────────────────────────────────┐
+│ Step 5: Download Components         │
+│ ┌──────────────────────────────┐   │
+│ │ Solutions (parallel)         │   │
+│ │ Checker + tests              │   │
+│ │ Validator + tests            │   │
+│ │ Generators                   │   │
+│ │ Statements (all languages)   │   │
+│ │ Tests (parallel fetch)       │   │
+│ │ Metadata                     │   │
+│ └──────────────────────────────┘   │
+│ - Normalize line endings (→ Unix)   │
+└────────────────────────────────────┘
+    ↓
+┌────────────────────────────────────┐
+│ Step 6: Generate Config.json        │
+│ - Build complete configuration      │
+│ - Include all metadata              │
+└────────────────────────────────────┘
+    ↓
+Success! Problem ready for local work
+```
+
+#### Push Operation Flow
+
+```
+User Command
+    ↓
+polyman remote push ./my-problem
+    ↓
+remotePushProblemAction
+    ↓
+┌────────────────────────────────────┐
+│ Step 1: Read Credentials           │
+└────────────────────────────────────┘
+    ↓
+┌────────────────────────────────────┐
+│ Step 2: Initialize SDK              │
+└────────────────────────────────────┘
+    ↓
+┌────────────────────────────────────┐
+│ Step 3: Read Config.json            │
+│ - Get problem ID                    │
+│ - Get all configurations            │
+└────────────────────────────────────┘
+    ↓
+┌────────────────────────────────────┐
+│ Step 4: Update Problem Info         │
+│ - Upload time/memory limits         │
+│ - Upload I/O file settings          │
+└────────────────────────────────────┘
+    ↓
+┌────────────────────────────────────┐
+│ Step 5-11: Upload Components        │
+│ ┌──────────────────────────────┐   │
+│ │ Solutions with tags          │   │
+│ │ Checker + set active         │   │
+│ │ Validator + tests + set      │   │
+│ │ Generators                   │   │
+│ │ Statements (all languages)   │   │
+│ │ Metadata                     │   │
+│ │ Testsets:                    │   │
+│ │   - Clear existing           │   │
+│ │   - Enable groups            │   │
+│ │   - Upload tests (parallel)  │   │
+│ │   - Upload script            │   │
+│ └──────────────────────────────┘   │
+│ - Normalize line endings (→ Win)    │
+└────────────────────────────────────┘
+    ↓
+Success! Changes uploaded to Polygon
+(Don't forget to commit!)
+```
+
+#### Performance Optimizations
+
+**Parallel Test Operations:**
+
+Both pull and push operations fetch/upload manual tests in parallel for significant performance improvements:
+
+**Pull (Parallel Fetch):**
+
+```typescript
+// Fetch test metadata without inputs (fast)
+const tests = await sdk.getTests(problemId, testsetName, true);
+const manualTests = tests.filter(t => t.manual);
+
+// Fetch all inputs in parallel
+const promises = manualTests.map(test =>
+  sdk.getTestInput(problemId, testsetName, test.index)
+);
+const results = await Promise.all(promises);
+```
+
+**Push (Parallel Upload):**
+
+```typescript
+// Create upload promises for all manual tests
+const promises = manualTests.map(test =>
+  sdk.saveTest(problemId, testsetName, index, input, options)
+);
+
+// Upload all in parallel
+await Promise.all(promises);
+```
+
+**Performance Impact:**
+
+- 50 manual tests: ~50 seconds sequential → ~2 seconds parallel
+- 100 manual tests: ~100 seconds sequential → ~3 seconds parallel
+
+---
+
 ## File Structure
 
 ### Template Structure
@@ -1763,7 +2788,7 @@ my-problem/
 ├── tests/                         # Generated by 'polyman generate'
 │   ├── test1.txt
 │   └── ...
-└── solutions-outputs/             # Generated by 'polyman run-solution'
+└── solutions-outputs/             # Generated by 'polyman run'
     ├── main/
     │   ├── output_test1.txt
     │   └── ...
@@ -1921,6 +2946,64 @@ For detailed API documentation of all functions, classes, and types, see the aut
 
 - `executor`
 
+**From `src/polygon.ts`:**
+
+- `PolygonSDK` (Polygon API SDK class)
+- `PolygonConfig`
+- `PolygonProblem`
+- `PolygonSolution`
+- `PolygonTest`
+- `PolygonTestGroup`
+- `PolygonFile`
+- `PolygonStatement`
+- `PolygonPackage`
+- `PackageState` ('NOT_STARTED' | 'WAITING' | 'RUNNING' | 'READY' | 'FAILED')
+
+**Remote Operations (from `src/actions.ts`):**
+
+- `registerApiKeyAndSecretAction(apiKey, apiSecret)` - Register Polygon credentials
+- `remoteListProblemsAction(options?)` - List accessible problems
+- `remotePullProblemAction(problemId, targetPath, options?)` - Download problem
+- `remotePushProblemAction(problemPath, options?)` - Upload changes to Polygon
+- `remoteViewProblemAction(problemId)` - Display problem details
+- `remoteCommitProblemAction(problemPath, message)` - Commit changes
+- `remotePackageProblemAction(problemPath, options?)` - Build package
+
+**Remote Helpers (from `src/helpers/remote/`):**
+
+_pulling.ts:_
+
+- `downloadSolutions(sdk, problemId, targetPath)`
+- `downloadChecker(sdk, problemId, targetPath)`
+- `downloadValidator(sdk, problemId, targetPath)`
+- `downloadGenerators(sdk, problemId, targetPath)`
+- `downloadStatements(sdk, problemId, targetPath)`
+- `fetchProblemMetadata(sdk, problemId)`
+- `downloadTestsetAndBuildGenerationScripts(sdk, problemId, targetPath)`
+
+_pushing.ts:_
+
+- `uploadSolutions(sdk, problemId, solutions)`
+- `uploadChecker(sdk, problemId, checker, problemPath)`
+- `uploadValidator(sdk, problemId, validator, problemPath)`
+- `uploadGenerators(sdk, problemId, generators, problemPath)`
+- `uploadStatements(sdk, problemId, statements, problemPath)`
+- `uploadMetadata(sdk, problemId, config)`
+- `uploadTestsets(sdk, problemId, testsets, problemPath)`
+- `updateProblemInfo(sdk, problemId, config)`
+
+_utils.ts (remote utilities):_
+
+- `normalizeLineEndingsFromWinToUnix(text)` - Convert CRLF to LF
+- `normalizeLineEndingsFromUnixToWin(text)` - Convert LF to CRLF
+- `readCredentialsFromHomeDirectory()` - Load API credentials
+- `saveCredentialsToHomeDirectory(apiKey, apiSecret)` - Store credentials
+- `getProblemIdFromPath(problemPath)` - Extract problem ID from Config.json
+
+_viewer.ts:_
+
+- `displayProblemInfo(problem, sdk?)` - Format and display problem details
+
 **From `src/types.d.ts`:**
 
 - `ConfigFile`
@@ -1942,6 +3025,8 @@ For detailed API documentation of all functions, classes, and types, see the aut
 - `CheckerVerdict`
 - `ValidatorVerdict`
 - `VerdictTracker`
+- `PullOptions` (remote pull configuration)
+- `PushOptions` (remote push configuration)
 
 ---
 

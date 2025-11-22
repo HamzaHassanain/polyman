@@ -17,7 +17,7 @@ A command-line interface tool for Codeforces problem setters to create, test, an
 
 ### Table of Contents
 
-[Overview](#overview) • [Key Features](#key-features) • [Installation](#installation) • [Getting Started](#getting-started) • [Commands](#command-reference) • [Solution Types](#solution-types) • [Standard Checkers](#standard-checkers) • [Example](#complete-example-integer-square-problem) • [Project Structure](#project-structure) • [Workflow](#typical-workflow) • [Advanced Features](#advanced-features) • [Documentation](#documentation-and-resources) • [Contributing](#support-and-contributions) • [License](#license)
+[Overview](#overview) • [Key Features](#key-features) • [Installation](#installation) • [Getting Started](#getting-started) • [Commands](#command-reference) • [Remote Operations](#remote-operations) • [Solution Types](#solution-types) • [Standard Checkers](#standard-checkers) • [Example](#complete-example-integer-square-problem) • [Project Structure](#project-structure) • [Workflow](#typical-workflow) • [Advanced Features](#advanced-features) • [Documentation](#documentation-and-resources) • [Contributing](#support-and-contributions) • [License](#license)
 
 ---
 
@@ -73,11 +73,18 @@ Executes the entire testing pipeline with a single command: generates tests, val
 
 Compiles and executes solutions written in C++ (g++), Python (python3), and Java (javac/java).
 
-### Polygon API Integration
+### Polygon Integration
 
-**_Includes a TypeScript SDK for programmatic interaction with the Codeforces Polygon API, enabling automation of problem submission and management._**
+Seamlessly integrates with Codeforces Polygon through a complete TypeScript SDK:
 
-**_This is NOW Being Developed and will be available in future releases._**
+- **Pull Problems**: Download problems from Polygon to work locally
+- **Push Changes**: Upload your local changes back to Polygon
+- **View Problems**: Display detailed problem information from Polygon
+- **Commit Changes**: Commit your modifications with descriptive messages
+- **Build Packages**: Create and download problem packages
+- **List Problems**: Browse all accessible problems on your Polygon account
+
+Work on problems locally with your preferred tools, then sync with Polygon when ready.
 
 ## Installation
 
@@ -120,7 +127,9 @@ This should display the installed version number.
 
 ## Getting Started
 
-### Step 1: Create a New Problem
+### Working Locally (New Problem)
+
+#### Step 1: Create a New Problem
 
 Generate a new problem directory with template files:
 
@@ -128,6 +137,25 @@ Generate a new problem directory with template files:
 polyman new my-problem
 cd my-problem
 ```
+
+### Working with Polygon (Existing Problem)
+
+If you have an existing problem on Polygon, you can pull it to work locally:
+
+```bash
+# Register your API credentials (one-time setup)
+polyman remote register
+
+# Pull the problem
+polyman remote pull 123456 ./my-problem
+cd my-problem
+
+# Work on it locally, then push changes back
+polyman remote push .
+polyman remote commit . -m "Updated solutions"
+```
+
+See [Remote Operations](#remote-operations) for complete documentation.
 
 This command creates a complete problem structure containing:
 
@@ -215,7 +243,7 @@ Edit the `Config.json` file to define your problem parameters:
 Run the test generators defined in your configuration:
 
 ```bash
-polyman generate all
+polyman generate --all
 ```
 
 This executes all generators and creates test input files in the `tests/` directory. Each generator produces test files numbered according to its `tests-range` specification.
@@ -251,82 +279,73 @@ Downloads the testlib.h header file from the official repository. This file is r
 
 ### Checker Management
 
-**`polyman list-checkers`**
+**`polyman list checkers`**
 Displays all available standard checkers with descriptions. Standard checkers handle common output formats like integers, floating-point numbers, and token sequences.
 
-**`polyman list-testsets`**
+**`polyman list testsets`**
 Lists all available testsets defined in the configuration. Shows testset names, number of tests, and group information.
 
 ### Test Generation
 
-**`polyman generate <target> [modifier]`**
+**`polyman generate [options]`**
 Generates test input files based on testset/group/test specification.
 
-**Targets:**
+**Options:**
 
-- `all` - Generate all testsets
-- `<testset-name>` - Generate entire testset
-
-**Modifiers (optional):**
-
-- `<group-name>` - Generate specific group within testset
-- `<test-number>` - Generate specific test within testset
+- `-a, --all` - Generate all testsets
+- `-t, --testset <name>` - Generate specific testset
+- `-g, --group <name>` - Generate specific group within testset
+- `-i, --index <number>` - Generate specific test by index
 
 Examples:
 
 ```bash
-polyman generate all              # Generate all testsets
-polyman generate tests            # Generate 'tests' testset
-polyman generate tests samples    # Generate 'samples' group in 'tests' testset
-polyman generate tests 5          # Generate test #5 in 'tests' testset
+polyman generate --all                     # Generate all testsets
+polyman generate --testset tests           # Generate 'tests' testset
+polyman generate --testset tests --group samples  # Generate 'samples' group
+polyman generate --testset tests --index 5        # Generate test #5
 ```
 
 ### Input Validation
 
-**`polyman validate <target> [modifier]`**
+**`polyman validate [options]`**
 Validates test input files using the validator program. Returns VALID or INVALID verdict for each test.
 
-**Targets:**
+**Options:**
 
-- `all` - Validate all testsets
-- `<testset-name>` - Validate entire testset
-
-**Modifiers (optional):**
-
-- `<group-name>` - Validate specific group within testset
-- `<test-number>` - Validate specific test within testset
+- `-a, --all` - Validate all testsets
+- `-t, --testset <name>` - Validate specific testset
+- `-g, --group <name>` - Validate specific group within testset
+- `-i, --index <number>` - Validate specific test by index
 
 Examples:
 
 ```bash
-polyman validate all              # Validate all testsets
-polyman validate tests            # Validate 'tests' testset
-polyman validate tests samples    # Validate 'samples' group in 'tests' testset
-polyman validate tests 5          # Validate test #5 in 'tests' testset
+polyman validate --all                     # Validate all testsets
+polyman validate --testset tests           # Validate 'tests' testset
+polyman validate --testset tests --group samples  # Validate 'samples' group
+polyman validate --testset tests --index 5        # Validate test #5
 ```
 
 ### Solution Execution
 
-**`polyman run-solution <solution-name> <target> [modifier]`**
+**`polyman run <solution-name> [options]`**
 Executes the specified solution on test files. Creates output files in `solutions-outputs/` directory.
 
-**Targets:**
+**Options:**
 
-- `all` - Run on all testsets
-- `<testset-name>` - Run on entire testset
-
-**Modifiers (optional):**
-
-- `<group-name>` - Run on specific group within testset
-- `<test-number>` - Run on specific test within testset
+- `-a, --all` - Run on all testsets
+- `-t, --testset <name>` - Run on specific testset
+- `-g, --group <name>` - Run on specific group within testset
+- `-i, --index <number>` - Run on specific test by index
 
 Examples:
 
 ```bash
-polyman run-solution main all              # Run main solution on all testsets
-polyman run-solution main tests            # Run main solution on 'tests' testset
-polyman run-solution main tests samples    # Run main solution on 'samples' group
-polyman run-solution main tests 5          # Run main solution on test #5
+polyman run main --all                     # Run main solution on all testsets
+polyman run main --testset tests           # Run main solution on 'tests' testset
+polyman run main --testset tests --group samples  # Run on 'samples' group
+polyman run main --testset tests --index 5        # Run on test #5
 ```
 
 ### Testing and Verification
@@ -350,6 +369,172 @@ polyman test wa-solution      # Test wa-solution against main solution
 
 **`polyman verify`**
 Runs the complete verification workflow. This is the primary command for validating an entire problem package. Includes test generation, validation, checker testing, solution execution, and verification.
+
+## Remote Operations
+
+Polyman provides complete integration with Codeforces Polygon, allowing you to work on problems locally and sync with Polygon.
+
+### Setup
+
+**`polyman remote register`**
+Register your Polygon API credentials (API key and secret). Credentials are securely stored in `~/.polyman/credentials.json`.
+
+```bash
+polyman remote register
+# You'll be prompted for:
+# - API Key
+# - API Secret
+```
+
+**Getting API Credentials:**
+
+1. Visit [https://polygon.codeforces.com/api/help](https://polygon.codeforces.com/api/help)
+2. Generate an API key and secret
+3. Use `polyman remote register` to save them
+
+### Problem Management
+
+**`polyman remote list [options]`**
+List all problems accessible on your Polygon account.
+
+**Options:**
+
+- `--id-only` - Display only problem IDs (useful for scripts)
+- `--owner <handle>` - Filter by owner handle
+
+Examples:
+
+```bash
+polyman remote list                    # List all problems with details
+polyman remote list --id-only          # List only problem IDs
+polyman remote list --owner tourist    # List problems owned by tourist
+```
+
+**`polyman remote view <problemId>`**
+Display detailed information about a specific problem on Polygon.
+
+```bash
+polyman remote view 123456
+```
+
+### Working with Problems
+
+**`polyman remote pull <problemId> <directory> [options]`**
+Download a problem from Polygon to work on locally. Creates complete problem structure with all components.
+
+**Options:**
+
+- `--skip-tests` - Don't download test files (useful for large test sets)
+- `--skip-statements` - Don't download problem statements
+
+**Downloads:**
+
+- Solutions with tags (main, correct, wrong answer, etc.)
+- Checker and checker tests
+- Validator and validator tests
+- Generators
+- Statements in all languages
+- Tests (generated and manual)
+- Complete Config.json
+
+Examples:
+
+```bash
+polyman remote pull 123456 ./my-problem           # Full download
+polyman remote pull 123456 ./my-problem --skip-tests  # Skip tests
+```
+
+**`polyman remote push <directory> [options]`**
+Upload your local changes back to Polygon. Updates all problem components on Polygon.
+
+**Options:**
+
+- `--skip-tests` - Don't upload test files
+- `--skip-statements` - Don't upload problem statements
+- `--skip-solutions` - Don't upload solution files
+- `--skip-checker` - Don't upload checker
+- `--skip-validator` - Don't upload validator
+- `--skip-generators` - Don't upload generator files
+
+**Uploads:**
+
+- Problem limits and settings
+- Solutions with correct tags
+- Checker and validator
+- Generators
+- Statements
+- Tests and test groups
+- Generation scripts
+
+Examples:
+
+```bash
+polyman remote push ./my-problem                  # Push everything
+polyman remote push ./my-problem --skip-tests     # Push without tests
+```
+
+**Important:** After pushing, your changes are in the working copy. Use `commit` to save them to the repository.
+
+**`polyman remote commit <directory> -m <message>`**
+Commit your changes to the Polygon repository with a descriptive message.
+
+```bash
+polyman remote commit ./my-problem -m "Added new test cases"
+polyman remote commit ./my-problem -m "Fixed validator bug"
+```
+
+### Package Building
+
+**`polyman remote package <directory> [options]`**
+Build a complete problem package on Polygon. The tool waits for the package to finish building (polls every 60 seconds, maximum 30 minutes).
+
+**Options:**
+
+- `--full` - Build full package (default: standard package)
+- `--verify` - Verify package during build
+
+```bash
+polyman remote package ./my-problem              # Build standard package
+polyman remote package ./my-problem --full       # Build full package
+polyman remote package ./my-problem --full --verify  # Build and verify
+```
+
+**Package States:**
+
+- `READY` - Package built successfully, ready to download
+- `FAILED` - Package build failed
+- `RUNNING` - Package is currently being built
+- `WAITING` - Package is in queue
+
+### Typical Remote Workflow
+
+```bash
+# 1. Register API credentials (one-time setup)
+polyman remote register
+
+# 2. List your problems
+polyman remote list
+
+# 3. Pull a problem to work locally
+polyman remote pull 123456 ./my-problem
+cd my-problem
+
+# 4. Make changes locally
+vim solutions/new-solution.cpp
+vim generators/new-gen.cpp
+
+# 5. Test locally
+polyman verify
+
+# 6. Push changes to Polygon
+polyman remote push .
+
+# 7. Commit changes
+polyman remote commit . -m "Added optimized solution and harder tests"
+
+# 8. Build package
+polyman remote package . --full --verify
+```
 
 ## Solution Types
 
@@ -641,13 +826,13 @@ int main(int argc, char* argv[]) {
 polyman download-testlib
 
 # Generate all 20 tests
-polyman generate all
+polyman generate --all
 
 # Validate all generated tests
-polyman validate all
+polyman validate --all
 
 # Run main solution on all tests
-polyman run-solution main all
+polyman run main --all
 
 # Complete verification
 polyman verify
@@ -753,7 +938,7 @@ Update `Config.json` with:
 Execute generators to create test input files.
 
 ```bash
-polyman generate all
+polyman generate --all
 ```
 
 ### 6. Validate Tests
@@ -761,7 +946,7 @@ polyman generate all
 Ensure all generated tests meet the validator's constraints.
 
 ```bash
-polyman validate all
+polyman validate --all
 ```
 
 ### 7. Run Solutions
@@ -769,7 +954,7 @@ polyman validate all
 Execute all solutions on all tests to generate output files.
 
 ```bash
-polyman run-solution main all
+polyman run main --all
 ```
 
 ### 8. Verify Everything
@@ -787,6 +972,21 @@ This command performs all previous steps plus additional verification:
 - Verifies all solution verdicts match expected types
 - Confirms wrong answer solutions fail on at least one test
 - Confirms time limit exceeded solutions timeout on at least one test
+
+### 9. Sync with Polygon (Optional)
+
+If working with Polygon, upload your verified problem:
+
+```bash
+# Push to Polygon
+polyman remote push .
+
+# Commit changes
+polyman remote commit . -m "Initial problem setup"
+
+# Build package
+polyman remote package . --full
+```
 
 ## Advanced Features
 
