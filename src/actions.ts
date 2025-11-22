@@ -53,7 +53,7 @@ import {
   stepBuildPackage,
   stepCreatePulledProblemDirectory,
   stepDownloadProblemFilesAndSetUpConfig,
-  // stepDownloadTests,
+  stepDownloadTests,
 } from './steps';
 
 import { logTemplateCreationSuccess } from './helpers/create-template';
@@ -904,6 +904,123 @@ export const listTestsetsAction = () => {
 };
 
 /**
+ * Lists all available solutions in the configuration.
+ * Shows solution names, source files, and tags (MA/OK/WA/TLE/etc).
+ *
+ * @returns {void}
+ *
+ * @throws {Error} If Config.json is invalid or missing solutions
+ *
+ * @example
+ * // From CLI: polyman list-solutions
+ * listSolutionsAction();
+ * // Displays:
+ * //   1. main       → ./solutions/acc.cpp        (MA - Main Accepted)
+ * //   2. wa-sol     → ./solutions/wa.cpp         (WA - Wrong Answer)
+ * //   3. tle-sol    → ./solutions/tle.py         (TL - Time Limit)
+ */
+export const listSolutionsAction = () => {
+  fmt.section('📋 AVAILABLE SOLUTIONS');
+
+  try {
+    const config = readConfigFile();
+
+    if (!config.solutions || config.solutions.length === 0) {
+      fmt.warning(`${fmt.warningIcon()} No solutions found in Config.json`);
+      console.log();
+      return;
+    }
+
+    fmt.info(
+      `  ${fmt.infoIcon()} Found ${fmt.highlight(config.solutions.length.toString())} solution(s)`
+    );
+    console.log();
+
+    const tagDescriptions: Record<string, string> = {
+      MA: 'Main Accepted',
+      OK: 'Accepted',
+      RJ: 'Rejected',
+      WA: 'Wrong Answer',
+      PE: 'Presentation Error',
+      TL: 'Time Limit',
+      ML: 'Memory Limit',
+      RE: 'Runtime Error',
+      CE: 'Compilation Error',
+    };
+
+    for (const [index, solution] of config.solutions.entries()) {
+      const tagDesc = tagDescriptions[solution.tag] || solution.tag;
+      const tagInfo = `(${solution.tag} - ${tagDesc})`;
+
+      fmt.log(
+        `  ${fmt.primary((index + 1).toString().padStart(2, ' ') + '.')} ${fmt.highlight(solution.name.padEnd(15))} ${fmt.dim('→')} ${solution.source.padEnd(30)} ${fmt.dim(tagInfo)}`
+      );
+    }
+
+    console.log();
+
+    // Listing complete
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    fmt.errorBox('FAILED TO LIST SOLUTIONS!');
+    fmt.error(`${message}`);
+    console.log();
+    process.exit(1);
+  }
+};
+
+/**
+ * Lists all available generators in the configuration.
+ * Shows generator names and source files.
+ *
+ * @returns {void}
+ *
+ * @throws {Error} If Config.json is invalid or missing generators
+ *
+ * @example
+ * // From CLI: polyman list-generators
+ * listGeneratorsAction();
+ * // Displays:
+ * //   1. gen-random    → ./generators/gen-random.cpp
+ * //   2. gen-max       → ./generators/gen-max.cpp
+ * //   3. gen-special   → ./generators/gen-special.py
+ */
+export const listGeneratorsAction = () => {
+  fmt.section('📋 AVAILABLE GENERATORS');
+
+  try {
+    const config = readConfigFile();
+
+    if (!config.generators || config.generators.length === 0) {
+      fmt.warning(`${fmt.warningIcon()} No generators found in Config.json`);
+      console.log();
+      return;
+    }
+
+    fmt.info(
+      `  ${fmt.infoIcon()} Found ${fmt.highlight(config.generators.length.toString())} generator(s)`
+    );
+    console.log();
+
+    for (const [index, generator] of config.generators.entries()) {
+      fmt.log(
+        `  ${fmt.primary((index + 1).toString().padStart(2, ' ') + '.')} ${fmt.highlight(generator.name.padEnd(20))} ${fmt.dim('→')} ${generator.source}`
+      );
+    }
+
+    console.log();
+
+    // Listing complete
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    fmt.errorBox('FAILED TO LIST GENERATORS!');
+    fmt.error(`${message}`);
+    console.log();
+    process.exit(1);
+  }
+};
+
+/**
  * Registers Polygon API credentials locally for use in remote commands.
  * Stores the API key and secret in user's home directory (~/.polyman/).
  * This data is only stored locally and used for authenticated Polygon API requests.
@@ -1049,7 +1166,8 @@ export const remoteListProblemsAction = async (
  */
 export const remotePullProblemAction = async (
   problemIdOrPath: string,
-  savePath: string
+  savePath: string,
+  testsets?: string
 ): Promise<void> => {
   fmt.section('⬇️  PULL PROBLEM FROM POLYGON');
 
@@ -1080,6 +1198,14 @@ export const remotePullProblemAction = async (
     );
 
     // step 7: Download test files
+    if (!testsets) {
+      await stepDownloadTests(stepNum++, sdk, problemId, 'tests', savePath);
+    } else {
+      const testsetsArr = testsets.split(',');
+      for (const testset of testsetsArr) {
+        await stepDownloadTests(stepNum++, sdk, problemId, testset, savePath);
+      }
+    }
     // await stepDownloadTests(stepNum++, sdk, problemId, savePath);
 
     console.log();

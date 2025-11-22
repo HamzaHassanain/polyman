@@ -537,6 +537,7 @@ interface LocalValidator {
  */
 interface GeneratorScriptCommand {
   type: 'generator-single' | 'manual' | 'generator-range';
+  useInStatements?: boolean;
   generator?: string;
   number?: number;
   index?: number;

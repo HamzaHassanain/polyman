@@ -19,6 +19,7 @@ import {
   downloadStatements,
   fetchProblemMetadata,
   fetchProblemInfo,
+  downloadTestsetAndBuildGenerationScripts,
 } from './helpers/polygon-remote';
 import {
   compileValidator,
@@ -841,62 +842,62 @@ export async function stepDownloadProblemFilesAndSetUpConfig(
   fmt.stepComplete('Files downloaded & Config.json created');
 }
 
-// /**
-//  * Step: Download test files from Polygon
-//  */
-// export async function stepDownloadTests(
-//   stepNum: number,
-//   sdk: PolygonSDK,
-//   problemId: number,
-//   savePath: string
-// ): Promise<void> {
-//   fmt.step(stepNum, 'Downloading Test Files');
-//   const problemDir = path.resolve(process.cwd(), savePath);
-//   const testsDir = path.join(problemDir, 'testsets', 'tests');
+/**
+ * Step: Download test files from Polygon
+ */
+export async function stepDownloadTests(
+  stepNum: number,
+  sdk: PolygonSDK,
+  problemId: number,
+  testset: string,
+  savePath: string
+): Promise<void> {
+  fmt.step(stepNum, 'Downloading Test Files');
+  const problemDir = path.resolve(process.cwd(), savePath);
+  const configPath = path.join(problemDir, 'Config.json');
 
-//   if (!fs.existsSync(testsDir)) {
-//     fs.mkdirSync(testsDir, { recursive: true });
-//   }
+  // Read current config to get generators
+  if (!fs.existsSync(configPath)) {
+    fmt.error('Config.json not found. Run download command first.');
+    throw new Error('Config.json not found');
+  }
 
-//   // Get tests from Polygon with input data
-//   let tests: Array<{
-//     index: number;
-//     input?: string;
-//     useGeneration?: boolean;
-//   }> = [];
-//   try {
-//     tests = await sdk.getTests(problemId, 'tests', false);
-//   } catch {
-//     fmt.warning('  ⚠️  Could not fetch tests information');
-//     fmt.stepComplete('No tests to download');
-//     return;
-//   }
+  const config = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as ConfigFile;
+  const generators = config.generators || [];
 
-//   const testCount = tests.length;
+  try {
+    const { testset: testsetConfig, manualCount } =
+      await downloadTestsetAndBuildGenerationScripts(
+        sdk,
+        problemId,
+        problemDir,
+        testset,
+        generators
+      );
 
-//   if (testCount === 0) {
-//     fmt.warning('  ⚠️  No tests found');
-//     fmt.stepComplete('No tests to download');
-//     return;
-//   }
+    // Update or add testset to config
+    if (!config.testsets) {
+      config.testsets = [];
+    }
 
-//   let downloadedCount = 0;
-//   // Download each test input
-//   for (const test of tests) {
-//     // Only download if test has input (not generated)
-//     if (test.input && !test.useGeneration) {
-//       try {
-//         const testPath = path.join(testsDir, `test${test.index}.txt`);
-//         fs.writeFileSync(testPath, test.input, 'utf-8');
-//         downloadedCount++;
-//       } catch {
-//         fmt.warning(`  ⚠️  Could not save test ${test.index}`);
-//       }
-//     }
-//   }
+    const existingIndex = config.testsets.findIndex(
+      (t: LocalTestset) => t.name === testset
+    );
+    if (existingIndex >= 0) {
+      config.testsets[existingIndex] = testsetConfig;
+    } else {
+      config.testsets.push(testsetConfig);
+    }
 
-//   fmt.info(
-//     `  ${fmt.infoIcon()} Downloaded ${fmt.highlight(downloadedCount.toString())} manual test(s) out of ${testCount} total`
-//   );
-//   fmt.stepComplete('Tests downloaded');
-// }
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+
+    const totalTests = testsetConfig.generatorScript?.commands?.length || 0;
+    fmt.info(
+      `  ${fmt.infoIcon()} Downloaded ${fmt.highlight(manualCount.toString())} manual test(s) out of ${totalTests} total`
+    );
+    fmt.stepComplete('Tests downloaded and testset configured');
+  } catch {
+    fmt.warning('  ⚠️  Could not fetch tests information');
+    fmt.stepComplete('No tests to download');
+  }
+}

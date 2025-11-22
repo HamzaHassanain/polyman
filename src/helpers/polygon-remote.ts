@@ -12,12 +12,25 @@ import type {
   LocalGenerator,
   LocalSolution,
   LocalValidator,
+  LocalTestset,
+  GeneratorScriptCommand,
   Problem,
   ProblemInfo,
   SolutionTag,
   StatementConfig,
 } from '../types';
 import { fmt } from '../formatter';
+
+/**
+ * Normalizes line endings in content from Polygon API.
+ * Converts Windows-style (\r\n) line endings to Unix-style (\n).
+ *
+ * @param {string} content - Content with potentially mixed line endings
+ * @returns {string} Content with normalized line endings
+ */
+function normalizeLineEndings(content: string): string {
+  return content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
 
 /**
  * Downloads all solutions from Polygon and returns metadata.
@@ -44,11 +57,11 @@ export async function downloadSolutions(
       try {
         const code = await sdk.viewSolution(problemId, solution.name);
         const targetPath = path.join(problemDir, 'solutions', solution.name);
-        fs.writeFileSync(targetPath, code, 'utf-8');
+        fs.writeFileSync(targetPath, normalizeLineEndings(code), 'utf-8');
         count++;
         solutionsData.push({
           name: solution.name.replace(/\.[^.]+$/, ''),
-          source: 'solutions/' + solution.name,
+          source: './solutions/' + solution.name,
           tag: solution.tag,
         });
       } catch {
@@ -91,24 +104,33 @@ export async function downloadChecker(
     const isStandard = checkerName.includes('std::');
     checkerName = checkerName.replace(/std::/g, '');
 
-    // The path to checker tests file (if any)
-    // used later to store in metadata
-    let testsPath = '';
-
     if (!isStandard) {
       const checkerCode = await sdk.viewFile(problemId, 'source', checkerName);
       const targetPath = path.join(problemDir, 'checker', checkerName);
-      fs.writeFileSync(targetPath, checkerCode, 'utf-8');
+      fs.writeFileSync(targetPath, normalizeLineEndings(checkerCode), 'utf-8');
       count++;
 
       // Download checker tests
       try {
         const checkerTests = await sdk.getCheckerTests(problemId);
-        if (checkerTests.length > 0) {
-          testsPath = path.join(problemDir, 'checker', 'checker_tests.json');
-          fs.writeFileSync(testsPath, JSON.stringify(checkerTests), 'utf-8');
-          count++;
-        }
+        // Normalize line endings in test inputs
+        const normalizedTests = checkerTests.map(test => ({
+          ...test,
+          input: test.input ? normalizeLineEndings(test.input) : test.input,
+          output: test.output ? normalizeLineEndings(test.output) : test.output,
+          answer: test.answer ? normalizeLineEndings(test.answer) : test.answer,
+        }));
+        const testsPath = path.join(
+          problemDir,
+          'checker',
+          'checker_tests.json'
+        );
+        fs.writeFileSync(
+          testsPath,
+          JSON.stringify({ tests: normalizedTests }, null, 2),
+          'utf-8'
+        );
+        count++;
       } catch {
         fmt.warning('  ⚠️  Could not fetch checker tests');
       }
@@ -117,9 +139,11 @@ export async function downloadChecker(
     return {
       data: {
         name: checkerName.replace(/\.[^.]+$/, ''),
-        source: isStandard ? checkerName : 'checker/' + checkerName,
+        source: isStandard ? checkerName : './checker/' + checkerName,
         isStandard,
-        testsFilePath: testsPath,
+        ...(!isStandard && {
+          testsFilePath: './checker/' + 'checker_tests.json',
+        }),
       },
       count,
     };
@@ -160,18 +184,28 @@ export async function downloadValidator(
       validatorName
     );
     const targetPath = path.join(problemDir, 'validator', validatorName);
-    fs.writeFileSync(targetPath, validatorCode, 'utf-8');
+    fs.writeFileSync(targetPath, normalizeLineEndings(validatorCode), 'utf-8');
     count++;
 
     // Download validator tests
-    let testsPath = '';
     try {
       const validatorTests = await sdk.getValidatorTests(problemId);
-      if (validatorTests.length > 0) {
-        testsPath = path.join(problemDir, 'validator', 'validator_tests.json');
-        fs.writeFileSync(testsPath, JSON.stringify(validatorTests), 'utf-8');
-        count++;
-      }
+      // Normalize line endings in test inputs
+      const normalizedTests = validatorTests.map(test => ({
+        ...test,
+        input: test.input ? normalizeLineEndings(test.input) : test.input,
+      }));
+      const testsPath = path.join(
+        problemDir,
+        'validator',
+        'validator_tests.json'
+      );
+      fs.writeFileSync(
+        testsPath,
+        JSON.stringify({ tests: normalizedTests }, null, 2),
+        'utf-8'
+      );
+      count++;
     } catch {
       fmt.warning('  ⚠️  Could not fetch validator tests');
     }
@@ -179,8 +213,8 @@ export async function downloadValidator(
     return {
       data: {
         name: validatorName.replace(/\.[^.]+$/, ''),
-        source: 'validator/' + validatorName,
-        testsFilePath: testsPath,
+        source: './validator/' + validatorName,
+        testsFilePath: './validator/validator_tests.json',
       },
       count,
     };
@@ -225,7 +259,7 @@ export async function downloadGenerators(
         file.sourceType?.includes('checker') ||
         file.sourceType?.includes('validator') ||
         file.sourceType?.startsWith('solution.') ||
-        file.name === validatorName
+        file.name === validatorName + '.cpp'
       ) {
         continue;
       }
@@ -233,11 +267,11 @@ export async function downloadGenerators(
       try {
         const content = await sdk.viewFile(problemId, 'source', file.name);
         const targetPath = path.join(problemDir, 'generators', file.name);
-        fs.writeFileSync(targetPath, content, 'utf-8');
+        fs.writeFileSync(targetPath, normalizeLineEndings(content), 'utf-8');
         count++;
         generatorsData.push({
           name: file.name.replace(/\.[^.]+$/, ''),
-          source: 'generators/' + file.name,
+          source: './generators/' + file.name,
         });
       } catch {
         fmt.warning(`  ⚠️  Failed to download: ${file.name}`);
@@ -296,7 +330,7 @@ export async function downloadStatements(
       if (statement.legend) {
         fs.writeFileSync(
           path.join(langDir, 'legend.tex'),
-          statement.legend,
+          normalizeLineEndings(statement.legend),
           'utf-8'
         );
         langConfig['legend'] = `./statements/${lang}/legend.tex`;
@@ -306,7 +340,7 @@ export async function downloadStatements(
       if (statement.input) {
         fs.writeFileSync(
           path.join(langDir, 'input-format.tex'),
-          statement.input,
+          normalizeLineEndings(statement.input),
           'utf-8'
         );
         langConfig['input'] = `./statements/${lang}/input-format.tex`;
@@ -316,7 +350,7 @@ export async function downloadStatements(
       if (statement.output) {
         fs.writeFileSync(
           path.join(langDir, 'output-format.tex'),
-          statement.output,
+          normalizeLineEndings(statement.output),
           'utf-8'
         );
         langConfig['output'] = `./statements/${lang}/output-format.tex`;
@@ -326,7 +360,7 @@ export async function downloadStatements(
       if (statement.notes) {
         fs.writeFileSync(
           path.join(langDir, 'notes.tex'),
-          statement.notes,
+          normalizeLineEndings(statement.notes),
           'utf-8'
         );
         langConfig['notes'] = `./statements/${lang}/notes.tex`;
@@ -336,7 +370,7 @@ export async function downloadStatements(
       if (statement.tutorial) {
         fs.writeFileSync(
           path.join(langDir, 'tutorial.tex'),
-          statement.tutorial,
+          normalizeLineEndings(statement.tutorial),
           'utf-8'
         );
         langConfig['tutorial'] = `./statements/${lang}/tutorial.tex`;
@@ -346,7 +380,7 @@ export async function downloadStatements(
       if (statement.interaction) {
         fs.writeFileSync(
           path.join(langDir, 'interaction.tex'),
-          statement.interaction,
+          normalizeLineEndings(statement.interaction),
           'utf-8'
         );
         langConfig['interaction'] = `./statements/${lang}/interaction.tex`;
@@ -356,7 +390,7 @@ export async function downloadStatements(
       if (statement.scoring) {
         fs.writeFileSync(
           path.join(langDir, 'scoring.tex'),
-          statement.scoring,
+          normalizeLineEndings(statement.scoring),
           'utf-8'
         );
         langConfig['scoring'] = `./statements/${lang}/scoring.tex`;
@@ -595,7 +629,8 @@ export function saveProblemIdToConfig(
 ): void {
   const config = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as ConfigFile;
   config.problemId = problemId;
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+  const str = JSON.stringify(config, null, 2).replace(/\r\n/g, '\n');
+  fs.writeFileSync(configPath, str, 'utf-8');
 }
 
 /**
@@ -612,4 +647,177 @@ export function saveProblemIdToConfig(
 export function isValidPackageType(packageType: string): boolean {
   const validTypes = ['standard', 'full', 'linux', 'windows'];
   return validTypes.includes(packageType.toLowerCase());
+}
+
+/**
+ * Downloads tests and builds testset configuration with generator scripts.
+ *
+ * @param {PolygonSDK} sdk - Polygon SDK instance
+ * @param {number} problemId - Problem ID
+ * @param {string} problemDir - Target directory
+ * @param {string} testsetName - Name of testset (usually 'tests')
+ * @param {LocalGenerator[]} generators - Available generators
+ * @returns {Promise<{ testset: LocalTestset; manualCount: number }>}
+ */
+export async function downloadTestsetAndBuildGenerationScripts(
+  sdk: PolygonSDK,
+  problemId: number,
+  problemDir: string,
+  testsetName: string,
+  generators: LocalGenerator[]
+): Promise<{
+  testset: LocalTestset;
+  manualCount: number;
+}> {
+  const testsDir = path.join(problemDir, 'testsets', testsetName);
+  const manualTestsDir = path.join(problemDir, 'manual', testsetName);
+  if (!fs.existsSync(testsDir)) {
+    fs.mkdirSync(testsDir, { recursive: true });
+  }
+
+  // Get tests from Polygon
+  const tests = await sdk.getTests(problemId, testsetName, false);
+
+  // Get Generation Script
+  const generationScript = await sdk.getScript(problemId, testsetName);
+
+  const commands: GeneratorScriptCommand[] = [];
+  let manualCount = 0;
+  const generatorNameMap = new Map<string, string>();
+  for (const g of generators) {
+    const filename = g.source
+      .split('/')
+      .pop()
+      ?.replace(/\.[^.]+$/, '');
+    if (filename) {
+      generatorNameMap.set(filename, g.name);
+    }
+  }
+
+  // Process each test
+  for (const test of tests) {
+    if (test.manual && test.input) {
+      // Manual test - save to file
+      if (!fs.existsSync(manualTestsDir)) {
+        fs.mkdirSync(manualTestsDir, { recursive: true });
+      }
+
+      const filename = `test${test.index}.txt`;
+      const filePath = path.join(manualTestsDir, filename);
+      const content = test.input.replace(/\r\n/g, '\n');
+      fs.writeFileSync(filePath, content, 'utf-8');
+      manualCount++;
+
+      const command: GeneratorScriptCommand = {
+        index: test.index,
+        type: 'manual',
+        manualFile: `./manual/${testsetName}/${filename}`,
+        useInStatements: test.useInStatements,
+      };
+      if (test.group) command.group = test.group;
+      if (test.points !== undefined) command.points = test.points;
+      commands.push(command);
+    }
+  }
+
+  // Parse generation script and merge commands
+  const scriptCommands = parseGenerationScript(
+    generationScript,
+    generatorNameMap
+  );
+
+  // Build testset configuration
+  const testset: LocalTestset = {
+    name: testsetName,
+    generatorScript: {
+      commands: [...commands, ...scriptCommands],
+    },
+  };
+
+  // Check if groups are used
+  const hasGroups = tests.some(t => t.group);
+  if (hasGroups) {
+    testset.groupsEnabled = true;
+    // Extract unique groups
+    const groupNames = [
+      ...new Set(tests.filter(t => t.group).map(t => t.group!)),
+    ];
+    testset.groups = groupNames.map(name => ({
+      name,
+    }));
+  }
+
+  // Check if points are used
+  const hasPoints = tests.some(t => t.points !== undefined);
+  if (hasPoints) {
+    testset.pointsEnabled = true;
+  }
+
+  return { testset, manualCount };
+}
+
+/**
+ * Parses FreeMarker template generation script to extract generator commands.
+ * Handles patterns like: <#list from..to as s> GeneratorName ${s} > $ </#list>
+ *
+ * @param {string} script - Generation script with FreeMarker syntax
+ * @param {Map<string, string>} generatorNameMap - Map of generator filenames to names
+ * @returns {GeneratorScriptCommand[]} Array of generator commands
+ */
+function parseGenerationScript(
+  script: string,
+  generatorNameMap: Map<string, string>
+): GeneratorScriptCommand[] {
+  const commands: GeneratorScriptCommand[] = [];
+
+  // Pattern to match: <#list from..to as var> GeneratorName ${var} args > $ </#list>
+  const listPattern =
+    /<#list\s+(\d+|[a-zA-Z_]\w*)\.\.(\d+|[a-zA-Z_]\w*)\s+as\s+\w+>\s*([^<]+?)\s*<\/#list>/gs;
+
+  let match;
+  while ((match = listPattern.exec(script)) !== null) {
+    const fromStr = match[1];
+    const toStr = match[2];
+    const commandLine = match[3].trim();
+
+    // Parse the command line to extract generator name and arguments
+    // Remove "> $" output redirection
+    const cleanedLine = commandLine.replace(/\s*>\s*\$\s*$/, '').trim();
+
+    // Extract generator name (first token) and check for ${var} placeholder
+    const parts = cleanedLine.split(/\s+/);
+    if (parts.length === 0) continue;
+
+    const generatorFile = parts[0];
+
+    // Try to find the generator name in our map
+    let generatorName = generatorNameMap.get(generatorFile) || generatorFile;
+
+    // If not found, try case-insensitive match
+    if (!generatorNameMap.has(generatorFile)) {
+      const lowerFile = generatorFile.toLowerCase();
+      for (const [file, name] of generatorNameMap.entries()) {
+        if (file.toLowerCase() === lowerFile) {
+          generatorName = name;
+          break;
+        }
+      }
+    }
+
+    // Check if from and to are numeric literals or variables
+    const fromNum = parseInt(fromStr, 10);
+    const toNum = parseInt(toStr, 10);
+
+    if (!isNaN(fromNum) && !isNaN(toNum)) {
+      // Numeric range - create generator-range command
+      commands.push({
+        type: 'generator-range',
+        generator: generatorName,
+        range: [fromNum, toNum],
+        useInStatements: false,
+      });
+    }
+  }
+
+  return commands;
 }

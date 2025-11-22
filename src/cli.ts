@@ -13,6 +13,8 @@ import {
   downloadTestlibAction,
   listAvailableCheckersAction,
   listTestsetsAction,
+  listSolutionsAction,
+  listGeneratorsAction,
   generateTestsAction,
   validateTestsAction,
   runSolutionAction,
@@ -92,6 +94,32 @@ program
   .command('list-testsets')
   .description('List available testsets in the configuration')
   .action(listTestsetsAction);
+
+/**
+ * Command: list-solutions
+ * Lists all available solutions in the configuration.
+ * Shows solution names, source files, and tags (MA/OK/WA/TLE/etc).
+ *
+ * @example
+ * polyman list-solutions
+ */
+program
+  .command('list-solutions')
+  .description('List available solutions in the configuration')
+  .action(listSolutionsAction);
+
+/**
+ * Command: list-generators
+ * Lists all available generators in the configuration.
+ * Shows generator names and source files.
+ *
+ * @example
+ * polyman list-generators
+ */
+program
+  .command('list-generators')
+  .description('List available generators in the configuration')
+  .action(listGeneratorsAction);
 
 /**
  * Command: generate <target> [modifier]
@@ -274,7 +302,16 @@ program
   .description(
     "Pulls a problem from Polygon associated with the user's registered API key. The pulled problem will be saved in a format closer to the template structure used by Polyman. If the user's path already has a problem with different ID (or no ID), they will be warned about the conflict, but if the ID is the same, they will be asked to merge the changes, or overwrite the local problem."
   )
-  .action(remotePullProblemAction);
+  .option(
+    '-t',
+    '--testsets <testsets>',
+    "Specify particular testsets to pull, separated by commas (e.g., 'pretests,maintests'). If not provided, a we will try to pull a testset NAMED tests."
+  )
+  .action(
+    async (probelmId: string, path: string, options: { testsets?: string }) => {
+      await remotePullProblemAction(probelmId, path, options.testsets);
+    }
+  );
 
 /**
  * Command: remote-pull <problem-id>
