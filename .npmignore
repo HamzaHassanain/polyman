@@ -50,7 +50,9 @@ logo.png
 
 # PDF documentation (use online docs instead)
 template/GUIDE.pdf
-*.pdf
+template/GUIDE.md
+template/TUTORIAL.md
+# *.pdf
 
 # Git files
 .gitattributes

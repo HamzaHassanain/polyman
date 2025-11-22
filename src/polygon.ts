@@ -25,6 +25,7 @@ export type {
   Problem,
   ProblemInfo,
   Statement,
+  StatementConfig,
   ResourceAdvancedProperties,
   File,
   FilesResponse,

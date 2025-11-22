@@ -18,7 +18,14 @@ import {
   runSolutionAction,
   testWhatAction,
   fullVerificationAction,
-  // registerApiKeyAndSecret,
+  registerApiKeyAndSecretAction,
+  remoteListProblemsAction,
+  remotePullProblemAction,
+  remotePushProblemAction,
+  remoteViewProblemAction,
+  remoteCommitProblemAction,
+  remoteVerifyProblemAction,
+  remotePackageProblemAction,
 } from './actions';
 
 const program = new Command();
@@ -229,11 +236,135 @@ program
  * polyman register 991d9b535452b525ade5e102dc04ac0ada65044f a4c7c2fc8f4087669edd1139f46c017376af839g
  * */
 
+program
+  .command('register <api-key> <secret>')
+  .description(
+    'Registers users Polygon api key locally, then to be used in future commands, please NOTE that, this is only stored on your machine, this app itself, does not do anything with your data execpt using the key and the secret'
+  )
+  .action(registerApiKeyAndSecretAction);
+
+/**
+ * Command: remote-list
+ * Lists the user's problems on Polygon associated with the registered API key
+ * @example
+ * polyman remote-list
+ * polyman remote-list --owner tourist
+ * */
+
+program
+  .command('remote-list')
+  .description(
+    "Lists the user's problems on Polygon associated with the registered API key"
+  )
+  .option('-o, --owner <username>', 'Filter problems by owner username')
+  .action(async (options: { owner?: string }) => {
+    await remoteListProblemsAction(options.owner);
+  });
+
+/**
+ * Command: remote-pull <directory/problem-id> <path-to-save-directory>
+ * Pulls a problem from Polygon associated with the user's registered API key
+ * @example
+ * polyman remote-pull 123456 /path/to/save
+ * polyman remote-pull . .
+ * */
+
+program
+  .command('remote-pull <directory/problem-id> <path-to-save-directory>')
+  .description(
+    "Pulls a problem from Polygon associated with the user's registered API key. The pulled problem will be saved in a format closer to the template structure used by Polyman. If the user's path already has a problem with different ID (or no ID), they will be warned about the conflict, but if the ID is the same, they will be asked to merge the changes, or overwrite the local problem."
+  )
+  .action(remotePullProblemAction);
+
+/**
+ * Command: remote-pull <problem-id>
+ * Pulls a problem from Polygon associated with the user's registered API key
+ * @example
+ * polyman remote-pull 123456
+ * */
+
+program
+  .command('remote-push <directory>')
+  .description(
+    "Pushes a problem to Polygon associated with the user's registered API key. The path should point to the local problem directory. If a problem with the same ID exists, the user will be asked to confirm overwriting it, otherwise a new problem will be created. If the Config does not contain a Polygon problem ID, a new problem will be created."
+  )
+  .action(remotePushProblemAction);
+/**
+ * Command: remote-view <problem-id/directory>
+ * Views a problem on Polygon associated with the user's registered API key
+ * @example
+ * polyman remote-view 123456
+ * polyman remote-view ./my-problem
+ * */
+
+program
+  .command('remote-view <directory/problem-id>')
+  .description(
+    `Views a problem on Polygon associated with the user's registered API key. The path should point to the local problem directory With Config File That Has An ID  or problem ID. This command views the problem's files and metadata on The terminal on a pleasant UI.`
+  )
+  .action(remoteViewProblemAction);
+
+/**
+ * Command: remote-pull <problem-id>
+ * Pulls a problem from Polygon associated with the user's registered API key
+ * @example
+ * polyman remote-pull 123456
+ * */
+
+program
+  .command('remote-commit <directory/problem-id> <commit-message>')
+  .description(
+    `
+    Commits changes to a problem on Polygon associated with the user's registered API key. The path should point to the local problem directory With Config File That Has An ID  or problem ID. This command allows users to commit changes made locally to the problem on Polygon, ensuring that updates are reflected on the platform.`
+  )
+  .action(remoteCommitProblemAction);
+/**
+ * Command: remote-verify <directory/problem-id>
+ * Verifies a problem on Polygon associated with the user's registered API key
+ * @example
+ * polyman remote-verify 123456
+ * */
+
+program
+  .command('remote-verify <directory/problem-id>')
+  .description(
+    `
+    Verifies a problem on Polygon associated with the user's registered API key. The path should point to the local problem directory With Config File That Has An ID or problem ID. This command runs a series of checks and validations on the problem to ensure it meets the required standards and guidelines set by Polygon before it can be published or updated on the platform.`
+  )
+  .action(remoteVerifyProblemAction);
+
+/**
+ * Command: remote-package <directory/problem-id> <package-type>
+ * Packages a problem on Polygon associated with the user's registered API key
+ * @example
+ * polyman remote-package 123456 std
+ * polyman remote-package 123456 full
+ * */
+
+program
+  .command('remote-package <directory/problem-id> <package-type>')
+  .description(
+    `
+    Packages a problem on Polygon associated with the user's registered API key. The path should point to the local problem directory With Config File That Has An ID or problem ID. This command packages the problem into the specified package type, preparing it for distribution or deployment on the platform.`
+  )
+  .action(remotePackageProblemAction);
+
+// /**
+//  * Command: remote-package <directory/problem-id> <package-type>
+//  * Packages a problem on Polygon associated with the user's registered API key
+//  * @example
+//  * polyman remote-package 123456 std
+//  * polyman remote-package 123456 full
+//  * */
+
 // program
-//   .command('register <api-key> <secret>')
-//   .description(
-//     'Registers users Polygon api key locally, then to be used in future commands, please NOTE that, this is only stored on your machine, this app itself, does not do anything with your data execpt using the key and the secret'
+//   .command(
+//     'download-package <directory/problem-id> <package-type>'
 //   )
-//   .action(registerApiKeyAndSecret);
+//   .description(
+//     `
+//     Packages a problem on Polygon associated with the user's registered API key. The path should point to the local problem directory With Config File That Has An ID or problem ID. This command packages the problem into the specified package type, preparing it for distribution or deployment on the platform.`
+//   )
+//   .action(remotePackageProblemAction);
 
 program.parse(process.argv);

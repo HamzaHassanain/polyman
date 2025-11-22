@@ -80,6 +80,31 @@ interface Statement {
   tutorial?: string;
 }
 
+/**
+ * Statement configuration in Config.json (with file paths)
+ * @interface StatementConfig
+ * @property {string} encoding - Text encoding (e.g., 'UTF-8')
+ * @property {string} name - Problem title in this language
+ * @property {string} [legend] - Path to legend.tex file
+ * @property {string} [input] - Path to input-format.tex file
+ * @property {string} [output] - Path to output-format.tex file
+ * @property {string} [scoring] - Path to scoring.tex file
+ * @property {string} [interaction] - Path to interaction.tex file
+ * @property {string} [notes] - Path to notes.tex file
+ * @property {string} [tutorial] - Path to tutorial.tex file
+ */
+interface StatementConfig {
+  encoding: string;
+  name: string;
+  legend?: string;
+  input?: string;
+  output?: string;
+  scoring?: string;
+  interaction?: string;
+  notes?: string;
+  tutorial?: string;
+}
+
 // ==================== Files ====================
 
 /**
@@ -391,7 +416,7 @@ interface ConfigFile {
 
   // Statements
   statements: {
-    [language: string]: Statement;
+    [language: string]: StatementConfig;
   };
 
   // Solutions
@@ -646,6 +671,7 @@ export {
   ProblemInfo,
   // Statements
   Statement,
+  StatementConfig,
   // Files
   ResourceAdvancedProperties,
   File,
