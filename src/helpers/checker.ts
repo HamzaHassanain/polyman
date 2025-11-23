@@ -60,9 +60,9 @@ export async function runChecker(
       timeout: DEFAULT_TIMEOUT,
       memoryLimitMB: DEFAULT_MEMORY_LIMIT,
       silent: true,
-      onError: () => {
+      onError: result => {
         if (expectedVerdict.toUpperCase() === 'OK') {
-          throw new Error(`Expected OK but got WA`);
+          throw new Error(result.stderr || 'Expected OK but got WA');
         }
         didCatchInvalid = true;
       },

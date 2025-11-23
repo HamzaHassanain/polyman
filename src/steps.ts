@@ -7,20 +7,41 @@
 import { fmt } from './formatter';
 import type { PolygonSDK, Problem } from './polygon';
 import { PolygonSDK as PolygonSDKClass } from './polygon';
+import type {
+  Statement,
+  Solution,
+  FilesResponse,
+  Package,
+  ProblemInfo,
+  Test,
+  File,
+} from './types';
 import {
   readCredentials,
   getProblemId,
   formatProblemInfo,
   isValidPackageType,
+  fetchProblemInfo,
+} from './helpers/remote/utils';
+import {
   downloadSolutions,
   downloadChecker,
   downloadValidator,
   downloadGenerators,
   downloadStatements,
   fetchProblemMetadata,
-  fetchProblemInfo,
   downloadTestsetAndBuildGenerationScripts,
-} from './helpers/polygon-remote';
+} from './helpers/remote/pulling';
+import {
+  updateProblemInfo,
+  uploadSolutions,
+  uploadChecker,
+  uploadValidator,
+  uploadGenerators,
+  uploadStatements,
+  uploadMetadata,
+  uploadTestsets,
+} from './helpers/remote/pushing';
 import {
   compileValidator,
   ensureValidatorExists,
@@ -38,7 +59,6 @@ import {
 import {
   compileAllGenerators,
   compileGeneratorsForTestsets,
-  ensureGeneratorsExist,
 } from './helpers/generator';
 import {
   generateAllTestsets,
@@ -63,6 +83,25 @@ import {
 import { copyTemplate } from './helpers/create-template';
 import { downloadFile } from './helpers/testlib-download';
 import { logError, readConfigFile } from './helpers/utils';
+import {
+  fetchStatements,
+  fetchSolutions,
+  fetchFiles,
+  fetchPackages,
+  fetchChecker,
+  fetchValidator,
+  identifyGenerators,
+  fetchSampleTests,
+  displayProblemDetails,
+  logStatementsFetch,
+  logSolutionsFetch,
+  logFilesFetch,
+  logPackagesFetch,
+  logCheckerFetch,
+  logValidatorFetch,
+  logGeneratorsIdentified,
+  logSampleTestsFetch,
+} from './helpers/remote/viewer';
 import path from 'path';
 import fs from 'fs';
 import type ConfigFile from './types';
@@ -201,13 +240,16 @@ export function stepValidateConfigForGeneration(
 ): void {
   fmt.step(stepNum, 'Validating Configuration');
   ensureTestsetsExist(config.testsets);
-  ensureGeneratorsExist(config.generators);
   fmt.info(
     `  ${fmt.infoIcon()} Testsets: ${fmt.highlight(config.testsets.length.toString())}`
   );
-  fmt.info(
-    `  ${fmt.infoIcon()} Generators: ${fmt.highlight(config.generators.length.toString())}`
-  );
+  if (!config.generators || config.generators.length === 0) {
+    fmt.warning('  No generators defined in configuration');
+  } else {
+    fmt.info(
+      `  ${fmt.infoIcon()} Generators: ${fmt.highlight(config.generators.length.toString())}`
+    );
+  }
   fmt.stepComplete('Configuration validated');
 }
 
@@ -570,8 +612,6 @@ export async function stepVerifySolutionsAgainstMainCorrect(
   }
   if (didFail) {
     throw new Error('Some solutions did not behave as expected');
-  } else {
-    fmt.success(`      ${fmt.checkmark()} Behaves as expected`);
   }
   fmt.stepComplete('All solutions verified');
 }
@@ -679,6 +719,173 @@ export async function stepFetchProblemInfo(
   );
   fmt.stepComplete('Problem info retrieved');
   return info;
+}
+
+/**
+ * Step: Fetch statements from Polygon
+ */
+export async function stepFetchStatements(
+  stepNum: number,
+  sdk: PolygonSDK,
+  problemId: number
+): Promise<Array<Statement & { language: string }>> {
+  fmt.step(stepNum, 'Fetching Problem Statements');
+  const statements = await fetchStatements(sdk, problemId);
+  logStatementsFetch(statements);
+  fmt.stepComplete(
+    statements.length > 0 ? 'Statements retrieved' : 'Statements check complete'
+  );
+  return statements;
+}
+
+/**
+ * Step: Fetch solutions from Polygon
+ */
+export async function stepFetchSolutions(
+  stepNum: number,
+  sdk: PolygonSDK,
+  problemId: number
+): Promise<Solution[]> {
+  fmt.step(stepNum, 'Fetching Solutions');
+  const solutions = await fetchSolutions(sdk, problemId);
+  logSolutionsFetch(solutions);
+  fmt.stepComplete(
+    solutions.length > 0 ? 'Solutions retrieved' : 'Solutions check complete'
+  );
+  return solutions;
+}
+
+/**
+ * Step: Fetch files from Polygon
+ */
+export async function stepFetchFiles(
+  stepNum: number,
+  sdk: PolygonSDK,
+  problemId: number
+): Promise<FilesResponse> {
+  fmt.step(stepNum, 'Fetching Problem Files');
+  const files = await fetchFiles(sdk, problemId);
+  logFilesFetch(files);
+  const totalFiles =
+    files.resourceFiles.length +
+    files.sourceFiles.length +
+    files.auxFiles.length;
+  fmt.stepComplete(totalFiles > 0 ? 'Files retrieved' : 'Files check complete');
+  return files;
+}
+
+/**
+ * Step: Fetch packages from Polygon
+ */
+export async function stepFetchPackages(
+  stepNum: number,
+  sdk: PolygonSDK,
+  problemId: number
+): Promise<Package[]> {
+  fmt.step(stepNum, 'Fetching Problem Packages');
+  const packages = await fetchPackages(sdk, problemId);
+  logPackagesFetch(packages);
+  fmt.stepComplete(
+    packages.length > 0 ? 'Packages retrieved' : 'Packages check complete'
+  );
+  return packages;
+}
+
+/**
+ * Step: Fetch checker information
+ */
+export async function stepFetchChecker(
+  stepNum: number,
+  sdk: PolygonSDK,
+  problemId: number
+): Promise<string> {
+  fmt.step(stepNum, 'Fetching Checker');
+  const checker = await fetchChecker(sdk, problemId);
+  logCheckerFetch(checker);
+  fmt.stepComplete(checker ? 'Checker retrieved' : 'Checker check complete');
+  return checker;
+}
+
+/**
+ * Step: Fetch validator information
+ */
+export async function stepFetchValidator(
+  stepNum: number,
+  sdk: PolygonSDK,
+  problemId: number
+): Promise<string> {
+  fmt.step(stepNum, 'Fetching Validator');
+  const validator = await fetchValidator(sdk, problemId);
+  logValidatorFetch(validator);
+  fmt.stepComplete(
+    validator ? 'Validator retrieved' : 'Validator check complete'
+  );
+  return validator;
+}
+
+/**
+ * Step: Fetch generators from source files
+ */
+export function stepFetchGenerators(
+  stepNum: number,
+  files: FilesResponse,
+  checker: string,
+  validator: string
+): File[] {
+  fmt.step(stepNum, 'Identifying Generators');
+  const generators = identifyGenerators(files, checker, validator);
+  logGeneratorsIdentified(generators);
+  fmt.stepComplete('Generators identified');
+  return generators;
+}
+
+/**
+ * Step: Fetch sample tests
+ */
+export async function stepFetchSampleTests(
+  stepNum: number,
+  sdk: PolygonSDK,
+  problemId: number
+): Promise<Test[]> {
+  fmt.step(stepNum, 'Fetching Sample Tests');
+  const samples = await fetchSampleTests(sdk, problemId);
+  logSampleTestsFetch(samples);
+  fmt.stepComplete(
+    samples.length > 0
+      ? 'Sample tests retrieved'
+      : 'Sample tests check complete'
+  );
+  return samples;
+}
+
+/**
+ * Step: Display comprehensive problem view
+ */
+export function stepDisplayProblemView(
+  stepNum: number,
+  info: ProblemInfo,
+  statements: Array<Statement & { language: string }>,
+  solutions: Solution[],
+  files: FilesResponse,
+  packages: Package[],
+  checker: string,
+  validator: string,
+  generators: File[],
+  samples: Test[]
+): void {
+  fmt.step(stepNum, 'Displaying Problem Details');
+  displayProblemDetails(
+    info,
+    statements,
+    solutions,
+    files,
+    packages,
+    checker,
+    validator,
+    generators,
+    samples
+  );
+  fmt.stepComplete('Problem details displayed');
 }
 
 /**
@@ -900,4 +1107,382 @@ export async function stepDownloadTests(
     fmt.warning('  ⚠️  Could not fetch tests information');
     fmt.stepComplete('No tests to download');
   }
+}
+
+// ============================================================================
+// POLYGON PUSH STEPS
+// ============================================================================
+
+/**
+ * Step: Read Config.json from problem directory
+ */
+export function stepReadConfig(
+  stepNum: number,
+  problemDir: string
+): ConfigFile {
+  fmt.step(stepNum, 'Reading Problem Configuration');
+  const configPath = path.join(problemDir, 'Config.json');
+
+  if (!fs.existsSync(configPath)) {
+    throw new Error(`Config.json not found in ${problemDir}`);
+  }
+
+  const config = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as ConfigFile;
+
+  fmt.info(
+    `  ${fmt.infoIcon()} Problem: ${fmt.highlight(config.name || 'Unnamed')}`
+  );
+  fmt.info(
+    `  ${fmt.infoIcon()} Problem ID: ${fmt.highlight(config.problemId?.toString() || 'New Problem')}`
+  );
+  fmt.stepComplete('Configuration loaded');
+  return config;
+}
+
+/**
+ * Step: Update problem information
+ */
+export async function stepUpdateProblemInfo(
+  stepNum: number,
+  sdk: PolygonSDK,
+  problemId: number,
+  config: ConfigFile
+): Promise<void> {
+  fmt.step(stepNum, 'Updating Problem Information');
+
+  await updateProblemInfo(sdk, problemId, config);
+
+  fmt.info(
+    `  ${fmt.infoIcon()} Time Limit: ${fmt.highlight(config.timeLimit + 'ms')}`
+  );
+  fmt.info(
+    `  ${fmt.infoIcon()} Memory Limit: ${fmt.highlight(config.memoryLimit + 'MB')}`
+  );
+  fmt.stepComplete('Problem info updated');
+}
+
+/**
+ * Step: Upload solutions to Polygon
+ */
+export async function stepUploadSolutions(
+  stepNum: number,
+  sdk: PolygonSDK,
+  problemId: number,
+  problemDir: string,
+  config: ConfigFile
+): Promise<void> {
+  fmt.step(stepNum, 'Uploading Solutions');
+
+  const count = await uploadSolutions(sdk, problemId, problemDir, config);
+
+  fmt.info(
+    `  ${fmt.infoIcon()} Uploaded ${fmt.highlight(count.toString())} solution(s)`
+  );
+  fmt.stepComplete('Solutions uploaded');
+}
+
+/**
+ * Step: Upload checker to Polygon
+ */
+export async function stepUploadChecker(
+  stepNum: number,
+  sdk: PolygonSDK,
+  problemId: number,
+  problemDir: string,
+  config: ConfigFile
+): Promise<void> {
+  fmt.step(stepNum, 'Uploading Checker');
+
+  const count = await uploadChecker(sdk, problemId, problemDir, config);
+
+  if (count > 0) {
+    fmt.info(
+      `  ${fmt.infoIcon()} Checker: ${fmt.highlight(config.checker?.name || 'N/A')}`
+    );
+  }
+  fmt.stepComplete(
+    config.checker.isStandard ? 'Standard Checker Updated' : 'Checker uploaded'
+  );
+}
+
+/**
+ * Step: Upload validator to Polygon
+ */
+export async function stepUploadValidator(
+  stepNum: number,
+  sdk: PolygonSDK,
+  problemId: number,
+  problemDir: string,
+  config: ConfigFile
+): Promise<void> {
+  fmt.step(stepNum, 'Uploading Validator');
+
+  const count = await uploadValidator(sdk, problemId, problemDir, config);
+
+  if (count > 0) {
+    fmt.info(
+      `  ${fmt.infoIcon()} Validator: ${fmt.highlight(config.validator?.name || 'N/A')}`
+    );
+  }
+  fmt.stepComplete(count > 0 ? 'Validator uploaded' : 'No validator to upload');
+}
+
+/**
+ * Step: Upload generators to Polygon
+ */
+export async function stepUploadGenerators(
+  stepNum: number,
+  sdk: PolygonSDK,
+  problemId: number,
+  problemDir: string,
+  config: ConfigFile
+): Promise<void> {
+  fmt.step(stepNum, 'Uploading Generators');
+
+  const count = await uploadGenerators(sdk, problemId, problemDir, config);
+
+  fmt.info(
+    `  ${fmt.infoIcon()} Uploaded ${fmt.highlight(count.toString())} generator(s)`
+  );
+  fmt.stepComplete('Generators uploaded');
+}
+
+/**
+ * Step: Upload statements to Polygon
+ */
+export async function stepUploadStatements(
+  stepNum: number,
+  sdk: PolygonSDK,
+  problemId: number,
+  problemDir: string,
+  config: ConfigFile
+): Promise<void> {
+  fmt.step(stepNum, 'Uploading Statements');
+
+  const count = await uploadStatements(sdk, problemId, problemDir, config);
+
+  fmt.info(
+    `  ${fmt.infoIcon()} Uploaded ${fmt.highlight(count.toString())} statement(s)`
+  );
+  fmt.stepComplete('Statements uploaded');
+}
+
+/**
+ * Step: Upload metadata (description and tags)
+ */
+export async function stepUploadMetadata(
+  stepNum: number,
+  sdk: PolygonSDK,
+  problemId: number,
+  config: ConfigFile
+): Promise<void> {
+  fmt.step(stepNum, 'Uploading Metadata');
+
+  await uploadMetadata(sdk, problemId, config);
+
+  if (config.description) {
+    const preview = config.description.substring(0, 50);
+    fmt.info(`  ${fmt.infoIcon()} Description: ${preview}...`);
+  }
+  if (config.tags && config.tags.length > 0) {
+    fmt.info(`  ${fmt.infoIcon()} Tags: ${config.tags.join(', ')}`);
+  }
+  fmt.stepComplete('Metadata uploaded');
+}
+
+/**
+ * Step: Upload testsets and tests
+ */
+export async function stepUploadTestsets(
+  stepNum: number,
+  sdk: PolygonSDK,
+  problemId: number,
+  problemDir: string,
+  config: ConfigFile
+): Promise<void> {
+  fmt.step(stepNum, 'Uploading Testsets and Tests');
+
+  const { testsCount, manualsCount } = await uploadTestsets(
+    sdk,
+    problemId,
+    problemDir,
+    config
+  );
+
+  fmt.info(
+    `  ${fmt.infoIcon()} Uploaded ${fmt.highlight(manualsCount.toString())} manual test(s)`
+  );
+  fmt.info(
+    `  ${fmt.infoIcon()} Total tests configured: ${fmt.highlight(testsCount.toString())}`
+  );
+  fmt.stepComplete('Testsets uploaded');
+}
+
+/**
+ * Step: Prompt user to create new problem on Polygon
+ */
+export async function stepPromptCreateProblem(
+  stepNum: number
+): Promise<boolean> {
+  fmt.step(stepNum, 'Confirm Problem Creation');
+
+  fmt.warning(
+    '  No problem ID found in Config.json. This appears to be a new problem.'
+  );
+  console.log();
+  fmt.info(
+    `  ${fmt.infoIcon()} A new problem will be created on Polygon if you continue.`
+  );
+
+  const readline = await import('readline');
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  const question = (query: string): Promise<string> => {
+    return new Promise(resolve => rl.question(query, resolve));
+  };
+
+  const proceed = await question(
+    '\n  Do you want to create a new problem on Polygon? (yes/no): '
+  );
+
+  rl.close();
+
+  const shouldProceed =
+    proceed.toLowerCase() === 'yes' || proceed.toLowerCase() === 'y';
+
+  if (!shouldProceed) {
+    fmt.stepComplete('User cancelled');
+  }
+
+  return shouldProceed;
+}
+
+/**
+ * Step: Validate and get problem name from user
+ */
+export async function stepGetValidProblemName(
+  stepNum: number,
+  sdk: PolygonSDK,
+  initialName?: string
+): Promise<string> {
+  fmt.step(stepNum, 'Validate Problem Name');
+
+  const readline = await import('readline');
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  const question = (query: string): Promise<string> => {
+    return new Promise(resolve => rl.question(query, resolve));
+  };
+
+  let problemName = initialName;
+  let isValidName = false;
+
+  while (!isValidName) {
+    // Validate name format: lowercase, no spaces, only dashes
+    if (
+      problemName &&
+      /^[a-z0-9]+(-[a-z0-9]+)*$/.test(problemName) &&
+      problemName === problemName.toLowerCase()
+    ) {
+      // Check if name conflicts with existing problems
+      try {
+        const existingProblems = await sdk.listProblems();
+        const nameConflict = existingProblems.some(
+          p => problemName && p.name.toLowerCase() === problemName.toLowerCase()
+        );
+
+        if (nameConflict) {
+          fmt.error(
+            `  Problem name "${problemName}" already exists on Polygon.`
+          );
+          problemName = '';
+        } else {
+          isValidName = true;
+        }
+      } catch {
+        // If we can't check, assume it's okay
+        isValidName = true;
+      }
+    } else {
+      if (problemName) {
+        fmt.error(
+          `  Invalid problem name "${problemName}". Name must be lowercase, no spaces, only dashes allowed.`
+        );
+      }
+      problemName = '';
+    }
+
+    if (!isValidName) {
+      problemName = await question(
+        '\n  Enter a valid problem name (e.g., two-sum, maximum-flow): '
+      );
+      problemName = problemName.trim();
+    }
+  }
+
+  rl.close();
+
+  if (!problemName) {
+    throw new Error('Problem name is required');
+  }
+
+  fmt.info(`  ${fmt.infoIcon()} Problem name: ${fmt.highlight(problemName)}`);
+  fmt.stepComplete('Problem name validated');
+
+  return problemName;
+}
+
+/**
+ * Step: Create new problem on Polygon
+ */
+export async function stepCreateProblemOnPolygon(
+  stepNum: number,
+  sdk: PolygonSDK,
+  problemName: string
+): Promise<number> {
+  fmt.step(stepNum, 'Creating New Problem on Polygon');
+
+  try {
+    const createdProblem = await sdk.createProblem(problemName);
+    const problemId = createdProblem.id;
+
+    fmt.success(
+      `  ${fmt.checkmark()} Problem created successfully (ID: ${problemId})`
+    );
+    fmt.info(`  ${fmt.infoIcon()} Problem Name: ${problemName}`);
+    fmt.stepComplete('Problem created on Polygon');
+
+    return problemId;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to create problem on Polygon: ${message}`);
+  }
+}
+
+/**
+ * Step: Update Config.json with problem ID and name
+ */
+export function stepUpdateConfigWithProblemId(
+  stepNum: number,
+  problemDir: string,
+  config: ConfigFile,
+  problemId: number,
+  problemName: string
+): void {
+  fmt.step(stepNum, 'Updating Config.json');
+
+  config.problemId = problemId;
+  config.name = problemName;
+
+  const configPath = path.join(problemDir, 'Config.json');
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+
+  fmt.info(`  ${fmt.infoIcon()} Updated Config.json with problem ID and name`);
+  fmt.stepComplete('Config.json updated');
 }

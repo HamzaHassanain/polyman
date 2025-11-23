@@ -12,7 +12,7 @@ import ConfigFile, {
 import { executor } from '../executor';
 import fs from 'fs';
 import path from 'path';
-import { throwError } from './utils';
+import { logError, throwError } from './utils';
 import {
   compileCPP,
   compileJava,
@@ -22,11 +22,7 @@ import {
   getCompiledCommandToRun,
 } from './utils';
 import { fmt } from '../formatter';
-import {
-  ensureCheckerExists,
-  runChecker,
-  getExpectedCheckerVerdict,
-} from './checker';
+import { ensureCheckerExists, runChecker } from './checker';
 import type { LocalChecker } from '../types';
 import { getGeneratorCommands } from './testset';
 
@@ -718,7 +714,7 @@ export async function startTheComparisonProcess(
         const inputFilePath = path.join(testsDir, testFile);
         const outputFilePath = path.join(targetOutputDir, `output_${testFile}`);
         const answerFilePath = path.join(mainOutputDir, `output_${testFile}`);
-        const expectedVerdict = getExpectedCheckerVerdict(targetSolution.tag);
+        const expectedVerdict = 'OK';
 
         try {
           await runChecker(
@@ -728,15 +724,11 @@ export async function startTheComparisonProcess(
             answerFilePath,
             expectedVerdict
           );
-
-          // expected verdict is correct and the checker did not throw
-          if (expectedVerdict.toUpperCase() !== 'OK') {
-            verdictTracker.didWA = true;
-          }
-        } catch {
-          if (expectedVerdict.toUpperCase() === 'OK') {
-            verdictTracker.didWA = true;
-          }
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          logError(`${testFile} in testset ${testset.name}: ${msg}`, 4);
+          verdictTracker.didWA = true;
+          break;
         }
       }
     }

@@ -5,8 +5,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { PolygonSDK } from '../polygon';
-import type ConfigFile from '../types';
+import { PolygonSDK } from '../../polygon';
 import type {
   LocalChecker,
   LocalGenerator,
@@ -14,23 +13,11 @@ import type {
   LocalValidator,
   LocalTestset,
   GeneratorScriptCommand,
-  Problem,
-  ProblemInfo,
   SolutionTag,
   StatementConfig,
-} from '../types';
-import { fmt } from '../formatter';
-
-/**
- * Normalizes line endings in content from Polygon API.
- * Converts Windows-style (\r\n) line endings to Unix-style (\n).
- *
- * @param {string} content - Content with potentially mixed line endings
- * @returns {string} Content with normalized line endings
- */
-function normalizeLineEndings(content: string): string {
-  return content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-}
+} from '../../types';
+import { fmt } from '../../formatter';
+import { normalizeLineEndingsFromWinToUnix } from './utils';
 
 /**
  * Downloads all solutions from Polygon and returns metadata.
@@ -57,7 +44,11 @@ export async function downloadSolutions(
       try {
         const code = await sdk.viewSolution(problemId, solution.name);
         const targetPath = path.join(problemDir, 'solutions', solution.name);
-        fs.writeFileSync(targetPath, normalizeLineEndings(code), 'utf-8');
+        fs.writeFileSync(
+          targetPath,
+          normalizeLineEndingsFromWinToUnix(code),
+          'utf-8'
+        );
         count++;
         solutionsData.push({
           name: solution.name.replace(/\.[^.]+$/, ''),
@@ -107,7 +98,11 @@ export async function downloadChecker(
     if (!isStandard) {
       const checkerCode = await sdk.viewFile(problemId, 'source', checkerName);
       const targetPath = path.join(problemDir, 'checker', checkerName);
-      fs.writeFileSync(targetPath, normalizeLineEndings(checkerCode), 'utf-8');
+      fs.writeFileSync(
+        targetPath,
+        normalizeLineEndingsFromWinToUnix(checkerCode),
+        'utf-8'
+      );
       count++;
 
       // Download checker tests
@@ -116,9 +111,15 @@ export async function downloadChecker(
         // Normalize line endings in test inputs
         const normalizedTests = checkerTests.map(test => ({
           ...test,
-          input: test.input ? normalizeLineEndings(test.input) : test.input,
-          output: test.output ? normalizeLineEndings(test.output) : test.output,
-          answer: test.answer ? normalizeLineEndings(test.answer) : test.answer,
+          input: test.input
+            ? normalizeLineEndingsFromWinToUnix(test.input)
+            : test.input,
+          output: test.output
+            ? normalizeLineEndingsFromWinToUnix(test.output)
+            : test.output,
+          answer: test.answer
+            ? normalizeLineEndingsFromWinToUnix(test.answer)
+            : test.answer,
         }));
         const testsPath = path.join(
           problemDir,
@@ -184,7 +185,11 @@ export async function downloadValidator(
       validatorName
     );
     const targetPath = path.join(problemDir, 'validator', validatorName);
-    fs.writeFileSync(targetPath, normalizeLineEndings(validatorCode), 'utf-8');
+    fs.writeFileSync(
+      targetPath,
+      normalizeLineEndingsFromWinToUnix(validatorCode),
+      'utf-8'
+    );
     count++;
 
     // Download validator tests
@@ -193,7 +198,9 @@ export async function downloadValidator(
       // Normalize line endings in test inputs
       const normalizedTests = validatorTests.map(test => ({
         ...test,
-        input: test.input ? normalizeLineEndings(test.input) : test.input,
+        input: test.input
+          ? normalizeLineEndingsFromWinToUnix(test.input)
+          : test.input,
       }));
       const testsPath = path.join(
         problemDir,
@@ -267,7 +274,11 @@ export async function downloadGenerators(
       try {
         const content = await sdk.viewFile(problemId, 'source', file.name);
         const targetPath = path.join(problemDir, 'generators', file.name);
-        fs.writeFileSync(targetPath, normalizeLineEndings(content), 'utf-8');
+        fs.writeFileSync(
+          targetPath,
+          normalizeLineEndingsFromWinToUnix(content),
+          'utf-8'
+        );
         count++;
         generatorsData.push({
           name: file.name.replace(/\.[^.]+$/, ''),
@@ -330,7 +341,7 @@ export async function downloadStatements(
       if (statement.legend) {
         fs.writeFileSync(
           path.join(langDir, 'legend.tex'),
-          normalizeLineEndings(statement.legend),
+          normalizeLineEndingsFromWinToUnix(statement.legend),
           'utf-8'
         );
         langConfig['legend'] = `./statements/${lang}/legend.tex`;
@@ -340,7 +351,7 @@ export async function downloadStatements(
       if (statement.input) {
         fs.writeFileSync(
           path.join(langDir, 'input-format.tex'),
-          normalizeLineEndings(statement.input),
+          normalizeLineEndingsFromWinToUnix(statement.input),
           'utf-8'
         );
         langConfig['input'] = `./statements/${lang}/input-format.tex`;
@@ -350,7 +361,7 @@ export async function downloadStatements(
       if (statement.output) {
         fs.writeFileSync(
           path.join(langDir, 'output-format.tex'),
-          normalizeLineEndings(statement.output),
+          normalizeLineEndingsFromWinToUnix(statement.output),
           'utf-8'
         );
         langConfig['output'] = `./statements/${lang}/output-format.tex`;
@@ -360,7 +371,7 @@ export async function downloadStatements(
       if (statement.notes) {
         fs.writeFileSync(
           path.join(langDir, 'notes.tex'),
-          normalizeLineEndings(statement.notes),
+          normalizeLineEndingsFromWinToUnix(statement.notes),
           'utf-8'
         );
         langConfig['notes'] = `./statements/${lang}/notes.tex`;
@@ -370,7 +381,7 @@ export async function downloadStatements(
       if (statement.tutorial) {
         fs.writeFileSync(
           path.join(langDir, 'tutorial.tex'),
-          normalizeLineEndings(statement.tutorial),
+          normalizeLineEndingsFromWinToUnix(statement.tutorial),
           'utf-8'
         );
         langConfig['tutorial'] = `./statements/${lang}/tutorial.tex`;
@@ -380,7 +391,7 @@ export async function downloadStatements(
       if (statement.interaction) {
         fs.writeFileSync(
           path.join(langDir, 'interaction.tex'),
-          normalizeLineEndings(statement.interaction),
+          normalizeLineEndingsFromWinToUnix(statement.interaction),
           'utf-8'
         );
         langConfig['interaction'] = `./statements/${lang}/interaction.tex`;
@@ -390,7 +401,7 @@ export async function downloadStatements(
       if (statement.scoring) {
         fs.writeFileSync(
           path.join(langDir, 'scoring.tex'),
-          normalizeLineEndings(statement.scoring),
+          normalizeLineEndingsFromWinToUnix(statement.scoring),
           'utf-8'
         );
         langConfig['scoring'] = `./statements/${lang}/scoring.tex`;
@@ -433,220 +444,6 @@ export async function fetchProblemMetadata(
   }
 
   return { description, tags };
-}
-
-/**
- * Fetches combined problem information.
- *
- * @param {PolygonSDK} sdk - Polygon SDK instance
- * @param {number} problemId - Problem ID
- * @returns {Promise<Problem & ProblemInfo>}
- */
-export async function fetchProblemInfo(
-  sdk: PolygonSDK,
-  problemId: number
-): Promise<Problem & ProblemInfo> {
-  const problemInfo = await sdk.getProblemInfo(problemId);
-  const problemFromList = (await sdk.listProblems()).find(
-    p => p.id === problemId
-  );
-
-  if (!problemFromList) {
-    throw new Error('Problem not found');
-  }
-
-  return {
-    ...problemInfo,
-    ...problemFromList,
-  };
-}
-
-/**
- * Gets the path to the .polyman directory in user's home.
- *
- * @returns {string} Absolute path to .polyman directory
- *
- * @example
- * const dir = getPolymanDirectory();
- * // Returns: '/home/user/.polyman' or 'C:\Users\user\.polyman'
- */
-export function getPolymanDirectory(): string {
-  const homeDir = process.env['HOME'] || process.env['USERPROFILE'] || '';
-  if (!homeDir) {
-    throw new Error('Could not determine home directory');
-  }
-  return path.join(homeDir, '.polyman');
-}
-
-/**
- * Reads Polygon API credentials from ~/.polyman/ directory.
- *
- * @returns {{ apiKey: string; secret: string }} API credentials
- *
- * @throws {Error} If credentials files don't exist or are empty
- *
- * @example
- * const { apiKey, secret } = readCredentials();
- */
-export function readCredentials(): { apiKey: string; secret: string } {
-  const polymanDir = getPolymanDirectory();
-  const apiKeyPath = path.join(polymanDir, 'api_key');
-  const secretPath = path.join(polymanDir, 'secret_key');
-
-  if (!fs.existsSync(apiKeyPath)) {
-    throw new Error(
-      'API key not found. Please run: polyman register <api-key> <secret>'
-    );
-  }
-
-  if (!fs.existsSync(secretPath)) {
-    throw new Error(
-      'API secret not found. Please run: polyman register <api-key> <secret>'
-    );
-  }
-
-  const apiKey = fs.readFileSync(apiKeyPath, 'utf-8').trim();
-  const secret = fs.readFileSync(secretPath, 'utf-8').trim();
-
-  if (!apiKey || !secret) {
-    throw new Error('API credentials are empty. Please register again.');
-  }
-
-  return { apiKey, secret };
-}
-
-/**
- * Initializes and returns a configured PolygonSDK instance.
- *
- * @returns {PolygonSDK} Configured SDK instance
- *
- * @throws {Error} If credentials cannot be read
- *
- * @example
- * const sdk = initializeSDK();
- * const problems = await sdk.listProblems();
- */
-export function initializeSDK(): PolygonSDK {
-  const { apiKey, secret } = readCredentials();
-  return new PolygonSDK({
-    apiKey,
-    apiSecret: secret,
-  });
-}
-
-/**
- * Checks if credentials are registered.
- *
- * @returns {boolean} True if credentials exist
- *
- * @example
- * if (!areCredentialsRegistered()) {
- *   console.log('Please register your API credentials first');
- * }
- */
-export function areCredentialsRegistered(): boolean {
-  try {
-    const polymanDir = getPolymanDirectory();
-    const apiKeyPath = path.join(polymanDir, 'api_key');
-    const secretPath = path.join(polymanDir, 'secret_key');
-    return fs.existsSync(apiKeyPath) && fs.existsSync(secretPath);
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Determines problem ID from path or direct ID.
- * If path is provided, reads problem ID from Config.json.
- * If numeric string, returns as problem ID.
- *
- * @param {string} problemIdOrPath - Problem ID or path to directory
- * @returns {number} Problem ID
- *
- * @throws {Error} If Config.json doesn't exist or doesn't contain problem ID
- *
- * @example
- * const id = getProblemId('123456');  // Returns: 123456
- * const id = getProblemId('./my-problem');  // Reads from Config.json
- * const id = getProblemId('.');  // Reads from current directory's Config.json
- */
-export function getProblemId(problemIdOrPath: string): number {
-  // Check if it's a numeric ID
-  const numericId = parseInt(problemIdOrPath, 10);
-  if (!isNaN(numericId)) {
-    return numericId;
-  }
-
-  // It's a path - read from Config.json
-  const configPath = path.resolve(problemIdOrPath, 'Config.json');
-  if (!fs.existsSync(configPath)) {
-    throw new Error(
-      `Config.json not found at: ${configPath}\nProvide a valid problem ID or path to problem directory.`
-    );
-  }
-
-  const config = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as ConfigFile;
-
-  if (!config.problemId) {
-    throw new Error(
-      'Config.json does not contain problemId field.\n' +
-        'Either provide a problem ID directly, or pull the problem from Polygon first.'
-    );
-  }
-
-  return config.problemId;
-}
-
-/**
- * Formats problem information for display.
- *
- * @param {Problem} problem - Problem object from Polygon API
- * @returns {string} Formatted problem string
- *
- * @example
- * const formatted = formatProblemInfo(problem);
- * // Returns: "[123456] My Problem (owner: username, access: OWNER)"
- */
-export function formatProblemInfo(problem: Problem): string {
-  const status = problem.modified ? ' (modified)' : '';
-  return `[${problem.id}] ${problem.name} (owner: ${problem.owner}, access: ${problem.accessType})${status}`;
-}
-
-/**
- * Saves problem ID to Config.json.
- *
- * @param {string} configPath - Path to Config.json
- * @param {number} problemId - Problem ID to save
- *
- * @throws {Error} If Config.json cannot be read or written
- *
- * @example
- * saveProblemIdToConfig('./my-problem/Config.json', 123456);
- */
-export function saveProblemIdToConfig(
-  configPath: string,
-  problemId: number
-): void {
-  const config = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as ConfigFile;
-  config.problemId = problemId;
-  const str = JSON.stringify(config, null, 2).replace(/\r\n/g, '\n');
-  fs.writeFileSync(configPath, str, 'utf-8');
-}
-
-/**
- * Validates package type.
- *
- * @param {string} packageType - Package type to validate
- * @returns {boolean} True if valid
- *
- * @example
- * if (!isValidPackageType('standard')) {
- *   throw new Error('Invalid package type');
- * }
- */
-export function isValidPackageType(packageType: string): boolean {
-  const validTypes = ['standard', 'full', 'linux', 'windows'];
-  return validTypes.includes(packageType.toLowerCase());
 }
 
 /**

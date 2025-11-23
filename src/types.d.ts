@@ -630,6 +630,41 @@ interface LocalTestset {
 }
 
 /**
+ * Options for adding or updating a test via the Polygon API.
+ * @interface TestOptions
+ * @property {boolean} [checkExisting] - Whether to check if test already exists
+ * @property {string} [testGroup] - Name of the test group
+ * @property {number} [testPoints] - Points assigned to the test
+ * @property {string} [testDescription] - Description of the test
+ * @property {boolean} [testUseInStatements] - Whether to use test in statements
+ * @property {string} [testInputForStatements] - Input to show in statements
+ * @property {string} [testOutputForStatements] - Output to show in statements
+ * @property {boolean} [verifyInputOutputForStatements] - Verify I/O for statements
+ * @example
+ * const options: TestOptions = {
+ *   checkExisting: true,
+ *   testGroup: 'samples',
+ *   testPoints: 10,
+ *   testDescription: 'Sample test case 1',
+ *   testUseInStatements: true,
+ *   testInputForStatements: '1 2 3',
+ *   testOutputForStatements: '6',
+ *   verifyInputOutputForStatements: true
+ * };
+ */
+
+interface TestOptions {
+  checkExisting?: boolean;
+  testGroup?: string;
+  testPoints?: number;
+  testDescription?: string;
+  testUseInStatements?: boolean;
+  testInputForStatements?: string;
+  testOutputForStatements?: string;
+  verifyInputOutputForStatements?: boolean;
+}
+
+/**
  * Local test group configuration.
  * @interface LocalTestGroup
  * @property {string} name - Group name
@@ -688,6 +723,7 @@ export {
   Solution,
   // Tests
   Test,
+  TestOptions,
   TestGroup,
   PointsPolicy,
   FeedbackPolicy,

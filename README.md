@@ -215,7 +215,7 @@ Edit the `Config.json` file to define your problem parameters:
 Run the test generators defined in your configuration:
 
 ```bash
-polyman generate all
+polyman generate --all
 ```
 
 This executes all generators and creates test input files in the `tests/` directory. Each generator produces test files numbered according to its `tests-range` specification.
@@ -259,74 +259,65 @@ Lists all available testsets defined in the configuration. Shows testset names, 
 
 ### Test Generation
 
-**`polyman generate <target> [modifier]`**
+**`polyman generate [options]`**
 Generates test input files based on testset/group/test specification.
 
-**Targets:**
+**Options:**
 
-- `all` - Generate all testsets
-- `<testset-name>` - Generate entire testset
-
-**Modifiers (optional):**
-
-- `<group-name>` - Generate specific group within testset
-- `<test-number>` - Generate specific test within testset
+- `-a, --all` - Generate all testsets
+- `-t, --testset <name>` - Generate specific testset
+- `-g, --group <name>` - Generate specific group within testset
+- `-i, --index <number>` - Generate specific test by index
 
 Examples:
 
 ```bash
-polyman generate all              # Generate all testsets
-polyman generate tests            # Generate 'tests' testset
-polyman generate tests samples    # Generate 'samples' group in 'tests' testset
-polyman generate tests 5          # Generate test #5 in 'tests' testset
+polyman generate --all                     # Generate all testsets
+polyman generate --testset tests           # Generate 'tests' testset
+polyman generate --testset tests --group samples  # Generate 'samples' group
+polyman generate --testset tests --index 5        # Generate test #5
 ```
 
 ### Input Validation
 
-**`polyman validate <target> [modifier]`**
+**`polyman validate [options]`**
 Validates test input files using the validator program. Returns VALID or INVALID verdict for each test.
 
-**Targets:**
+**Options:**
 
-- `all` - Validate all testsets
-- `<testset-name>` - Validate entire testset
-
-**Modifiers (optional):**
-
-- `<group-name>` - Validate specific group within testset
-- `<test-number>` - Validate specific test within testset
+- `-a, --all` - Validate all testsets
+- `-t, --testset <name>` - Validate specific testset
+- `-g, --group <name>` - Validate specific group within testset
+- `-i, --index <number>` - Validate specific test by index
 
 Examples:
 
 ```bash
-polyman validate all              # Validate all testsets
-polyman validate tests            # Validate 'tests' testset
-polyman validate tests samples    # Validate 'samples' group in 'tests' testset
-polyman validate tests 5          # Validate test #5 in 'tests' testset
+polyman validate --all                     # Validate all testsets
+polyman validate --testset tests           # Validate 'tests' testset
+polyman validate --testset tests --group samples  # Validate 'samples' group
+polyman validate --testset tests --index 5        # Validate test #5
 ```
 
 ### Solution Execution
 
-**`polyman run-solution <solution-name> <target> [modifier]`**
+**`polyman run <solution-name> [options]`**
 Executes the specified solution on test files. Creates output files in `solutions-outputs/` directory.
 
-**Targets:**
+**Options:**
 
-- `all` - Run on all testsets
-- `<testset-name>` - Run on entire testset
-
-**Modifiers (optional):**
-
-- `<group-name>` - Run on specific group within testset
-- `<test-number>` - Run on specific test within testset
+- `-a, --all` - Run on all testsets
+- `-t, --testset <name>` - Run on specific testset
+- `-g, --group <name>` - Run on specific group within testset
+- `-i, --index <number>` - Run on specific test by index
 
 Examples:
 
 ```bash
-polyman run-solution main all              # Run main solution on all testsets
-polyman run-solution main tests            # Run main solution on 'tests' testset
-polyman run-solution main tests samples    # Run main solution on 'samples' group
-polyman run-solution main tests 5          # Run main solution on test #5
+polyman run main --all                     # Run main solution on all testsets
+polyman run main --testset tests           # Run main solution on 'tests' testset
+polyman run main --testset tests --group samples  # Run on 'samples' group
+polyman run main --testset tests --index 5        # Run on test #5
 ```
 
 ### Testing and Verification
@@ -641,13 +632,13 @@ int main(int argc, char* argv[]) {
 polyman download-testlib
 
 # Generate all 20 tests
-polyman generate all
+polyman generate --all
 
 # Validate all generated tests
-polyman validate all
+polyman validate --all
 
 # Run main solution on all tests
-polyman run-solution main all
+polyman run main --all
 
 # Complete verification
 polyman verify
@@ -753,7 +744,7 @@ Update `Config.json` with:
 Execute generators to create test input files.
 
 ```bash
-polyman generate all
+polyman generate --all
 ```
 
 ### 6. Validate Tests
@@ -761,7 +752,7 @@ polyman generate all
 Ensure all generated tests meet the validator's constraints.
 
 ```bash
-polyman validate all
+polyman validate --all
 ```
 
 ### 7. Run Solutions
@@ -769,7 +760,7 @@ polyman validate all
 Execute all solutions on all tests to generate output files.
 
 ```bash
-polyman run-solution main all
+polyman run main --all
 ```
 
 ### 8. Verify Everything

@@ -64,6 +64,7 @@
 
 9. [CLI Commands Reference](#cli-commands-reference)
    - [Problem Creation](#problem-creation)
+   - [List Commands](#list-commands)
    - [Test Management](#test-management)
    - [Validation](#validation)
    - [Solution Execution](#solution-execution)
@@ -385,7 +386,7 @@ Define output checker:
 
 #### Available Standard Checkers
 
-Use `polyman list-checkers` to see all available checkers:
+Use `polyman list checkers` to see all available checkers:
 
 - **wcmp**: Compare tokens (whitespace-insensitive)
 - **ncmp**: Compare numbers with absolute/relative error
@@ -1039,8 +1040,8 @@ You can specify the test number explicitly for manual tests:
 4. **Validate generated tests**
 
    ```bash
-   polyman generate tests
-   polyman validate all
+   polyman generate --testset tests
+   polyman validate --all
    ```
 
 5. **Use range for many similar tests**
@@ -1149,16 +1150,16 @@ After configuring testsets, verify everything works:
 
 ```bash
 # 1. Generate tests
-polyman generate all
+polyman generate --all
 
 # 2. Check generated files
 ls testsets/tests/
 
 # 3. Validate tests
-polyman validate all
+polyman validate --all
 
 # 4. Run main solution
-polyman run-solution main all
+polyman run main --all
 
 # 5. Full verification
 polyman verify
@@ -1678,13 +1679,13 @@ print(result)
 
 ```bash
 # 1. Compile generators
-polyman generate tests
+polyman generate --testset tests
 
 # 2. Validate generated tests
-polyman validate all
+polyman validate --all
 
 # 3. Run main solution
-polyman run-solution main all
+polyman run main --all
 ```
 
 ### Manual Tests
@@ -1832,14 +1833,16 @@ polyman download-testlib
 
 ---
 
-#### `polyman list-checkers`
+### List Commands
+
+#### `polyman list checkers`
 
 Lists all available standard checkers from testlib.
 
 **Usage:**
 
 ```bash
-polyman list-checkers
+polyman list checkers
 ```
 
 **What Happens:**
@@ -1863,16 +1866,94 @@ Available Standard Checkers:
 
 ---
 
+#### `polyman list testsets`
+
+Lists all available testsets defined in Config.json.
+
+**Usage:**
+
+```bash
+polyman list testsets
+```
+
+**What Happens:**
+
+1. Reads `Config.json`
+2. Displays all testsets with their details
+3. Shows number of tests and groups in each testset
+
+**Example Output:**
+
+```
+Available Testsets:
+  tests     - 52 tests, 3 groups (samples, main, edge)
+  pretests  - 10 tests, 1 group (samples)
+```
+
+---
+
+#### `polyman list solutions`
+
+Lists all available solutions defined in Config.json.
+
+**Usage:**
+
+```bash
+polyman list solutions
+```
+
+**What Happens:**
+
+1. Reads `Config.json`
+2. Displays all solutions with their names, tags, and source files
+
+**Example Output:**
+
+```
+Available Solutions:
+  main       (MA)  - solutions/acc.cpp
+  alt        (OK)  - solutions/acc2.java
+  wa-solution (WA) - solutions/wa.cpp
+  tle-solution (TL) - solutions/tle.py
+```
+
+---
+
+#### `polyman list generators`
+
+Lists all available generators defined in Config.json.
+
+**Usage:**
+
+```bash
+polyman list generators
+```
+
+**What Happens:**
+
+1. Reads `Config.json`
+2. Displays all generators with their names and source files
+
+**Example Output:**
+
+```
+Available Generators:
+  gen-random - generators/gen.cpp
+  gen-special - generators/special.cpp
+```
+
+---
+
 ### Test Management
 
-#### `polyman generate all`
+#### `polyman generate --all`
 
 Generates all tests for all testsets defined in Config.json.
 
 **Usage:**
 
 ```bash
-polyman generate all
+polyman generate --all
 ```
 
 **What Happens:**
@@ -1909,14 +1990,14 @@ polyman generate all
 
 ---
 
-#### `polyman generate <testset>`
+#### `polyman generate --testset <testset>`
 
 Generates tests for a specific testset only.
 
 **Usage:**
 
 ```bash
-polyman generate tests
+polyman generate --testset tests
 ```
 
 **What Happens:**
@@ -1926,14 +2007,14 @@ Same as `generate all`, but only for the specified testset.
 
 ---
 
-#### `polyman generate <testset> <group>`
+#### `polyman generate --testset <testset> --group <group>`
 
 Generates tests for a specific group within a testset.
 
 **Usage:**
 
 ```bash
-polyman generate tests samples
+polyman generate --testset tests --group samples
 ```
 
 **What Happens:**
@@ -1947,14 +2028,14 @@ polyman generate tests samples
 
 ---
 
-#### `polyman generate <testset> <index>`
+#### `polyman generate --testset <testset> --index <index>`
 
 Generates a specific test by number.
 
 **Usage:**
 
 ```bash
-polyman generate tests 5
+polyman generate --testset tests --index 5
 ```
 
 **What Happens:**
@@ -1970,14 +2051,14 @@ polyman generate tests 5
 
 ### Validation
 
-#### `polyman validate all`
+#### `polyman validate --all`
 
 Validates all generated tests using the validator.
 
 **Usage:**
 
 ```bash
-polyman validate all
+polyman validate --all
 ```
 
 **What Happens:**
@@ -2018,14 +2099,14 @@ polyman validate all
 
 ---
 
-#### `polyman validate <testset>`
+#### `polyman validate --testset <testset>`
 
 Validates tests for a specific testset.
 
 **Usage:**
 
 ```bash
-polyman validate tests
+polyman validate --testset tests
 ```
 
 **What Happens:**
@@ -2033,14 +2114,14 @@ Same as `validate all`, but only for specified testset.
 
 ---
 
-#### `polyman validate <testset> <group>`
+#### `polyman validate --testset <testset> --group <group>`
 
 Validates tests in a specific group.
 
 **Usage:**
 
 ```bash
-polyman validate tests samples
+polyman validate --testset tests --group samples
 ```
 
 **What Happens:**
@@ -2056,14 +2137,14 @@ polyman validate tests samples
 
 ---
 
-#### `polyman validate <testset> <index>`
+#### `polyman validate --testset <testset> --index <index>`
 
 Validates a single test.
 
 **Usage:**
 
 ```bash
-polyman validate tests 5
+polyman validate --testset tests --index 5
 ```
 
 **What Happens:**
@@ -2078,14 +2159,14 @@ polyman validate tests 5
 
 ### Solution Execution
 
-#### `polyman run-solution <name> all`
+#### `polyman run <name> --all`
 
 Runs a solution on all tests in all testsets.
 
 **Usage:**
 
 ```bash
-polyman run-solution main all
+polyman run main --all
 ```
 
 **What Happens:**
@@ -2127,14 +2208,14 @@ polyman run-solution main all
 
 ---
 
-#### `polyman run-solution <name> <testset>`
+#### `polyman run <name> --testset <testset>`
 
 Runs solution on specific testset.
 
 **Usage:**
 
 ```bash
-polyman run-solution main tests
+polyman run main --testset tests
 ```
 
 **What Happens:**
@@ -2142,14 +2223,14 @@ Same as above, but only for the specified testset.
 
 ---
 
-#### `polyman run-solution <name> <testset> <group>`
+#### `polyman run <name> --testset <testset> --group <group>`
 
 Runs solution on specific group.
 
 **Usage:**
 
 ```bash
-polyman run-solution main tests samples
+polyman run main --testset tests --group samples
 ```
 
 **What Happens:**
@@ -2162,14 +2243,14 @@ polyman run-solution main tests samples
 
 ---
 
-#### `polyman run-solution <name> <testset> <index>`
+#### `polyman run <name> --testset <testset> --index <index>`
 
 Runs solution on single test.
 
 **Usage:**
 
 ```bash
-polyman run-solution main tests 5
+polyman run main --testset tests --index 5
 ```
 
 **What Happens:**
@@ -2432,9 +2513,9 @@ This is the **most comprehensive command**. It runs all steps in order:
 | ------------------ | ----------------- | --------- | ---------- | -------------- | --------------- |
 | `new`              | -                 | Template  | -          | -              | -               |
 | `download-testlib` | -                 | -         | -          | -              | -               |
-| `generate all`     | Generators        | ✓         | -          | -              | -               |
-| `validate all`     | Validator         | -         | ✓          | -              | -               |
-| `run-solution`     | Solution, Checker | -         | -          | ✓              | -               |
+| `generate --all`   | Generators        | ✓         | -          | -              | -               |
+| `validate --all`   | Validator         | -         | ✓          | -              | -               |
+| `run`              | Solution, Checker | -         | -          | ✓              | -               |
 | `test validator`   | Validator         | -         | Self-tests | -              | -               |
 | `test checker`     | Checker           | -         | Self-tests | -              | -               |
 | `test <solution>`  | All               | ✓         | -          | ✓              | ✓               |
@@ -2460,11 +2541,11 @@ polyman test validator
 polyman test checker
 
 # 4. Generate and validate tests
-polyman generate all
-polyman validate all
+polyman generate --all
+polyman validate --all
 
 # 5. Test main solution
-polyman run-solution main all
+polyman run main --all
 
 # 6. Test WA/TL solutions
 polyman test wa-solution
@@ -2478,18 +2559,18 @@ polyman verify
 
 ```bash
 # After fixing a generator
-polyman generate tests small    # Regenerate just one group
-polyman validate tests small     # Validate just that group
-polyman run-solution main tests small  # Test just that group
+polyman generate --testset tests --group small    # Regenerate just one group
+polyman validate --testset tests --group small     # Validate just that group
+polyman run main --testset tests --group small  # Test just that group
 ```
 
 **Debugging:**
 
 ```bash
 # Test single failing test
-polyman generate tests 5
-polyman validate tests 5
-polyman run-solution main tests 5
+polyman generate --testset tests --index 5
+polyman validate --testset tests --index 5
+polyman run main --testset tests --index 5
 ```
 
 ---
@@ -2978,7 +3059,7 @@ Each directory is independent. Use separate `Config.json` for each problem.
 2. **Run specific test:**
 
    ```bash
-   polyman run-solution main tests 5
+   polyman run main --testset tests --index 5
    ```
 
 3. **Check solution output:**

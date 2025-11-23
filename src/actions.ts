@@ -48,12 +48,34 @@ import {
   stepDisplayProblems,
   stepGetProblemId,
   stepFetchProblemInfo,
+  stepFetchStatements,
+  stepFetchSolutions,
+  stepFetchFiles,
+  stepFetchPackages,
+  stepFetchChecker,
+  stepFetchValidator,
+  stepFetchGenerators,
+  stepFetchSampleTests,
+  stepDisplayProblemView,
   stepCommitChanges,
   stepValidatePackageType,
   stepBuildPackage,
   stepCreatePulledProblemDirectory,
   stepDownloadProblemFilesAndSetUpConfig,
   stepDownloadTests,
+  stepReadConfig,
+  stepUpdateProblemInfo,
+  stepUploadSolutions,
+  stepUploadChecker,
+  stepUploadValidator,
+  stepUploadGenerators,
+  stepUploadStatements,
+  stepUploadMetadata,
+  stepUploadTestsets,
+  stepPromptCreateProblem,
+  stepGetValidProblemName,
+  stepCreateProblemOnPolygon,
+  stepUpdateConfigWithProblemId,
 } from './steps';
 
 import { logTemplateCreationSuccess } from './helpers/create-template';
@@ -1244,27 +1266,227 @@ export const remotePullProblemAction = async (
  * await remotePushProblemAction('./my-problem');
  * // Creates new problem or updates existing one
  */
-export const remotePushProblemAction = (problemPath: string): void => {
+export const remotePushProblemAction = async (
+  problemPath: string,
+  options?: {
+    all?: boolean;
+    solutions?: boolean;
+    checker?: boolean;
+    validator?: boolean;
+    generators?: boolean;
+    statements?: boolean;
+    tests?: boolean;
+    metadata?: boolean;
+    info?: boolean;
+  }
+): Promise<void> => {
   fmt.section('⬆️  PUSH PROBLEM TO POLYGON');
 
   try {
     let stepNum = 1;
+    const errors: string[] = [];
+
+    // Determine what to push
+    const hasSpecificOptions =
+      options &&
+      (options.solutions ||
+        options.checker ||
+        options.validator ||
+        options.generators ||
+        options.statements ||
+        options.tests ||
+        options.metadata ||
+        options.info);
+
+    const pushAll = !hasSpecificOptions || options?.all;
+    const pushSolutions = pushAll || options?.solutions;
+    const pushChecker = pushAll || options?.checker;
+    const pushValidator = pushAll || options?.validator;
+    const pushGenerators = pushAll || options?.generators;
+    const pushStatements = pushAll || options?.statements;
+    const pushTests = pushAll || options?.tests;
+    const pushMetadata = pushAll || options?.metadata;
+    const pushInfo = pushAll || options?.info;
 
     // step 1: Read API credentials
-    stepReadCredentials(stepNum++);
+    const credentials = stepReadCredentials(stepNum++);
 
-    // step 2: Initialize SDK (will be used in full implementation)
-    // const sdk = stepInitializeSDK(stepNum++, credentials);
-    stepNum++;
+    // step 2: Initialize SDK
+    const sdk = stepInitializeSDK(stepNum++, credentials);
 
-    // TODO: Implement reading Config.json and uploading files
-    fmt.warning('  ⚠️  Full push implementation coming soon!');
-    fmt.info(`  Problem path: ${problemPath}`);
+    // step 3: Read Config.json
+    const problemDir = path.resolve(process.cwd(), problemPath);
+    const config = stepReadConfig(stepNum++, problemDir);
+
+    // step 4: Get problem ID (or create new problem)
+    let problemId = config.problemId;
+
+    if (!problemId) {
+      // Prompt user to create new problem
+      const shouldProceed = await stepPromptCreateProblem(stepNum++);
+
+      if (!shouldProceed) {
+        console.log();
+        fmt.info('  Push cancelled.');
+        console.log();
+        return;
+      }
+
+      // Validate and get problem name
+      const problemName = await stepGetValidProblemName(
+        stepNum++,
+        sdk,
+        config.name
+      );
+
+      // Create the problem on Polygon
+      problemId = await stepCreateProblemOnPolygon(stepNum++, sdk, problemName);
+
+      // Update Config.json with new problem ID and name
+      stepUpdateConfigWithProblemId(
+        stepNum++,
+        problemDir,
+        config,
+        problemId,
+        problemName
+      );
+      console.log();
+    }
+
+    // step 5: Update problem information
+    if (pushInfo) {
+      await stepUpdateProblemInfo(stepNum++, sdk, problemId, config);
+    } else if (!pushAll) {
+      fmt.info(`${fmt.infoIcon()} Skipping problem info update`);
+    }
+
+    // step 6: Upload solutions
+    if (pushSolutions) {
+      if (config.solutions && config.solutions.length > 0) {
+        await stepUploadSolutions(
+          stepNum++,
+          sdk,
+          problemId,
+          problemDir,
+          config
+        );
+      } else if (!pushAll) {
+        fmt.error(`   ${fmt.cross()} Solutions not found in Config.json`);
+      } else {
+        fmt.warning(`   ${fmt.warningIcon()} No solutions to upload`);
+      }
+    } else if (!pushAll) {
+      fmt.info(`${fmt.infoIcon()} Skipping solutions`);
+    }
+
+    // step 7: Upload checker
+    if (pushChecker) {
+      if (config.checker) {
+        await stepUploadChecker(stepNum++, sdk, problemId, problemDir, config);
+      } else if (!pushAll) {
+        fmt.error(`   ${fmt.cross()} Checker not found in Config.json`);
+      } else {
+        fmt.warning(`   ${fmt.warningIcon()} No checker to upload`);
+      }
+    } else if (!pushAll) {
+      fmt.info(`${fmt.infoIcon()} Skipping checker`);
+    }
+
+    // step 8: Upload validator
+    if (pushValidator) {
+      if (config.validator) {
+        await stepUploadValidator(
+          stepNum++,
+          sdk,
+          problemId,
+          problemDir,
+          config
+        );
+      } else if (!pushAll) {
+        fmt.error(`   ${fmt.cross()} Validator not found in Config.json`);
+      } else {
+        fmt.warning(`   ${fmt.warningIcon()} No validator to upload`);
+      }
+    } else if (!pushAll) {
+      fmt.info(`${fmt.infoIcon()} Skipping validator`);
+    }
+
+    // step 9: Upload generators
+    if (pushGenerators) {
+      if (config.generators && config.generators.length > 0) {
+        await stepUploadGenerators(
+          stepNum++,
+          sdk,
+          problemId,
+          problemDir,
+          config
+        );
+      } else if (!pushAll) {
+        fmt.error(`   ${fmt.cross()}  Generators not found in Config.json`);
+      } else {
+        fmt.warning(`   ${fmt.warningIcon()} No generators to upload`);
+      }
+    } else if (!pushAll) {
+      fmt.info(`${fmt.infoIcon()} Skipping generators`);
+    }
+
+    // step 10: Upload statements
+    if (pushStatements) {
+      if (config.statements) {
+        await stepUploadStatements(
+          stepNum++,
+          sdk,
+          problemId,
+          problemDir,
+          config
+        );
+      } else if (!pushAll) {
+        fmt.error(`   ${fmt.cross()}  Statements not found in Config.json`);
+      } else {
+        fmt.warning(`   ${fmt.warningIcon()} No statements to upload`);
+      }
+    } else if (!pushAll) {
+      fmt.info(`${fmt.infoIcon()} Skipping statements`);
+    }
+
+    // step 11: Upload metadata
+    if (pushMetadata) {
+      await stepUploadMetadata(stepNum++, sdk, problemId, config);
+    } else if (!pushAll) {
+      fmt.info(`${fmt.infoIcon()} Skipping metadata`);
+    }
+
+    // step 12: Upload testsets and tests
+    if (pushTests) {
+      if (config.testsets && config.testsets.length > 0) {
+        await stepUploadTestsets(stepNum++, sdk, problemId, problemDir, config);
+      } else if (!pushAll) {
+        fmt.error(`${fmt.cross()}  Testsets not found in Config.json`);
+      } else {
+        fmt.warning(`${fmt.warningIcon()} No testsets to upload`);
+      }
+    } else if (!pushAll) {
+      fmt.info(`${fmt.infoIcon()} Skipping tests`);
+    }
+
+    // Check if there were any errors
+    if (errors.length > 0) {
+      console.log();
+      errors.forEach(error => fmt.error(`  • ${error}`));
+      console.log();
+      throw new Error(
+        `Failed to push ${errors.length} component(s). See errors above.`
+      );
+    }
+
     console.log();
-
-    // Final success message
-    fmt.successBox('CREDENTIALS VERIFIED!');
-    fmt.info('  Note: Full file upload will be available in the next release.');
+    fmt.successBox('PROBLEM PUSHED SUCCESSFULLY!');
+    fmt.info(
+      `  ${fmt.infoIcon()} Problem ID: ${fmt.highlight(problemId.toString())}`
+    );
+    fmt.info(
+      `  ${fmt.infoIcon()} Don't forget to commit your changes on Polygon using: ${fmt.highlight('polyman remote commit')}`
+    );
     console.log();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -1316,14 +1538,48 @@ export const remoteViewProblemAction = async (
     // step 4: Fetch problem info
     const info = await stepFetchProblemInfo(stepNum++, sdk, problemId);
 
-    // Display additional details
-    console.log();
-    fmt.info(`  ${fmt.infoIcon()} Input: ${fmt.highlight(info.inputFile)}`);
-    fmt.info(`  ${fmt.infoIcon()} Output: ${fmt.highlight(info.outputFile)}`);
-    fmt.info(
-      `  ${fmt.infoIcon()} Interactive: ${fmt.highlight(info.interactive ? 'Yes' : 'No')}`
+    // step 5: Fetch statements
+    const statements = await stepFetchStatements(stepNum++, sdk, problemId);
+
+    // step 6: Fetch solutions
+    const solutions = await stepFetchSolutions(stepNum++, sdk, problemId);
+
+    // step 7: Fetch files
+    const files = await stepFetchFiles(stepNum++, sdk, problemId);
+
+    // step 8: Fetch packages
+    const packages = await stepFetchPackages(stepNum++, sdk, problemId);
+
+    // step 9: Fetch checker
+    const checker = await stepFetchChecker(stepNum++, sdk, problemId);
+
+    // step 10: Fetch validator
+    const validator = await stepFetchValidator(stepNum++, sdk, problemId);
+
+    // step 11: Identify generators from source files
+    const generators = stepFetchGenerators(
+      stepNum++,
+      files,
+      checker,
+      validator
     );
-    console.log();
+
+    // step 12: Fetch sample tests
+    const samples = await stepFetchSampleTests(stepNum++, sdk, problemId);
+
+    // step 13: Display comprehensive view
+    stepDisplayProblemView(
+      stepNum++,
+      info,
+      statements,
+      solutions,
+      files,
+      packages,
+      checker,
+      validator,
+      generators,
+      samples
+    );
 
     // Final success message
     fmt.successBox('PROBLEM DETAILS RETRIEVED!');
