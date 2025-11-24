@@ -10,7 +10,7 @@ import type ConfigFile from '../../types';
 import { fmt } from '../../formatter';
 import { logError, throwError } from '../utils';
 import { normalizeLineEndingsFromUnixToWin } from './utils';
-import { GeneratorScriptCommand, TestOptions } from '../../types';
+import { GeneratorScriptCommand, LocalTestset, TestOptions } from '../../types';
 
 /**
  * Uploads all solutions to Polygon.
@@ -450,7 +450,11 @@ export async function uploadTestsets(
   }
 
   for (const testset of config.testsets) {
+    let currentIndex = 1;
     try {
+      // clear testset
+      await clearTestset(sdk, problemId, testset.name);
+
       // Enable groups if needed
       if (testset.groupsEnabled) {
         try {
@@ -460,78 +464,63 @@ export async function uploadTestsets(
         }
       }
 
-      // Upload test groups if enabled
-      if (testset.groupsEnabled && testset.groups) {
-        for (const group of testset.groups) {
-          try {
-            const groupOptions: Record<string, string | undefined> = {};
-            if (group.pointsPolicy) {
-              groupOptions['pointsPolicy'] = group.pointsPolicy;
-            }
-            if (group.feedbackPolicy) {
-              groupOptions['feedbackPolicy'] = group.feedbackPolicy;
-            }
-            if (group.dependencies) {
-              groupOptions['dependencies'] = group.dependencies.join(',');
-            }
-            await sdk.saveTestGroup(
-              problemId,
-              testset.name,
-              group.name,
-              groupOptions
-            );
-          } catch (error) {
-            logError(error);
-          }
-        }
+      // Process generator script commands
+      if (!testset.generatorScript?.commands) {
+        fmt.warning(
+          `  ⚠️  No generator script commands for testset: ${testset.name}`
+        );
+        continue;
+      }
+      const indeices = { currentIndex, manualsCount };
+      // Upload manual tests
+      const manualTestsPromises = createManaulTestsPromises(
+        sdk,
+        problemId,
+        problemDir,
+        testset,
+        indeices
+      );
+
+      try {
+        await Promise.all(manualTestsPromises);
+      } catch (error) {
+        logError(error);
       }
 
-      // Process generator script commands
-      if (testset.generatorScript?.commands) {
-        const script = buildGenerationScript(testset.generatorScript.commands);
+      currentIndex = indeices.currentIndex;
+      manualsCount = indeices.manualsCount;
 
-        // Upload generation script
+      const script = buildGenerationScript(testset.generatorScript.commands);
+
+      // Upload generation script
+      try {
+        await sdk.saveScript(problemId, testset.name, script);
+      } catch (error) {
+        logError(error);
+      }
+
+      // add groups for generaeted tests
+      for (const command of testset.generatorScript?.commands || []) {
+        if (!command?.group) continue;
         try {
-          await sdk.saveScript(problemId, testset.name, script);
+          const testUpdatePromises = [];
+          const totalTests =
+            command.type === 'generator-range' && command.range
+              ? command.range[1] - command.range[0] + 1
+              : command.type === 'generator-single'
+                ? 1
+                : 0;
+
+          for (let i = 0; i < totalTests; i++) {
+            testUpdatePromises.push(
+              sdk.saveTest(problemId, testset.name, currentIndex++, '', {
+                testGroup: command.group,
+              })
+            );
+          }
+          await Promise.all(testUpdatePromises);
         } catch (error) {
           logError(error);
-        }
-
-        // Upload manual tests
-        for (const command of testset.generatorScript.commands) {
-          if (command.type === 'manual' && command.manualFile) {
-            try {
-              const testPath = path.resolve(problemDir, command.manualFile);
-              if (!fs.existsSync(testPath)) {
-                throw new Error(
-                  `Manual test file not found: ${command.manualFile}`
-                );
-              }
-
-              const input = normalizeLineEndingsFromUnixToWin(
-                fs.readFileSync(testPath, 'utf-8')
-              );
-
-              const options: TestOptions = {};
-              if (command.group) options.testGroup = command.group;
-              if (command.points !== undefined)
-                options.testPoints = command.points;
-              if (command.useInStatements) options.testUseInStatements = true;
-
-              if (command.index !== undefined) {
-                await sdk.saveTest(
-                  problemId,
-                  testset.name,
-                  command.index,
-                  input,
-                  options
-                );
-                manualsCount++;
-              }
-            } catch (error) {
-              logError(error);
-            }
-          }
         }
       }
 
@@ -562,7 +551,7 @@ function buildGenerationScript(
       command.range
     ) {
       const [from, to] = command.range;
-      lines.push(`<#list ${from + 1}..${to + 1} as i>`);
+      lines.push(`<#list ${from}..${to} as i>`);
       lines.push(`${command.generator} \${i} > $`.trim());
       lines.push(`</#list>`);
     } else if (command.type === 'generator-single' && command.generator) {
@@ -597,4 +586,65 @@ export async function updateProblemInfo(
   if (config.memoryLimit) info['memoryLimit'] = config.memoryLimit;
 
   await sdk.updateProblemInfo(problemId, info);
+}
+
+async function clearTestset(
+  sdk: PolygonSDK,
+  problemId: number,
+  testsetName: string
+): Promise<void> {
+  const allPromises = [
+    sdk.enableGroups(problemId, testsetName, false),
+    sdk.saveScript(problemId, testsetName, ' '),
+    sdk.enableGroups(problemId, testsetName, false),
+  ];
+  try {
+    await Promise.all(allPromises);
+  } catch (error) {
+    fmt.warning(
+      `  ⚠️  Failed to clear testset: ${testsetName}: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
+function createManaulTestsPromises(
+  sdk: PolygonSDK,
+  problemId: number,
+  problemDir: string,
+  testset: LocalTestset,
+  indeices: {
+    currentIndex: number;
+    manualsCount: number;
+  }
+): Array<Promise<void>> {
+  const promises: Array<Promise<void>> = [];
+  for (const command of testset?.generatorScript?.commands || []) {
+    if (command.type === 'manual' && command.manualFile) {
+      const testPath = path.resolve(problemDir, command.manualFile);
+      if (!fs.existsSync(testPath)) {
+        throw new Error(`Manual test file not found: ${command.manualFile}`);
+      }
+
+      const input = normalizeLineEndingsFromUnixToWin(
+        fs.readFileSync(testPath, 'utf-8')
+      );
+
+      const options: TestOptions = {};
+      if (command.group) options.testGroup = command.group;
+      if (command.points !== undefined) options.testPoints = command.points;
+      if (command.useInStatements) options.testUseInStatements = true;
+
+      indeices.manualsCount++;
+      promises.push(
+        sdk.saveTest(
+          problemId,
+          testset.name,
+          indeices.currentIndex++,
+          input,
+          options
+        )
+      );
+    }
+  }
+  return promises;
 }

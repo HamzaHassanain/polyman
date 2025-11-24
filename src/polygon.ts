@@ -1349,9 +1349,9 @@ export class PolygonSDK {
       problemId,
       testset,
       testIndex,
-      testInput,
       ...(options || {}),
     };
+    if (testInput) params['testInput'] = testInput;
     if (pin) params['pin'] = pin;
     await this.request('problem.saveTest', params);
   }

@@ -540,7 +540,6 @@ interface GeneratorScriptCommand {
   useInStatements?: boolean;
   generator?: string;
   number?: number;
-  index?: number;
   manualFile?: string;
   group?: string;
   points?: number;

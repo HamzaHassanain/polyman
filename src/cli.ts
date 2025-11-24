@@ -26,7 +26,6 @@ import {
   remotePushProblemAction,
   remoteViewProblemAction,
   remoteCommitProblemAction,
-  remoteVerifyProblemAction,
   remotePackageProblemAction,
 } from './actions';
 
@@ -341,7 +340,7 @@ const remote = program
  * Command: remote register <api-key> <secret>
  * Registers users Polygon api key locally, then to be used in future commands
  * @example
- * polyman remote register 991d9b535452b525ade5e102dc04ac0ada65044f a4c7c2fc8f4087669edd1139f46c017376af839g
+ * polyman remote register 991d9b535452b525afe5e102dc04ac0ada65044v a5c7c2fc8f4087660edd1139f46c017376af839g
  * */
 remote
   .command('register <api-key> <secret>')
@@ -368,22 +367,41 @@ remote
  * Pulls a problem from Polygon associated with the user's registered API key
  * @example
  * polyman remote pull 123456 ./my-problem
- * polyman remote pull . .
+ * polyman remote pull 123456 ./my-problem -s -c  # Pull only solutions and checker
+ * polyman remote pull 123456 ./my-problem --all  # Pull everything (default)
  * */
 remote
   .command('pull <problem-id> <directory>')
   .description('Pull a problem from Polygon to local directory')
+  .option('-a, --all', 'Pull all components')
+  .option('-s, --solutions', 'Pull solutions')
+  .option('-c, --checker', 'Pull checker')
+  .option('-v, --validator', 'Pull validator')
+  .option('-g, --generators', 'Pull generators')
+  .option('-S, --statements', 'Pull statements')
   .option(
-    '-t, --testsets <testsets>',
-    'Comma-separated testset names to pull (default: tests)'
+    '-t, --tests <testsets>',
+    'Pull tests (optionally specify comma-separated testset names)'
   )
+  .option('-m, --metadata', 'Pull metadata (description and tags)')
+  .option('-i, --info', 'Pull problem info (time/memory limits)')
   .action(
     async (
       problemId: string,
       directory: string,
-      options: { testsets?: string }
+      options: {
+        all?: boolean;
+        solutions?: boolean;
+        checker?: boolean;
+        validator?: boolean;
+        generators?: boolean;
+        statements?: boolean;
+        tests?: string;
+        metadata?: boolean;
+        info?: boolean;
+      }
     ) => {
-      await remotePullProblemAction(problemId, directory, options.testsets);
+      await remotePullProblemAction(problemId, directory, options);
     }
   );
 
@@ -449,18 +467,6 @@ remote
   .command('commit <problem-id> <message>')
   .description('Commit changes to Polygon problem')
   .action(remoteCommitProblemAction);
-
-/**
- * Command: remote verify <problem-id>
- * Verifies a problem on Polygon associated with the user's registered API key
- * @example
- * polyman remote verify 123456
- * polyman remote verify ./my-problem
- * */
-remote
-  .command('verify <problem-id>')
-  .description('Run Polygon verification on problem')
-  .action(remoteVerifyProblemAction);
 
 /**
  * Command: remote package <problem-id> <type>

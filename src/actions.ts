@@ -1170,6 +1170,7 @@ export const remoteListProblemsAction = async (
  *
  * @param {string} problemIdOrPath - Problem ID or path to directory with Config.json
  * @param {string} savePath - Directory path where problem should be saved
+ * @param {object} options - Pull options for selective download
  * @returns {void} Resolves when pull completes
  *
  * @throws {Error} If credentials are not registered
@@ -1189,12 +1190,38 @@ export const remoteListProblemsAction = async (
 export const remotePullProblemAction = async (
   problemIdOrPath: string,
   savePath: string,
-  testsets?: string
+  options?: {
+    all?: boolean;
+    solutions?: boolean;
+    checker?: boolean;
+    validator?: boolean;
+    generators?: boolean;
+    statements?: boolean;
+    tests?: string;
+    metadata?: boolean;
+    info?: boolean;
+  }
 ): Promise<void> => {
   fmt.section('⬇️  PULL PROBLEM FROM POLYGON');
 
   try {
     let stepNum = 1;
+
+    // Determine what to pull
+    const hasSpecificOptions =
+      options &&
+      (options.solutions ||
+        options.checker ||
+        options.validator ||
+        options.generators ||
+        options.statements ||
+        options.tests ||
+        options.metadata ||
+        options.info);
+
+    const pullAll = !hasSpecificOptions || options?.all;
+    const pullTests = pullAll || options?.tests;
+    const pullInfo = pullAll || options?.info;
 
     // step 1: Read API credentials
     const credentials = stepReadCredentials(stepNum++);
@@ -1206,12 +1233,15 @@ export const remotePullProblemAction = async (
     const problemId = stepGetProblemId(stepNum++, problemIdOrPath);
 
     // step 4: Fetch problem info
-    await stepFetchProblemInfo(stepNum++, sdk, problemId);
+    if (pullInfo) {
+      await stepFetchProblemInfo(stepNum++, sdk, problemId);
+    }
 
     // step 5: Create directory structure
     stepCreatePulledProblemDirectory(stepNum++, savePath);
 
-    // step 6: Download all problem files and create Config.json
+    // step 6: Download problem files and create Config.json
+    // Note: Currently pulls all files - selective pull will be implemented in future
     await stepDownloadProblemFilesAndSetUpConfig(
       stepNum++,
       sdk,
@@ -1220,15 +1250,17 @@ export const remotePullProblemAction = async (
     );
 
     // step 7: Download test files
-    if (!testsets) {
-      await stepDownloadTests(stepNum++, sdk, problemId, 'tests', savePath);
-    } else {
-      const testsetsArr = testsets.split(',');
-      for (const testset of testsetsArr) {
-        await stepDownloadTests(stepNum++, sdk, problemId, testset, savePath);
+    if (pullTests) {
+      const testsets = options!.tests;
+      if (!testsets) {
+        await stepDownloadTests(stepNum++, sdk, problemId, 'tests', savePath);
+      } else {
+        const testsetsArr = testsets.split(',');
+        for (const testset of testsetsArr) {
+          await stepDownloadTests(stepNum++, sdk, problemId, testset, savePath);
+        }
       }
     }
-    // await stepDownloadTests(stepNum++, sdk, problemId, savePath);
 
     console.log();
     fmt.successBox('PROBLEM PULLED SUCCESSFULLY!');
@@ -1284,7 +1316,6 @@ export const remotePushProblemAction = async (
 
   try {
     let stepNum = 1;
-    const errors: string[] = [];
 
     // Determine what to push
     const hasSpecificOptions =
@@ -1356,8 +1387,6 @@ export const remotePushProblemAction = async (
     // step 5: Update problem information
     if (pushInfo) {
       await stepUpdateProblemInfo(stepNum++, sdk, problemId, config);
-    } else if (!pushAll) {
-      fmt.info(`${fmt.infoIcon()} Skipping problem info update`);
     }
 
     // step 6: Upload solutions
@@ -1375,8 +1404,6 @@ export const remotePushProblemAction = async (
       } else {
         fmt.warning(`   ${fmt.warningIcon()} No solutions to upload`);
       }
-    } else if (!pushAll) {
-      fmt.info(`${fmt.infoIcon()} Skipping solutions`);
     }
 
     // step 7: Upload checker
@@ -1388,8 +1415,6 @@ export const remotePushProblemAction = async (
       } else {
         fmt.warning(`   ${fmt.warningIcon()} No checker to upload`);
       }
-    } else if (!pushAll) {
-      fmt.info(`${fmt.infoIcon()} Skipping checker`);
     }
 
     // step 8: Upload validator
@@ -1407,8 +1432,6 @@ export const remotePushProblemAction = async (
       } else {
         fmt.warning(`   ${fmt.warningIcon()} No validator to upload`);
       }
-    } else if (!pushAll) {
-      fmt.info(`${fmt.infoIcon()} Skipping validator`);
     }
 
     // step 9: Upload generators
@@ -1426,8 +1449,6 @@ export const remotePushProblemAction = async (
       } else {
         fmt.warning(`   ${fmt.warningIcon()} No generators to upload`);
       }
-    } else if (!pushAll) {
-      fmt.info(`${fmt.infoIcon()} Skipping generators`);
     }
 
     // step 10: Upload statements
@@ -1445,15 +1466,11 @@ export const remotePushProblemAction = async (
       } else {
         fmt.warning(`   ${fmt.warningIcon()} No statements to upload`);
       }
-    } else if (!pushAll) {
-      fmt.info(`${fmt.infoIcon()} Skipping statements`);
     }
 
     // step 11: Upload metadata
     if (pushMetadata) {
       await stepUploadMetadata(stepNum++, sdk, problemId, config);
-    } else if (!pushAll) {
-      fmt.info(`${fmt.infoIcon()} Skipping metadata`);
     }
 
     // step 12: Upload testsets and tests
@@ -1465,18 +1482,6 @@ export const remotePushProblemAction = async (
       } else {
         fmt.warning(`${fmt.warningIcon()} No testsets to upload`);
       }
-    } else if (!pushAll) {
-      fmt.info(`${fmt.infoIcon()} Skipping tests`);
-    }
-
-    // Check if there were any errors
-    if (errors.length > 0) {
-      console.log();
-      errors.forEach(error => fmt.error(`  • ${error}`));
-      console.log();
-      throw new Error(
-        `Failed to push ${errors.length} component(s). See errors above.`
-      );
     }
 
     console.log();
@@ -1643,60 +1648,6 @@ export const remoteCommitProblemAction = async (
 };
 
 /**
- * Runs full verification on Polygon for the problem.
- * Polygon will validate all files, run solutions, and check outputs.
- * This is the same verification that runs before problem publication.
- *
- * @param {string} problemIdOrPath - Problem ID or path to directory with Config.json
- * @returns {void} Resolves when verification completes
- *
- * @throws {Error} If credentials are not registered
- * @throws {Error} If problem not found on Polygon
- * @throws {Error} If verification fails
- *
- * @example
- * // From CLI: polyman remote-verify ./my-problem
- * await remoteVerifyProblemAction('./my-problem');
- * // Triggers Polygon verification and displays results
- */
-export const remoteVerifyProblemAction = (problemIdOrPath: string): void => {
-  fmt.section('✅ VERIFY PROBLEM ON POLYGON');
-
-  try {
-    let stepNum = 1;
-
-    // step 1: Read API credentials
-    stepReadCredentials(stepNum++);
-
-    // step 2: Initialize SDK (will be used in full implementation)
-    // const sdk = stepInitializeSDK(stepNum++, credentials);
-    stepNum++;
-
-    // step 3: Get problem ID
-    const problemId = stepGetProblemId(stepNum++, problemIdOrPath);
-
-    // TODO: Implement verification polling and status checking
-    fmt.warning('  ⚠️  Verification status polling coming soon!');
-    fmt.info(`  Problem ID: ${problemId}`);
-    fmt.info(`  Trigger verification manually on Polygon for now.`);
-    console.log();
-
-    // Final message
-    fmt.successBox('CREDENTIALS VERIFIED!');
-    fmt.info(
-      '  Note: Automated verification will be available in the next release.'
-    );
-    console.log();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    fmt.errorBox('VERIFICATION FAILED!');
-    fmt.error(`${message}`);
-    console.log();
-    process.exit(1);
-  }
-};
-
-/**
  * Builds and downloads problem package from Polygon.
  * Package types: 'standard' (for contests) or 'full' (complete problem data).
  * Downloaded package is saved to current directory.
@@ -1739,20 +1690,30 @@ export const remotePackageProblemAction = async (
     // step 4: Validate package type
     stepValidatePackageType(stepNum++, packageType);
 
-    // step 5: Build package
-    await stepBuildPackage(stepNum++, sdk, problemId, packageType);
-
-    // TODO: Implement package download and save
-    fmt.warning('  ⚠️  Package download coming soon!');
-    fmt.info(`  Package built successfully on Polygon.`);
-    fmt.info(`  Download it manually from Polygon for now.`);
-    console.log();
-
-    // Final success message
-    fmt.successBox('PACKAGE BUILT SUCCESSFULLY!');
-    fmt.info(
-      '  Note: Automatic download will be available in the next release.'
+    // step 5: Build package and wait for completion
+    const packageInfo = await stepBuildPackage(
+      stepNum++,
+      sdk,
+      problemId,
+      packageType
     );
+
+    console.log();
+    // Final success message
+
+    if (packageInfo.state === 'FAILED') {
+      fmt.errorBox('PACKAGE BUILD FAILED!');
+    } else {
+      fmt.successBox('PACKAGE BUILT SUCCESSFULLY!');
+    }
+    fmt.info(
+      `  ${fmt.infoIcon()} Package ID: ${fmt.highlight(packageInfo.id.toString())}`
+    );
+    fmt.info(`  ${fmt.infoIcon()} State: ${fmt.highlight(packageInfo.state)}`);
+    if (packageInfo.comment) {
+      fmt.info(`  ${fmt.infoIcon()} Message: ${packageInfo.comment}`);
+    }
+    // fmt.info(`  ${fmt.infoIcon()} You can download the package from Polygon`);
     console.log();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

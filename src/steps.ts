@@ -921,22 +921,93 @@ export function stepValidatePackageType(stepNum: number, packageType: string) {
 }
 
 /**
- * Step: Build package on Polygon
+ * Step: Build package on Polygon and wait for completion
  */
 export async function stepBuildPackage(
   stepNum: number,
   sdk: PolygonSDK,
   problemId: number,
   packageType: string
-): Promise<void> {
+): Promise<{ id: number; state: string; comment: string }> {
   fmt.step(stepNum, 'Building Package on Polygon');
-  fmt.info(`  ${fmt.infoIcon()} This may take a few minutes...`);
+
+  // Get initial package count
+  const initialPackages = await sdk.listPackages(problemId);
+  const initialCount = initialPackages.length;
+
+  fmt.info(`  ${fmt.infoIcon()} Current packages: ${initialCount}`);
+  fmt.info(
+    `  ${fmt.infoIcon()} Starting build (this may take several minutes)...`
+  );
 
   const isFullVerify = packageType === 'full';
   const isLinux = packageType === 'linux' || packageType === 'standard';
 
+  // Trigger the build
   await sdk.buildPackage(problemId, isFullVerify, isLinux);
-  fmt.stepComplete('Package built successfully');
+  fmt.info(`  ${fmt.infoIcon()} Build job queued, waiting for completion...`);
+
+  // Poll every 30 seconds to check if new package is created
+  let latestPackage = null;
+  let attempts = 0;
+  const maxAttempts = 30; // 30 minutes max wait time
+
+  while (attempts < maxAttempts) {
+    attempts++;
+
+    // Wait 60 seconds before checking
+    await new Promise(resolve => setTimeout(resolve, 30000));
+
+    // Check packages
+    const currentPackages = await sdk.listPackages(problemId);
+
+    if (currentPackages.length > initialCount) {
+      // New package detected, get the latest one
+      latestPackage = currentPackages.reduce(
+        (latest, pkg) => (pkg.id > latest.id ? pkg : latest),
+        currentPackages[0]
+      );
+
+      fmt.info(
+        `  ${fmt.infoIcon()} Package detected (ID: ${latestPackage.id}, State: ${latestPackage.state})`
+      );
+
+      // If package is still running, continue waiting
+      if (
+        latestPackage.state === 'RUNNING' ||
+        latestPackage.state === 'PENDING'
+      ) {
+        fmt.info(`  ${fmt.infoIcon()} Package still building, waiting...`);
+        continue;
+      }
+
+      // Package is complete (READY or FAILED)
+      break;
+    }
+
+    fmt.info(
+      `  ${fmt.infoIcon()} Waiting... (${attempts} minute${attempts > 1 ? 's' : ''} elapsed)`
+    );
+  }
+
+  if (!latestPackage) {
+    throw new Error('Package build timed out after 30 minutes');
+  }
+
+  if (latestPackage.state === 'READY') {
+    fmt.stepComplete(`Package built successfully (ID: ${latestPackage.id})`);
+  } else if (latestPackage.state === 'FAILED') {
+    fmt.error(
+      `  ${fmt.cross()} Package build failed: ${latestPackage.comment}`
+    );
+    throw new Error(`Package build failed: ${latestPackage.comment}`);
+  }
+
+  return {
+    id: latestPackage.id,
+    state: latestPackage.state,
+    comment: latestPackage.comment,
+  };
 }
 
 /**

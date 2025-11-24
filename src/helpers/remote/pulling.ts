@@ -506,7 +506,6 @@ export async function downloadTestsetAndBuildGenerationScripts(
       manualCount++;
 
       const command: GeneratorScriptCommand = {
-        index: test.index,
         type: 'manual',
         manualFile: `./manual/${testsetName}/${filename}`,
         useInStatements: test.useInStatements,
