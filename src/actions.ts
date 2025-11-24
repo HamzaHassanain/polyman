@@ -136,7 +136,7 @@ export const createTemplateAction = (directory: string) => {
  * @throws {Error} If reading checker files fails
  *
  * @example
- * // From CLI: polyman list-checkers
+ * // From CLI: polyman list checkers
  * listAvailableCheckersAction();
  * // Displays:
  * //   1. acmp.cpp       → Almost-correct mode checker
@@ -889,7 +889,7 @@ export const fullVerificationAction = async () => {
  * @throws {Error} If Config.json is invalid or missing testsets
  *
  * @example
- * // From CLI: polyman list-testsets
+ * // From CLI: polyman list testsets
  * await listTestsetsAction();
  * // Displays:
  * //   1. tests: 15 tests, groups: samples, main
@@ -934,7 +934,7 @@ export const listTestsetsAction = () => {
  * @throws {Error} If Config.json is invalid or missing solutions
  *
  * @example
- * // From CLI: polyman list-solutions
+ * // From CLI: polyman list solutions
  * listSolutionsAction();
  * // Displays:
  * //   1. main       → ./solutions/acc.cpp        (MA - Main Accepted)
@@ -1000,7 +1000,7 @@ export const listSolutionsAction = () => {
  * @throws {Error} If Config.json is invalid or missing generators
  *
  * @example
- * // From CLI: polyman list-generators
+ * // From CLI: polyman list generators
  * listGeneratorsAction();
  * // Displays:
  * //   1. gen-random    → ./generators/gen-random.cpp

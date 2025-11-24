@@ -78,13 +78,7 @@
           {
             "useInStatements": true,
             "type": "manual",
-            "manualFile": "./tests/manual/sample1.txt",
-            "group": "samples"
-          },
-          {
-            "useInStatements": true,
-            "type": "manual",
-            "manualFile": "./tests/manual/sample2.txt",
+            "manualFile": "./manual/tests/sample1.txt",
             "group": "samples"
           },
           {
