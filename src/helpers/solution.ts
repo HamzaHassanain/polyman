@@ -125,6 +125,11 @@ async function runSolution(
     testsetName,
     inputFile
   );
+
+  // if ouputFilePath exists from previous runs, delete it first
+  if (fs.existsSync(outputFilePath)) {
+    fs.unlinkSync(outputFilePath);
+  }
   await executor.executeWithRedirect(
     compiledPath,
     {
@@ -737,7 +742,7 @@ export async function startTheComparisonProcess(
   } catch (error) {
     throwError(error, 'Error during solution comparison process');
   } finally {
-    executor.cleanup();
+    await executor.cleanup();
   }
 }
 /**

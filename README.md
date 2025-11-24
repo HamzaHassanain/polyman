@@ -127,6 +127,12 @@ This should display the installed version number.
 
 ## Getting Started
 
+> 📚 **New to Polyman?**
+>
+> - **Quick Start**: Follow the steps below for a rapid introduction
+> - **Step-by-Step Tutorial**: Check out our [beginner-friendly tutorial](TUTORIAL.md) for a complete walkthrough
+> - **Complete Guide**: See the [comprehensive guide](GUIDE.md) for in-depth documentation on all features
+
 ### Working Locally (New Problem)
 
 #### Step 1: Create a New Problem
@@ -208,7 +214,7 @@ Edit the `Config.json` file to define your problem parameters:
       "generatorScript": {
         "commands": [
           {
-            "type": "generator-range",
+            "type": "generator",
             "generator": "gen-random",
             "range": [1, 20],
             "group": "main"
@@ -801,7 +807,7 @@ int main(int argc, char* argv[]) {
       "generatorScript": {
         "commands": [
           {
-            "type": "generator-range",
+            "type": "generator",
             "generator": "gen-random",
             "range": [1, 20],
             "group": "main"
@@ -1098,10 +1104,11 @@ int main(int argc, char* argv[]) {
 
 ## Documentation and Resources
 
-### Official Documentation
+### Learning Resources
 
-- **Complete Documentation**: [https://hamzahassanain.github.io/polyman/](https://hamzahassanain.github.io/polyman/)
-- **API Reference**: [https://hamzahassanain.github.io/polyman/](https://hamzahassanain.github.io/polyman/)
+- **📖 [Beginner Tutorial](TUTORIAL.md)**: Step-by-step walkthrough for creating your first problem from scratch. Perfect for newcomers!
+- **📚 [Complete User Guide](GUIDE.md)**: Comprehensive reference covering all features, best practices, and advanced usage patterns
+- **🔧 [API Documentation](https://hamzahassanain.github.io/polyman/)**: TypeDoc-generated documentation for developers and advanced users
 
 ### Related Resources
 

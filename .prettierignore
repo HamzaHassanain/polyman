@@ -6,5 +6,5 @@ coverage
 .vscode
 .github
 temp
-template/GUIDE.md
+GUIDE.md
 logo.png

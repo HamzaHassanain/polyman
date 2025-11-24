@@ -40,7 +40,7 @@ program
   .description(
     'CLI tool for Codeforces problem setters to manage problems via terminal'
   )
-  .version('1.0.0');
+  .version('2.2.0');
 
 // ============================================================================
 // LOCAL COMMANDS

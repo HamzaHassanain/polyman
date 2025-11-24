@@ -85,18 +85,18 @@ async function runValidator(
         if (expectedVerdict === 'VALID')
           throw new Error(result.stderr || 'Validator execution failed');
       },
-      onTimeout: () => {
+      onTimeout: async () => {
         fmt.error(
           `${fmt.cross()} ${fmt.bold('Validator Unexpectedly Exceeded Time Limit!')} (${DEFAULT_TIMEOUT}ms)`
         );
-        executor.cleanup();
+        await executor.cleanup();
         process.exit(1);
       },
-      onMemoryExceeded: () => {
+      onMemoryExceeded: async () => {
         fmt.error(
           `${fmt.cross()} ${fmt.bold('Validator Unexpectedly Exceeded Memory Limit!')} (${DEFAULT_MEMORY_LIMIT} MB)`
         );
-        executor.cleanup();
+        await executor.cleanup();
         process.exit(1);
       },
     },
@@ -195,7 +195,7 @@ export async function validateTestset(
   } catch (error) {
     throwError(error, `Failed to validate testset ${testsetName}`);
   } finally {
-    executor.cleanup();
+    await executor.cleanup();
   }
 
   if (someFailed) throw new Error('Some tests failed validation');
@@ -237,7 +237,7 @@ export async function validateGroup(
 
     for (const command of commands) {
       if (command.group === groupName) {
-        if (command.type === 'generator-range' && command.range) {
+        if (command.type === 'generator' && command.range) {
           const [start, end] = command.range;
           for (let i = start; i <= end; i++) {
             groupCommands.push(currentIndex);
@@ -249,7 +249,7 @@ export async function validateGroup(
         }
       } else {
         // Count tests not in this group
-        if (command.type === 'generator-range' && command.range) {
+        if (command.type === 'generator' && command.range) {
           const [start, end] = command.range;
           currentIndex += end - start + 1;
         } else {
@@ -278,7 +278,7 @@ export async function validateGroup(
   } catch (error) {
     throwError(error, `Failed to validate group ${groupName}`);
   } finally {
-    executor.cleanup();
+    await executor.cleanup();
   }
 
   if (someFailed)
@@ -356,9 +356,10 @@ export async function testValidatorItself() {
     ensureValidatorExists(config.validator);
 
     if (!config.validator.testsFilePath) {
-      throw new Error(
-        'Validator tests file path is not specified in the configuration.'
+      fmt.warning(
+        'No validator tests file path specified in configuration. Skipping validator self-tests.'
       );
+      return;
     }
 
     await makeValidatorTests(config.validator.testsFilePath);
@@ -366,7 +367,7 @@ export async function testValidatorItself() {
   } catch (error) {
     throwError(error, 'Failed to test validator');
   } finally {
-    executor.cleanup();
+    await executor.cleanup();
     removeDirectoryRecursively('validator_tests');
   }
 }
@@ -437,7 +438,7 @@ export async function runValidatorTests(validator: LocalValidator) {
   } catch (error) {
     throwError(error, 'Failed to compile validator');
   } finally {
-    executor.cleanup();
+    await executor.cleanup();
   }
 
   if (someFailed) throw new Error('Some validator tests failed');

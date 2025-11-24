@@ -605,9 +605,9 @@ function parseGenerationScript(
     const toNum = parseInt(toStr, 10);
 
     if (!isNaN(fromNum) && !isNaN(toNum)) {
-      // Numeric range - create generator-range command
+      // Numeric range - create generator command
       commands.push({
-        type: 'generator-range',
+        type: 'generator',
         generator: generatorName,
         range: [fromNum, toNum],
         useInStatements: false,

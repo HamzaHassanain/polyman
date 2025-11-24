@@ -17,8 +17,9 @@ Welcome! This tutorial will guide you step-by-step through creating your first c
 11. [Step 8: Add Sample Tests](#step-8-add-sample-tests)
 12. [Step 9: Choose a Checker](#step-9-choose-a-checker)
 13. [Step 10: Test Everything](#step-10-test-everything)
-14. [Step 11: Add More Solutions](#step-11-add-more-solutions-optional)
-15. [Next Steps](#next-steps)
+14. [Step 11: Upload to Polygon](#step-11-upload-to-polygon-optional)
+15. [Step 12: Add More Solutions](#step-12-add-more-solutions-optional)
+16. [Next Steps](#next-steps)
 
 ---
 
@@ -312,6 +313,7 @@ The `Config.json` file tells Polyman about your problem. Open it and update it t
 
   "checker": {
     "name": "ncmp",
+    "source": "ncmp.cpp",
     "isStandard": true
   },
 
@@ -326,7 +328,7 @@ The `Config.json` file tells Polyman about your problem. Open it and update it t
       "generatorScript": {
         "commands": [
           {
-            "type": "generator-range",
+            "type": "generator",
             "generator": "gen",
             "range": [1, 10],
             "group": "main"
@@ -530,7 +532,7 @@ Update the `testsets` section in `Config.json`:
           "group": "samples"
         },
         {
-          "type": "generator-range",
+          "type": "generator",
           "generator": "gen",
           "range": [3, 12],
           "group": "main"
@@ -560,7 +562,7 @@ Update the `testsets` section in `Config.json`:
    - We have two manual test commands, one for each sample
 
 2. **Generated tests (3-12):** These will be created by the generator
-   - `"type": "generator-range"` means use a generator
+   - `"type": "generator"` means use a generator
    - `"range": [3, 12]` means generate tests 3 through 12 (10 tests)
    - `"group": "main"` puts them in the main group
 
@@ -713,7 +715,356 @@ If everything is correct, you'll see a beautiful success message! 🎉
 
 ---
 
-## Step 11: Add More Solutions (Optional)
+## Step 11: Upload to Polygon (Optional)
+
+Now that your problem is fully tested and working locally, you might want to upload it to Codeforces Polygon. Polyman makes this process seamless with its Polygon integration!
+
+### First Time Setup
+
+Before you can work with Polygon, you need to register your API credentials once:
+
+#### Get Your API Credentials
+
+1. Go to [Polygon API Help](https://polygon.codeforces.com/api/help)
+2. Log in with your Codeforces account
+3. Click on "Generate API Key" or use your existing key
+4. You'll see:
+   - **API Key** (a long string like `abc123def456...`)
+   - **API Secret** (another long string)
+5. Copy both of these
+
+#### Register Your Credentials with Polyman
+
+Run:
+
+```bash
+polyman remote register
+```
+
+You'll be prompted to enter:
+
+- **API Key**: Paste your API key
+- **API Secret**: Paste your API secret
+
+These credentials are securely stored in `~/.polyman/credentials.json` and you only need to do this once!
+
+### Method 1: Create New Problem on Polygon
+
+If you want to create a brand new problem on Polygon:
+
+#### Step 1: Create the Problem on Polygon Website
+
+Unfortunately, you need to create the problem shell on Polygon first (Polyman can't create new problems from scratch):
+
+1. Go to [Polygon](https://polygon.codeforces.com/)
+2. Click "Create New Problem"
+3. Fill in basic details (name, etc.)
+4. Note down the **Problem ID** (e.g., `123456`)
+
+#### Step 2: Push Your Local Problem to Polygon
+
+Now push your entire local problem to Polygon:
+
+```bash
+polyman remote push . --problem-id <YOUR_PROBLEM_ID>
+```
+
+Wait, there's no `--problem-id` option! Don't worry - you need to add the problem ID to your `Config.json` first:
+
+**Option A: Add Problem ID to Config.json**
+
+Open `Config.json` and add:
+
+```json
+{
+  "name": "sum-problem",
+  "polygonProblemId": 123456,
+  "description": "Calculate the sum of two numbers",
+  ...
+}
+```
+
+Then push:
+
+```bash
+polyman remote push .
+```
+
+**Option B: Use an Existing Problem**
+
+If you already created a problem on Polygon and noted its ID, you can work with it directly.
+
+#### What Gets Uploaded?
+
+When you run `polyman remote push .`, Polyman uploads:
+
+- ✅ Problem settings (time limit, memory limit, I/O files)
+- ✅ All solutions with their correct tags (MA, OK, WA, TL, etc.)
+- ✅ Validator with validator tests
+- ✅ Checker (or standard checker configuration)
+- ✅ All generators
+- ✅ All test files and test organization
+- ✅ Problem statements (if you have them)
+
+**What Happens After Pushing:**
+
+After `polyman remote push`, your changes are uploaded to Polygon's **working copy** (like a staging area). They're not yet saved to the repository!
+
+#### Step 3: Commit Your Changes
+
+To save your changes to Polygon's repository, commit them:
+
+```bash
+polyman remote commit . -m "Initial problem setup"
+```
+
+This is like a git commit - it saves your changes with a descriptive message.
+
+### Method 2: Pull Existing Problem, Modify, and Push Back
+
+If you already have a problem on Polygon and want to work on it locally:
+
+#### Step 1: Pull the Problem
+
+```bash
+polyman remote pull 123456 ./my-problem
+cd my-problem
+```
+
+This downloads everything from Polygon:
+
+- Solutions
+- Validator and validator tests
+- Checker and checker tests
+- Generators
+- Tests
+- Statements
+- Config.json with all settings
+
+#### Step 2: Work Locally
+
+Make your changes:
+
+```bash
+# Edit solutions
+vim solutions/new-solution.cpp
+
+# Modify generator
+vim generators/gen.cpp
+
+# Update Config.json
+vim Config.json
+
+# Test everything locally
+polyman verify
+```
+
+#### Step 3: Push Changes Back
+
+Once you're happy with your changes:
+
+```bash
+polyman remote push .
+```
+
+#### Step 4: Commit Changes
+
+```bash
+polyman remote commit . -m "Added new test cases and optimized solution"
+```
+
+### Selective Pushing
+
+Sometimes you don't want to upload everything. Polyman gives you control:
+
+```bash
+# Push everything except tests (useful if tests are large)
+polyman remote push . --skip-tests
+
+# Push everything except statements
+polyman remote push . --skip-statements
+
+# Push only solutions (skip tests, statements, checker, validator, generators)
+polyman remote push . --skip-tests --skip-statements --skip-checker --skip-validator --skip-generators
+```
+
+### Building Packages
+
+After pushing and committing, you might want to build a package:
+
+```bash
+# Build standard package
+polyman remote package .
+
+# Build full package
+polyman remote package . --full
+
+# Build full package with verification
+polyman remote package . --full --verify
+```
+
+Polyman will:
+
+1. Request package build from Polygon
+2. Poll every 60 seconds to check if it's ready
+3. Wait up to 30 minutes
+4. Download the package when ready
+
+You'll see status updates like:
+
+- `WAITING` - Package is in queue
+- `RUNNING` - Package is being built
+- `READY` - Package is ready to download
+- `FAILED` - Package build failed
+
+### Viewing Your Problems
+
+Want to see all your problems on Polygon?
+
+```bash
+# List all problems with details
+polyman remote list
+
+# List only problem IDs
+polyman remote list --id-only
+
+# List problems by specific owner
+polyman remote list --owner tourist
+```
+
+Want detailed info about a specific problem?
+
+```bash
+polyman remote view 123456
+```
+
+### Complete Workflow Example
+
+Here's a real-world workflow:
+
+```bash
+# 1. One-time setup: Register API credentials
+polyman remote register
+
+# 2. Create problem locally
+polyman new sum-problem
+cd sum-problem
+polyman download-testlib
+
+# 3. Build your problem (write solutions, validators, generators)
+# ... (Steps 3-10 from tutorial)
+
+# 4. Verify everything works locally
+polyman verify
+
+# 5. Create problem shell on Polygon website (note the ID: 123456)
+
+# 6. Add problem ID to Config.json
+# Add: "polygonProblemId": 123456
+
+# 7. Push to Polygon
+polyman remote push .
+
+# 8. Commit changes
+polyman remote commit . -m "Initial problem: Sum of Two Numbers"
+
+# 9. Build package
+polyman remote package . --full --verify
+
+# Done! Your problem is on Polygon, ready for contest use
+```
+
+### Alternative: Work on Existing Problem
+
+```bash
+# 1. Pull problem from Polygon
+polyman remote pull 123456 ./sum-problem
+cd sum-problem
+
+# 2. Make changes locally
+vim solutions/new-solution.cpp
+vim generators/gen.cpp
+
+# 3. Test locally
+polyman verify
+
+# 4. Push changes
+polyman remote push .
+
+# 5. Commit
+polyman remote commit . -m "Added stress tests and alternative solution"
+
+# 6. Build package
+polyman remote package .
+```
+
+### Troubleshooting
+
+**Q: "API authentication failed"**
+
+- Make sure you registered credentials: `polyman remote register`
+- Check your API key and secret are correct
+- Try regenerating them on Polygon
+
+**Q: "Problem not found"**
+
+- Make sure the problem ID is correct
+- Check that you have access to this problem on Polygon
+- Verify you're using the correct Polygon account
+
+**Q: "Push failed - invalid testset configuration"**
+
+- Run `polyman verify` locally first
+- Make sure all tests are valid
+- Check that your Config.json matches Polygon's requirements
+
+**Q: "Package build failed"**
+
+- Check Polygon website for error details
+- Make sure all solutions compile on Polygon's servers
+- Verify validator and checker work correctly
+
+**Q: "I don't want to upload all my tests (too many/too large)"**
+
+- Use `--skip-tests` flag: `polyman remote push . --skip-tests`
+- You can generate tests directly on Polygon instead
+
+### Important Notes
+
+**About Problem IDs:**
+
+- You need to add `"polygonProblemId": 123456` to your `Config.json`
+- Or create the problem on Polygon first and note the ID
+- The ID is shown in the Polygon URL: `polygon.codeforces.com/p123456`
+
+**About Commits:**
+
+- Always commit after pushing: `polyman remote commit . -m "message"`
+- Commits save your changes permanently to Polygon's repository
+- Without committing, your changes are only in the working copy
+
+**About Packages:**
+
+- Packages are what you download and use in contests
+- Building takes time (can be several minutes)
+- Use `--full` for complete packages with all files
+- Use `--verify` to run full verification on Polygon
+
+### What's Next?
+
+Now you know how to:
+
+- ✅ Create problems locally
+- ✅ Test them thoroughly with `polyman verify`
+- ✅ Upload to Polygon
+- ✅ Work with existing Polygon problems
+- ✅ Build and download packages
+
+You have the complete workflow! You can now create problems efficiently, test them locally, and seamlessly sync with Polygon.
+
+---
+
+## Step 12: Add More Solutions (Optional)
 
 In real problem setting, you want to test that your problem is robust. Let's add a **wrong solution** to make sure it fails.
 
@@ -778,7 +1129,7 @@ This confirms your checker is working correctly!
 
 ## Next Steps
 
-Congratulations! You've created your first competitive programming problem! 🎉
+Congratulations! You've created your first competitive programming problem and learned how to upload it to Polygon! 🎉
 
 Here's what you learned:
 
@@ -789,7 +1140,8 @@ Here's what you learned:
 5. ✅ Writing a generator to create test cases automatically
 6. ✅ Using standard checkers to verify outputs
 7. ✅ Running complete verification with `polyman verify`
-8. ✅ Adding wrong solutions to test your checker
+8. ✅ Uploading problems to Polygon and syncing changes
+9. ✅ Adding wrong solutions to test your checker
 
 ### What to Try Next
 

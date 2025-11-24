@@ -505,11 +505,9 @@ export async function uploadTestsets(
         try {
           const testUpdatePromises = [];
           const totalTests =
-            command.type === 'generator-range' && command.range
+            command.type === 'generator' && command.range
               ? command.range[1] - command.range[0] + 1
-              : command.type === 'generator-single'
-                ? 1
-                : 0;
+              : 0;
 
           for (let i = 0; i < totalTests; i++) {
             testUpdatePromises.push(
@@ -545,17 +543,11 @@ function buildGenerationScript(
   const lines: string[] = [];
 
   for (const command of commands) {
-    if (
-      command.type === 'generator-range' &&
-      command.generator &&
-      command.range
-    ) {
+    if (command.type === 'generator' && command.generator && command.range) {
       const [from, to] = command.range;
       lines.push(`<#list ${from}..${to} as i>`);
       lines.push(`${command.generator} \${i} > $`.trim());
       lines.push(`</#list>`);
-    } else if (command.type === 'generator-single' && command.generator) {
-      lines.push(`${command.generator} > $`.trim());
     }
     // Manual tests are uploaded separately, not in the script
   }

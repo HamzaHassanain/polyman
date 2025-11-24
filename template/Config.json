@@ -82,21 +82,9 @@
             "group": "samples"
           },
           {
-            "type": "generator-single",
+            "type": "generator",
             "generator": "gen-random",
-            "number": 3,
-            "group": "main"
-          },
-          {
-            "type": "generator-single",
-            "generator": "gen-random",
-            "number": 4,
-            "group": "main"
-          },
-          {
-            "type": "generator-range",
-            "generator": "gen-random",
-            "range": [5, 10],
+            "range": [1, 10],
             "group": "main"
           }
         ]

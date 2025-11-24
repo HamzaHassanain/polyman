@@ -123,10 +123,11 @@ export class CommandExecutor {
       command,
       options.memoryLimitMB
     );
+    const platformCommand = this.normalizeCommandForPlatform(wrappedCommand);
 
     return new Promise<ExecutionResult>((resolve, reject) => {
       const { process: child, result } = this.spawnProcess(
-        wrappedCommand,
+        platformCommand,
         options
       );
       const collectors = this.createOutputCollectors(child);
@@ -188,9 +189,7 @@ export class CommandExecutor {
     const isJava = command.trim().startsWith('java ');
 
     if (process.platform === 'win32') {
-      fmt.warning(
-        `${fmt.warningIcon()} Memory limits on Windows are not fully supported.`
-      );
+      // @Todo: Windows memory limit enforcement can be added here
       return command;
     }
 
@@ -200,6 +199,42 @@ export class CommandExecutor {
 
     const memoryLimitKB = memoryLimitMB * 1024;
     return `(ulimit -v ${memoryLimitKB}; ${command})`;
+  }
+
+  /**
+   * Normalizes command syntax for the current platform.
+   * - On Windows, converts './foo' to '.\\foo' and forward slashes in the
+   *   executable path to backslashes to avoid ERROR_PATH_NOT_FOUND (3).
+   * - Leaves arguments and redirections intact.
+   *
+   * @private
+   * @param {string} command - Command line string to normalize
+   * @returns {string} Normalized command string appropriate for the platform
+   */
+  private normalizeCommandForPlatform(command: string): string {
+    if (process.platform !== 'win32') return command;
+
+    // Split out the first token (executable) from the rest while preserving redirections
+    const match = command.match(/^(?:"([^"]+)"|([^\s<>|]+))(.*)$/);
+    if (!match) return command;
+
+    const executable = (match[1] ?? match[2] ?? '').trim();
+    const rest = match[3] ?? '';
+
+    // Only adjust if the executable looks like a path (contains a slash or starts with ./)
+    let normalizedExec = executable;
+    if (executable.startsWith('./')) {
+      normalizedExec = '.\\' + executable.slice(2);
+    }
+    if (/\//.test(normalizedExec)) {
+      // Replace forward slashes with backslashes in the executable part only
+      normalizedExec = normalizedExec.replace(/\//g, '\\');
+    }
+
+    // Re-wrap in quotes if the original was quoted
+    const wasQuoted = !!match[1];
+    const finalExec = wasQuoted ? `"${normalizedExec}"` : normalizedExec;
+    return `${finalExec}${rest}`;
   }
 
   /**
@@ -219,7 +254,8 @@ export class CommandExecutor {
     const child = spawn(command, {
       shell: true,
       cwd: options.cwd,
-      detached: true,
+      // if on window, we cannot use detached processes properly
+      detached: process.platform !== 'win32',
     });
 
     this.activeProcesses.add(child);
@@ -337,11 +373,6 @@ export class CommandExecutor {
     collectors.isResolved = true;
     result.timedOut = true;
 
-    this.killProcessTree(child.pid!);
-    setTimeout(() => child.kill('SIGKILL'), KILL_GRACE_PERIOD_MS);
-
-    this.activeProcesses.delete(child);
-
     Object.assign(result, {
       stdout: collectors.stdout,
       stderr: `Command timed out after ${options.timeout}ms`,
@@ -355,12 +386,42 @@ export class CommandExecutor {
       );
     }
 
-    if (options.onTimeout) {
-      options.onTimeout(result);
-      resolve(result);
-    } else {
-      reject(new Error(`Process killed after ${options.timeout}ms timeout`));
-    }
+    // Kill process and wait for cleanup before resolving
+    this.killProcessTree(child.pid!);
+
+    const finalizeTimeout = () => {
+      child.kill('SIGSEGV');
+
+      // On Windows, wait for file handles to be released before resolving
+      const cleanupDelay = process.platform === 'win32' ? 1000 : 0;
+
+      setTimeout(() => {
+        this.activeProcesses.delete(child);
+
+        if (options.onTimeout) {
+          this.cleanup()
+            .then(() => {
+              try {
+                options.onTimeout!(result);
+                resolve(result);
+              } catch (error) {
+                reject(
+                  error instanceof Error ? error : new Error(String(error))
+                );
+              }
+            })
+            .catch(error =>
+              reject(error instanceof Error ? error : new Error(String(error)))
+            );
+        } else {
+          reject(
+            new Error(`Process killed after ${options.timeout}ms timeout`)
+          );
+        }
+      }, cleanupDelay);
+    };
+
+    setTimeout(finalizeTimeout, KILL_GRACE_PERIOD_MS);
   }
 
   /**
@@ -392,22 +453,33 @@ export class CommandExecutor {
   ) {
     child.on('close', (code, signal) => {
       if (collectors.isResolved) return;
-
-      this.activeProcesses.delete(child);
       collectors.isResolved = true;
       cancelTimeout();
-      try {
-        this.handleProcessClose(
-          code,
-          signal,
-          options,
-          result,
-          collectors,
-          resolve,
-          reject
-        );
-      } catch (error) {
-        reject(error instanceof Error ? error : new Error(String(error)));
+
+      // On Windows, add a small delay to ensure file handles are released
+
+      const cleanup = () => {
+        this.activeProcesses.delete(child);
+        try {
+          this.handleProcessClose(
+            code,
+            signal,
+            options,
+            result,
+            collectors,
+            resolve,
+            reject
+          );
+        } catch (error) {
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
+      };
+
+      if (process.platform === 'win32') {
+        setTimeout(cleanup, 50);
+      } else {
+        this.activeProcesses.delete(child);
+        cleanup();
       }
     });
 
@@ -680,12 +752,14 @@ export class CommandExecutor {
         });
       } else {
         try {
-          process.kill(-pid, 'SIGKILL');
+          process.kill(-pid, 'SIGSEGV');
         } catch {
-          process.kill(pid, 'SIGKILL');
+          process.kill(pid, 'SIGSEGV');
         }
       }
-    } catch {
+    } catch (error) {
+      console.log(error);
+
       // Process already terminated
     }
   }
@@ -747,8 +821,24 @@ export class CommandExecutor {
     outputFile?: string
   ): string {
     let result = command;
-    if (inputFile) result = `${result} < ${inputFile}`;
-    if (outputFile) result = `${result} > ${outputFile}`;
+    // Normalize file paths for the current platform and quote for spaces
+    const normalizePathForPlatform = (p: string) => {
+      if (process.platform !== 'win32') return p;
+      let q = p;
+      if (q.startsWith('./')) q = '.\\' + q.slice(2);
+      if (q.startsWith('../')) q = '..\\' + q.slice(3);
+      q = q.replace(/\//g, '\\');
+      return q;
+    };
+
+    if (inputFile) {
+      const inPath = normalizePathForPlatform(inputFile);
+      result = `${result} < "${inPath}"`;
+    }
+    if (outputFile) {
+      const outPath = normalizePathForPlatform(outputFile);
+      result = `${result} > "${outPath}"`;
+    }
     return result;
   }
 
@@ -769,16 +859,25 @@ export class CommandExecutor {
    * Clean up all active processes and clear temp file registry.
    * Kills any running processes and resets internal state.
    * Should be called when shutting down or after batch operations.
+   * On Windows, waits for file handles to be released.
+   *
+   * @returns {Promise<void>} Resolves when cleanup is complete
    *
    * @example
    * try {
    *   await runAllTests();
    * } finally {
-   *   executor.cleanup();
+   *   await executor.cleanup();
    * }
    */
-  cleanup() {
+  async cleanup(): Promise<void> {
     this.killAllActiveProcesses();
+
+    // On Windows, wait for file handles to be released
+    if (process.platform === 'win32' && this.activeProcesses.size > 0) {
+      await new Promise(resolve => setTimeout(resolve, 150));
+    }
+
     this.activeProcesses.clear();
     this.tempFiles = [];
   }
@@ -796,7 +895,7 @@ export class CommandExecutor {
    */
   private killAllActiveProcesses() {
     for (const process of this.activeProcesses) {
-      if (process.pid && !process.killed) {
+      if (process.pid) {
         try {
           this.killProcessTree(process.pid);
           process.kill('SIGKILL');
