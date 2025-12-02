@@ -7,23 +7,57 @@ import type { Problem, ProblemInfo } from '../../types';
 /**
  * Normalizes line endings in content from Polygon API.
  * Converts Windows-style (\r\n) line endings to Unix-style (\n).
+ * Handles mixed/corrupted encodings by processing all variants.
  *
  * @param {string} content - Content with potentially mixed line endings
  * @returns {string} Content with normalized line endings
  */
 export function normalizeLineEndingsFromWinToUnix(content: string): string {
-  return content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  // Handle all possible line ending combinations
+  // 1. First normalize \r\n to \n (Windows to Unix)
+  // 2. Then normalize any remaining \r to \n (old Mac style)
+  // 3. Finally collapse multiple consecutive newlines if corrupted
+  return content
+    .replace(/\r\n/g, '\n') // Windows CRLF -> Unix LF
+    .replace(/\r/g, '\n') // Old Mac CR -> Unix LF
+    .replace(/\n{3,}/g, '\n\n'); // Collapse 3+ newlines to max 2 (preserve paragraph breaks)
 }
 
 /**
  * Normalizes line endings in content for Windows systems.
  * Converts Unix-style (\n) line endings to Windows-style (\r\n).
+ * Handles mixed/corrupted encodings by first normalizing to Unix, then converting.
  *
  * @param {string} content - Content with potentially mixed line endings
  * @returns {string} Content with normalized line endings
  */
 export function normalizeLineEndingsFromUnixToWin(content: string): string {
-  return content.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
+  // First normalize everything to Unix-style (handles mixed encodings)
+  // Then convert all Unix line endings to Windows style
+  return content
+    .replace(/\r\n/g, '\n') // Existing Windows CRLF -> Unix LF
+    .replace(/\r/g, '\n') // Old Mac CR -> Unix LF
+    .replace(/\n{3,}/g, '\n\n') // Collapse excessive newlines
+    .replace(/\n/g, '\r\n'); // Convert all Unix LF -> Windows CRLF
+}
+
+export function normalizeLineEndingsFromRemoteToSystem(
+  content: string
+): string {
+  if (process.platform === 'win32') {
+    return content;
+  } else {
+    return normalizeLineEndingsFromWinToUnix(content);
+  }
+}
+
+export function normalizeLineEndingsFromSystemToRemote(
+  content: string
+): string {
+  if (process.platform === 'win32') {
+    return content;
+  }
+  return normalizeLineEndingsFromUnixToWin(content);
 }
 
 /**

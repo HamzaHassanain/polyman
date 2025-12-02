@@ -35,5 +35,6 @@
     "moduleDetection": "force",
     "skipLibCheck": true
   },
+  "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "src/md-to-pdf.ts"]
 }
