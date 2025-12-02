@@ -61,10 +61,10 @@ Windows uses backslashes (`\`) for file paths, while Unix-based systems use forw
 I had a hard time trying to ensure the proper cleanup of the processes terminated duo to time limit exceeded on Windows,
 Most of the time, you will find that the processes are not being killed properly, leading to resource leaks and other unexpected behavior.
 
-That is most of the time you will recive that error saying:
+That is most of the time you will recive that error saying something like:
 
 ```
-
+EBUSY: resource busy or locked, open 'C:\Users\hamza\sum-problem\solutions-outputs\tlee\tests\output_test1.txt'
 ```
 
 This error mostly happens while wrting to files that are being used by another process (the one that was not killed properly).
@@ -78,3 +78,11 @@ If you face compilation errors that you are sure are not related to your code, t
 ## Notes Regarding Polygon
 
 I found no way to disable the automatic update of the checker, so it will give you a warning (when useing a standard checker). You may need to consider doing that manually if you want to avoid that warning.
+
+## Notes Regarding The Validators new line.
+
+Please keep in mind that on Windows, the new line character is represented by a carriage return followed by a line feed (`\r\n`), while on Unix-based systems, it is represented by just a line feed (`\n`). Also keep in mind that some code editors will use `\n` even on Windows.
+
+So when you write a manual test case for your validator, make sure to use the correct new line character based on the operating system you are using.
+
+Best option is to use the windows Text Editor (the built-in one) to write your test cases, as it will use the correct new line characters for your OS.

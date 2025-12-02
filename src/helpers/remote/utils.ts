@@ -45,7 +45,7 @@ export function normalizeLineEndingsFromRemoteToSystem(
   content: string
 ): string {
   if (process.platform === 'win32') {
-    return normalizeLineEndingsFromUnixToWin(content);
+    return content;
   } else {
     return normalizeLineEndingsFromWinToUnix(content);
   }
@@ -54,6 +54,9 @@ export function normalizeLineEndingsFromRemoteToSystem(
 export function normalizeLineEndingsFromSystemToRemote(
   content: string
 ): string {
+  if (process.platform === 'win32') {
+    return content;
+  }
   return normalizeLineEndingsFromUnixToWin(content);
 }
 
