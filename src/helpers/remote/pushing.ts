@@ -9,7 +9,7 @@ import { CheckerTest, PolygonSDK, ValidatorTest } from '../../polygon';
 import type ConfigFile from '../../types';
 import { fmt } from '../../formatter';
 import { logError, throwError } from '../utils';
-import { normalizeLineEndingsFromUnixToWin } from './utils';
+import { normalizeLineEndingsFromSystemToRemote } from './utils';
 import { GeneratorScriptCommand, LocalTestset, TestOptions } from '../../types';
 
 /**
@@ -40,7 +40,7 @@ export async function uploadSolutions(
         throw new Error(`Solution file not found: ${solution.source}`);
       }
 
-      const code = normalizeLineEndingsFromUnixToWin(
+      const code = normalizeLineEndingsFromSystemToRemote(
         fs.readFileSync(solutionPath, 'utf-8')
       );
       const filename = path.basename(solution.source);
@@ -100,7 +100,7 @@ export async function uploadChecker(
       throw new Error(`Checker file not found: ${checker.source}`);
     }
 
-    const code = normalizeLineEndingsFromUnixToWin(
+    const code = normalizeLineEndingsFromSystemToRemote(
       fs.readFileSync(checkerPath, 'utf-8')
     );
     const filename = path.basename(checker.source);
@@ -134,9 +134,9 @@ export async function uploadChecker(
                 await sdk.saveCheckerTest(
                   problemId,
                   test.index,
-                  normalizeLineEndingsFromUnixToWin(test.input),
-                  normalizeLineEndingsFromUnixToWin(test.output),
-                  normalizeLineEndingsFromUnixToWin(test.answer),
+                  normalizeLineEndingsFromSystemToRemote(test.input),
+                  normalizeLineEndingsFromSystemToRemote(test.output),
+                  normalizeLineEndingsFromSystemToRemote(test.answer),
                   checkerVerdict
                 );
               }
@@ -179,7 +179,7 @@ export async function uploadValidator(
       throw new Error(`Validator file not found: ${config.validator.source}`);
     }
 
-    const code = normalizeLineEndingsFromUnixToWin(
+    const code = normalizeLineEndingsFromSystemToRemote(
       fs.readFileSync(validatorPath, 'utf-8')
     );
     const filename = path.basename(config.validator.source);
@@ -214,7 +214,7 @@ export async function uploadValidator(
                 await sdk.saveValidatorTest(
                   problemId,
                   test.index ? test.index : index++,
-                  normalizeLineEndingsFromUnixToWin(test.input),
+                  normalizeLineEndingsFromSystemToRemote(test.input),
                   validatorVerdict
                 );
               }
@@ -261,7 +261,7 @@ export async function uploadGenerators(
         throw new Error(`Generator file not found: ${generator.source}`);
       }
 
-      const code = normalizeLineEndingsFromUnixToWin(
+      const code = normalizeLineEndingsFromSystemToRemote(
         fs.readFileSync(genPath, 'utf-8')
       );
       const filename = path.basename(generator.source);
@@ -319,7 +319,7 @@ export async function uploadStatements(
         const legendPath = path.resolve(problemDir, statement.legend);
 
         if (fs.existsSync(legendPath)) {
-          statementData['legend'] = normalizeLineEndingsFromUnixToWin(
+          statementData['legend'] = normalizeLineEndingsFromSystemToRemote(
             fs.readFileSync(legendPath, 'utf-8')
           );
         }
@@ -328,7 +328,7 @@ export async function uploadStatements(
       if (statement.input) {
         const inputPath = path.resolve(problemDir, statement.input);
         if (fs.existsSync(inputPath)) {
-          statementData['input'] = normalizeLineEndingsFromUnixToWin(
+          statementData['input'] = normalizeLineEndingsFromSystemToRemote(
             fs.readFileSync(inputPath, 'utf-8')
           );
         }
@@ -337,7 +337,7 @@ export async function uploadStatements(
       if (statement.output) {
         const outputPath = path.resolve(problemDir, statement.output);
         if (fs.existsSync(outputPath)) {
-          statementData['output'] = normalizeLineEndingsFromUnixToWin(
+          statementData['output'] = normalizeLineEndingsFromSystemToRemote(
             fs.readFileSync(outputPath, 'utf-8')
           );
         }
@@ -346,7 +346,7 @@ export async function uploadStatements(
       if (statement.notes) {
         const notesPath = path.resolve(problemDir, statement.notes);
         if (fs.existsSync(notesPath)) {
-          statementData['notes'] = normalizeLineEndingsFromUnixToWin(
+          statementData['notes'] = normalizeLineEndingsFromSystemToRemote(
             fs.readFileSync(notesPath, 'utf-8')
           );
         }
@@ -355,7 +355,7 @@ export async function uploadStatements(
       if (statement.tutorial) {
         const tutorialPath = path.resolve(problemDir, statement.tutorial);
         if (fs.existsSync(tutorialPath)) {
-          statementData['tutorial'] = normalizeLineEndingsFromUnixToWin(
+          statementData['tutorial'] = normalizeLineEndingsFromSystemToRemote(
             fs.readFileSync(tutorialPath, 'utf-8')
           );
         }
@@ -364,7 +364,7 @@ export async function uploadStatements(
       if (statement.interaction) {
         const interactionPath = path.resolve(problemDir, statement.interaction);
         if (fs.existsSync(interactionPath)) {
-          statementData['interaction'] = normalizeLineEndingsFromUnixToWin(
+          statementData['interaction'] = normalizeLineEndingsFromSystemToRemote(
             fs.readFileSync(interactionPath, 'utf-8')
           );
         }
@@ -373,7 +373,7 @@ export async function uploadStatements(
       if (statement.scoring) {
         const scoringPath = path.resolve(problemDir, statement.scoring);
         if (fs.existsSync(scoringPath)) {
-          statementData['scoring'] = normalizeLineEndingsFromUnixToWin(
+          statementData['scoring'] = normalizeLineEndingsFromSystemToRemote(
             fs.readFileSync(scoringPath, 'utf-8')
           );
         }
@@ -617,7 +617,7 @@ function createManaulTestsPromises(
         throw new Error(`Manual test file not found: ${command.manualFile}`);
       }
 
-      const input = normalizeLineEndingsFromUnixToWin(
+      const input = normalizeLineEndingsFromSystemToRemote(
         fs.readFileSync(testPath, 'utf-8')
       );
 

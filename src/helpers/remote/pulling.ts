@@ -17,7 +17,7 @@ import type {
   StatementConfig,
 } from '../../types';
 import { fmt } from '../../formatter';
-import { normalizeLineEndingsFromWinToUnix } from './utils';
+import { normalizeLineEndingsFromRemoteToSystem } from './utils';
 
 /**
  * Downloads all solutions from Polygon and returns metadata.
@@ -46,7 +46,7 @@ export async function downloadSolutions(
         const targetPath = path.join(problemDir, 'solutions', solution.name);
         fs.writeFileSync(
           targetPath,
-          normalizeLineEndingsFromWinToUnix(code),
+          normalizeLineEndingsFromRemoteToSystem(code),
           'utf-8'
         );
         count++;
@@ -100,7 +100,7 @@ export async function downloadChecker(
       const targetPath = path.join(problemDir, 'checker', checkerName);
       fs.writeFileSync(
         targetPath,
-        normalizeLineEndingsFromWinToUnix(checkerCode),
+        normalizeLineEndingsFromRemoteToSystem(checkerCode),
         'utf-8'
       );
       count++;
@@ -112,13 +112,13 @@ export async function downloadChecker(
         const normalizedTests = checkerTests.map(test => ({
           ...test,
           input: test.input
-            ? normalizeLineEndingsFromWinToUnix(test.input)
+            ? normalizeLineEndingsFromRemoteToSystem(test.input)
             : test.input,
           output: test.output
-            ? normalizeLineEndingsFromWinToUnix(test.output)
+            ? normalizeLineEndingsFromRemoteToSystem(test.output)
             : test.output,
           answer: test.answer
-            ? normalizeLineEndingsFromWinToUnix(test.answer)
+            ? normalizeLineEndingsFromRemoteToSystem(test.answer)
             : test.answer,
         }));
         const testsPath = path.join(
@@ -187,7 +187,7 @@ export async function downloadValidator(
     const targetPath = path.join(problemDir, 'validator', validatorName);
     fs.writeFileSync(
       targetPath,
-      normalizeLineEndingsFromWinToUnix(validatorCode),
+      normalizeLineEndingsFromRemoteToSystem(validatorCode),
       'utf-8'
     );
     count++;
@@ -199,7 +199,7 @@ export async function downloadValidator(
       const normalizedTests = validatorTests.map(test => ({
         ...test,
         input: test.input
-          ? normalizeLineEndingsFromWinToUnix(test.input)
+          ? normalizeLineEndingsFromRemoteToSystem(test.input)
           : test.input,
       }));
       const testsPath = path.join(
@@ -276,7 +276,7 @@ export async function downloadGenerators(
         const targetPath = path.join(problemDir, 'generators', file.name);
         fs.writeFileSync(
           targetPath,
-          normalizeLineEndingsFromWinToUnix(content),
+          normalizeLineEndingsFromRemoteToSystem(content),
           'utf-8'
         );
         count++;
@@ -341,7 +341,7 @@ export async function downloadStatements(
       if (statement.legend) {
         fs.writeFileSync(
           path.join(langDir, 'legend.tex'),
-          normalizeLineEndingsFromWinToUnix(statement.legend),
+          normalizeLineEndingsFromRemoteToSystem(statement.legend),
           'utf-8'
         );
         langConfig['legend'] = `./statements/${lang}/legend.tex`;
@@ -351,7 +351,7 @@ export async function downloadStatements(
       if (statement.input) {
         fs.writeFileSync(
           path.join(langDir, 'input-format.tex'),
-          normalizeLineEndingsFromWinToUnix(statement.input),
+          normalizeLineEndingsFromRemoteToSystem(statement.input),
           'utf-8'
         );
         langConfig['input'] = `./statements/${lang}/input-format.tex`;
@@ -361,7 +361,7 @@ export async function downloadStatements(
       if (statement.output) {
         fs.writeFileSync(
           path.join(langDir, 'output-format.tex'),
-          normalizeLineEndingsFromWinToUnix(statement.output),
+          normalizeLineEndingsFromRemoteToSystem(statement.output),
           'utf-8'
         );
         langConfig['output'] = `./statements/${lang}/output-format.tex`;
@@ -371,7 +371,7 @@ export async function downloadStatements(
       if (statement.notes) {
         fs.writeFileSync(
           path.join(langDir, 'notes.tex'),
-          normalizeLineEndingsFromWinToUnix(statement.notes),
+          normalizeLineEndingsFromRemoteToSystem(statement.notes),
           'utf-8'
         );
         langConfig['notes'] = `./statements/${lang}/notes.tex`;
@@ -381,7 +381,7 @@ export async function downloadStatements(
       if (statement.tutorial) {
         fs.writeFileSync(
           path.join(langDir, 'tutorial.tex'),
-          normalizeLineEndingsFromWinToUnix(statement.tutorial),
+          normalizeLineEndingsFromRemoteToSystem(statement.tutorial),
           'utf-8'
         );
         langConfig['tutorial'] = `./statements/${lang}/tutorial.tex`;
@@ -391,7 +391,7 @@ export async function downloadStatements(
       if (statement.interaction) {
         fs.writeFileSync(
           path.join(langDir, 'interaction.tex'),
-          normalizeLineEndingsFromWinToUnix(statement.interaction),
+          normalizeLineEndingsFromRemoteToSystem(statement.interaction),
           'utf-8'
         );
         langConfig['interaction'] = `./statements/${lang}/interaction.tex`;
@@ -401,7 +401,7 @@ export async function downloadStatements(
       if (statement.scoring) {
         fs.writeFileSync(
           path.join(langDir, 'scoring.tex'),
-          normalizeLineEndingsFromWinToUnix(statement.scoring),
+          normalizeLineEndingsFromRemoteToSystem(statement.scoring),
           'utf-8'
         );
         langConfig['scoring'] = `./statements/${lang}/scoring.tex`;
