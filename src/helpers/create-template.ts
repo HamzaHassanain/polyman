@@ -45,10 +45,10 @@ export function logTemplateCreationSuccess(directory: string) {
     `    ${fmt.primary('6.')} Run ${fmt.highlight('polyman verify')} for full verification`
   );
   fmt.log(
-    `    ${fmt.primary('Quick TUTORIAL ->')} Visit ${fmt.highlight('https://github.com/HamzaHassanain/polyman/blob/master/template/TUTORIAL.md')}`
+    `    ${fmt.primary('Quick TUTORIAL ->')} Visit ${fmt.highlight('https://github.com/HamzaHassanain/polyman/blob/master/TUTORIAL.md')}`
   );
   fmt.log(
-    `    ${fmt.primary('Full Guide ->')} Visit ${fmt.highlight('https://github.com/HamzaHassanain/polyman/blob/master/template/GUIDE.md')}`
+    `    ${fmt.primary('Full Guide ->')} Visit ${fmt.highlight('https://github.com/HamzaHassanain/polyman/blob/master/GUIDE.md')}`
   );
   console.log();
 }

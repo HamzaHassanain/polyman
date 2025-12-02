@@ -13,10 +13,7 @@ export function validateGeneratorCommands(
   availableGenerators: string[]
 ): void {
   for (const command of commands) {
-    if (
-      command.type === 'generator-single' ||
-      command.type === 'generator-range'
-    ) {
+    if (command.type === 'generator') {
       if (!command.generator) {
         throw new Error('Generator command missing generator name');
       }

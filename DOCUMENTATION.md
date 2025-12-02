@@ -254,7 +254,7 @@ interface LocalValidator {
 
 ```typescript
 interface GeneratorScriptCommand {
-  type: 'generator-single' | 'manual' | 'generator-range';
+  type:  'manual' | 'generator';
   generator?: string;
   number?: number;
   index?: number;
@@ -2113,7 +2113,7 @@ The `Config.json` file is the heart of every Polyman problem, defining all metad
       "generatorScript": {
         "commands": [
           {
-            "type": "generator-range",
+            "type": "generator",
             "generator": "gen-all",
             "range": [1, 20],
             "group": "main"
@@ -3076,7 +3076,7 @@ Important considerations for development, deployment, and platform-specific beha
 ## Related Documentation
 
 - **User Guide:** `README.md`
-- **Template Guide:** `template/GUIDE.md`
+- **Template Guide:** `GUIDE.md`
 - **Testlib Documentation:** [testlib on GitHub](https://github.com/MikeMirzayanov/testlib)
 - **Polygon System:** [Codeforces Polygon](https://polygon.codeforces.com/)
 

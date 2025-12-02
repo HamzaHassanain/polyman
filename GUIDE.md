@@ -549,13 +549,7 @@ Testsets are collections of test cases that define how your problem will be test
             "group": "samples" // Group assignment (required if groupsEnabled: true)
           },
           {
-            "type": "generator-single",
-            "generator": "gen-random",
-            "number": 10,
-            "group": "main"
-          },
-          {
-            "type": "generator-range",
+            "type": "generator",
             "generator": "gen-random",
             "range": [100, 130],
             "group": "main"
@@ -645,9 +639,9 @@ Executes a generator once with a specific parameter.
 
 ```json
 {
-  "type": "generator-single", // Required: Command type
+  "type": "generator", // Required: Command type
   "generator": "gen-random", // Required: Generator name (must be defined in generators)
-  "number": 42, // Required: Parameter passed to generator
+  "range": [42, 42], // Required: [start, end] inclusive range (same value for single call)
   "group": "main" // Required if groupsEnabled: true
 }
 ```
@@ -671,23 +665,11 @@ Executes a generator once with a specific parameter.
 {
   "commands": [
     {
-      "type": "generator-single",
+      "type": "generator",
       "generator": "gen-random",
-      "number": 10,
+      "range": [10, 10],
       "group": "small"
     },
-    {
-      "type": "generator-single",
-      "generator": "gen-random",
-      "number": 1000,
-      "group": "main"
-    },
-    {
-      "type": "generator-single",
-      "generator": "gen-random",
-      "number": 100000,
-      "group": "stress"
-    }
   ]
 }
 ```
@@ -723,7 +705,7 @@ Executes a generator multiple times with different parameters.
 
 ```json
 {
-  "type": "generator-range", // Required: Command type
+  "type": "generator", // Required: Command type
   "generator": "gen-random", // Required: Generator name
   "range": [1, 100], // Required: [start, end] inclusive range
   "group": "stress" // Required if groupsEnabled: true
@@ -749,13 +731,13 @@ Executes a generator multiple times with different parameters.
 {
   "commands": [
     {
-      "type": "generator-range",
+      "type": "generator",
       "generator": "gen-random",
       "range": [1, 10],
       "group": "small"
     },
     {
-      "type": "generator-range",
+      "type": "generator",
       "generator": "gen-random",
       "range": [100, 1000],
       "group": "main"
@@ -793,25 +775,13 @@ Executes a generator multiple times with different parameters.
       "group": "samples"
     },
     {
-      "type": "generator-range",
+      "type": "generator",
       "generator": "gen-random",
       "range": [1, 10],
       "group": "small"
     },
     {
-      "type": "generator-single",
-      "generator": "gen-random",
-      "number": 100,
-      "group": "main"
-    },
-    {
-      "type": "generator-single",
-      "generator": "gen-random",
-      "number": 1000,
-      "group": "main"
-    },
-    {
-      "type": "generator-range",
+      "type": "generator",
       "generator": "gen-random",
       "range": [10000, 10050],
       "group": "stress"
@@ -840,8 +810,7 @@ Tests are numbered sequentially starting from 1:
   "commands": [
     { "type": "manual", "manualFile": "./tests/manual/sample1.txt" }, // test1.txt
     { "type": "manual", "manualFile": "./tests/manual/sample2.txt" }, // test2.txt
-    { "type": "generator-single", "generator": "gen", "number": 10 }, // test3.txt
-    { "type": "generator-range", "generator": "gen", "range": [1, 3] } // test4.txt, test5.txt, test6.txt
+    { "type": "generator", "generator": "gen", "range": [1, 3] } // test4.txt, test5.txt, test6.txt
   ]
 }
 ```
@@ -882,7 +851,7 @@ You can specify the test number explicitly for manual tests:
         "commands": [
           { "type": "manual", "manualFile": "./tests/manual/sample1.txt" },
           { "type": "manual", "manualFile": "./tests/manual/sample2.txt" },
-          { "type": "generator-range", "generator": "gen", "range": [1, 50] }
+          { "type": "generator", "generator": "gen", "range": [1, 50] }
         ]
       }
     }
@@ -919,25 +888,11 @@ You can specify the test number explicitly for manual tests:
 
           // Main tests
           {
-            "type": "generator-range",
+            "type": "generator",
             "generator": "gen-random",
             "range": [10, 100],
             "group": "main"
           },
-
-          // Edge cases
-          {
-            "type": "generator-single",
-            "generator": "gen-edge",
-            "number": 1,
-            "group": "edge"
-          },
-          {
-            "type": "generator-single",
-            "generator": "gen-edge",
-            "number": 100000,
-            "group": "edge"
-          }
         ]
       }
     }
@@ -983,7 +938,7 @@ You can specify the test number explicitly for manual tests:
 
           // Random tests
           {
-            "type": "generator-range",
+            "type": "generator",
             "generator": "gen-random",
             "range": [1, 30],
             "group": "random"
@@ -991,25 +946,25 @@ You can specify the test number explicitly for manual tests:
 
           // Worst case tests
           {
-            "type": "generator-range",
+            "type": "generator",
             "generator": "gen-worst",
             "range": [1, 20],
             "group": "worst"
           },
 
-          // Special cases
-          {
-            "type": "generator-single",
-            "generator": "gen-special",
-            "number": 1,
-            "group": "special"
-          },
-          {
-            "type": "generator-single",
-            "generator": "gen-special",
-            "number": 2,
-            "group": "special"
-          }
+            // Special cases
+            {
+              "type": "generator",
+              "generator": "gen-special",
+              "range": [1, 1],
+              "group": "special"
+            },
+            {
+              "type": "generator",
+              "generator": "gen-special",
+              "range": [2, 2],
+              "group": "special"
+            }
         ]
       }
     }
@@ -1054,11 +1009,11 @@ You can specify the test number explicitly for manual tests:
 
    ```json
    // ✅ Good: One command for 100 tests
-   {"type": "generator-range", "generator": "gen", "range": [1, 100]}
+   {"type": "generator", "generator": "gen", "range": [1, 100]}
 
-   // ❌ Bad: 100 separate commands
-   {"type": "generator-single", "generator": "gen", "number": 1}
-   {"type": "generator-single", "generator": "gen", "number": 2}
+    // ❌ Bad: 100 separate commands
+    {"type": "generator", "generator": "gen", "range": [1, 1]}
+    {"type": "generator", "generator": "gen", "range": [2, 2]}
    // ... (98 more)
    ```
 
@@ -1127,7 +1082,7 @@ You can specify the test number explicitly for manual tests:
   "testsets": [{
     "generatorScript": {
       "commands": [
-        {"type": "generator-single", "generator": "gen-wrong", "number": 10}  // ❌ "gen-wrong" doesn't exist
+        {"type": "generator", "generator": "gen-wrong", "range": [10, 10]}  // ❌ "gen-wrong" doesn't exist
       ]
     }
   }]
@@ -1141,7 +1096,7 @@ You can specify the test number explicitly for manual tests:
   "testsets": [{
     "generatorScript": {
       "commands": [
-        {"type": "generator-single", "generator": "gen-random", "number": 10}  // ✅ Matches defined generator
+        {"type": "generator", "generator": "gen-random", "range": [10, 10]}  // ✅ Matches defined generator
       ]
     }
   }]
@@ -1189,8 +1144,7 @@ testsets/
 | Command Type         | Purpose                      | Creates | Use When                                |
 | -------------------- | ---------------------------- | ------- | --------------------------------------- |
 | **manual**           | Use pre-written file         | 1 test  | Sample tests, specific edge cases       |
-| **generator-single** | Run generator once           | 1 test  | Specific parameter values               |
-| **generator-range**  | Run generator multiple times | N tests | Many similar tests with different sizes |
+| **generator**  | Run generator multiple times | N tests | Many similar tests with different sizes |
 
 **Key Points:**
 
@@ -1219,7 +1173,7 @@ testsets/
 
           // 30-50 main tests
           {
-            "type": "generator-range",
+            "type": "generator",
             "generator": "gen-random",
             "range": [10, 60],
             "group": "main"
@@ -1227,17 +1181,11 @@ testsets/
 
           // 5-10 edge cases
           {
-            "type": "generator-single",
+            "type": "generator",
             "generator": "gen-edge",
-            "number": 1,
+            "range": [1, 10],
             "group": "edge"
           },
-          {
-            "type": "generator-single",
-            "generator": "gen-edge",
-            "number": 100000,
-            "group": "edge"
-          }
         ]
       }
     }
@@ -1721,9 +1669,9 @@ Use generator commands:
 
 ```json
 {
-  "type": "generator-single",
+  "type": "generator",
   "generator": "gen-random",
-  "number": 42,
+  "range": [42, 42],
   "group": "main"
 }
 ```
@@ -1969,11 +1917,7 @@ polyman generate --all
    - Creates directory `testsets/<testset-name>/`
    - **For each command in generatorScript:**
      - **If manual:** Copies file from `manualFile` path
-     - **If generator-single:**
-       - Compiles generator if needed
-       - Runs `./generator <number>`
-       - Saves output to `test<N>.txt`
-     - **If generator-range:**
+     - **If generator:**
        - Compiles generator if needed
        - Runs generator for each number in range
        - Saves each output to `test<N>.txt`

@@ -313,6 +313,7 @@ The `Config.json` file tells Polyman about your problem. Open it and update it t
 
   "checker": {
     "name": "ncmp",
+    "source": "ncmp.cpp",
     "isStandard": true
   },
 
@@ -327,7 +328,7 @@ The `Config.json` file tells Polyman about your problem. Open it and update it t
       "generatorScript": {
         "commands": [
           {
-            "type": "generator-range",
+            "type": "generator",
             "generator": "gen",
             "range": [1, 10],
             "group": "main"
@@ -531,7 +532,7 @@ Update the `testsets` section in `Config.json`:
           "group": "samples"
         },
         {
-          "type": "generator-range",
+          "type": "generator",
           "generator": "gen",
           "range": [3, 12],
           "group": "main"
@@ -561,7 +562,7 @@ Update the `testsets` section in `Config.json`:
    - We have two manual test commands, one for each sample
 
 2. **Generated tests (3-12):** These will be created by the generator
-   - `"type": "generator-range"` means use a generator
+   - `"type": "generator"` means use a generator
    - `"range": [3, 12]` means generate tests 3 through 12 (10 tests)
    - `"group": "main"` puts them in the main group
 

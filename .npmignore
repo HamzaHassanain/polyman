@@ -49,9 +49,9 @@ logo.png
 *.gif
 
 # PDF documentation (use online docs instead)
-template/GUIDE.pdf
-template/GUIDE.md
-template/TUTORIAL.md
+./GUIDE.pdf
+./GUIDE.md
+./TUTORIAL.md
 # *.pdf
 
 # Git files

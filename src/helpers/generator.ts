@@ -50,18 +50,18 @@ export async function runGenerator(
       timeout: DEFAULT_TIMEOUT,
       memoryLimitMB: DEFAULT_MEMORY_LIMIT,
       silent: true,
-      onTimeout: () => {
+      onTimeout: async () => {
         fmt.error(
           `${fmt.cross()} ${fmt.bold('Generator Unexpectedly Exceeded Time Limit!')} (${DEFAULT_TIMEOUT}ms)`
         );
-        executor.cleanup();
+        await executor.cleanup();
         process.exit(1);
       },
-      onMemoryExceeded: () => {
+      onMemoryExceeded: async () => {
         fmt.error(
           `${fmt.cross()} ${fmt.bold('Generator Unexpectedly Exceeded Memory Limit!')} (${DEFAULT_MEMORY_LIMIT} MB)`
         );
-        executor.cleanup();
+        await executor.cleanup();
         process.exit(1);
       },
     },
@@ -141,11 +141,7 @@ export async function compileAllGenerators(
   const compiledGenerators = new Map<string, string>();
 
   for (const command of commands) {
-    if (
-      (command.type === 'generator-single' ||
-        command.type === 'generator-range') &&
-      command.generator
-    ) {
+    if (command.type === 'generator' && command.generator) {
       if (!compiledGenerators.has(command.generator)) {
         const generator = generators.find(g => g.name === command.generator);
         if (!generator) {
@@ -191,11 +187,7 @@ export async function compileGeneratorsForTestsets(
   for (const testset of testsets) {
     if (testset.generatorScript?.commands) {
       for (const command of testset.generatorScript.commands) {
-        if (
-          (command.type === 'generator-single' ||
-            command.type === 'generator-range') &&
-          command.generator
-        ) {
+        if (command.type === 'generator' && command.generator) {
           uniqueGeneratorNames.add(command.generator);
         }
       }
@@ -230,7 +222,6 @@ export async function compileGeneratorsForTestsets(
  * await executeGeneratorScript(
  *   [
  *     { type: 'manual', manualFile: './tests/manual/sample.txt' },
- *     { type: 'generator-single', generator: 'gen-random', args: ['1'] }
  *   ],
  *   generators,
  *   './tests/my-testset'
@@ -258,19 +249,7 @@ export async function executeGeneratorScript(
         // Copy manual test file
         const testFilePath = path.join(testsDir, `test${testNumber++}.txt`);
         await copyManualTest(command.manualFile, testFilePath);
-      } else if (command.type === 'generator-single' && command.generator) {
-        // Run generator once
-        const testFilePath = path.join(testsDir, `test${testNumber++}.txt`);
-        const compiledPath = compiledGenerators.get(command.generator);
-        if (!compiledPath) {
-          throw new Error(`Generator "${command.generator}" not compiled`);
-        }
-        await runGenerator(
-          compiledPath,
-          [command.number!.toString()],
-          testFilePath
-        );
-      } else if (command.type === 'generator-range' && command.generator) {
+      } else if (command.type === 'generator' && command.generator) {
         // Run generator multiple times for a range
         const compiledPath = compiledGenerators.get(command.generator);
         if (!compiledPath) {

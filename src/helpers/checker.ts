@@ -66,18 +66,18 @@ export async function runChecker(
         }
         didCatchInvalid = true;
       },
-      onTimeout: () => {
+      onTimeout: async () => {
         fmt.error(
           `${fmt.cross()} ${fmt.bold('Checker Unexpectedly Exceeded Time Limit!')} (${DEFAULT_TIMEOUT}ms)`
         );
-        executor.cleanup();
+        await executor.cleanup();
         process.exit(1);
       },
-      onMemoryExceeded: () => {
+      onMemoryExceeded: async () => {
         fmt.error(
           `${fmt.cross()} ${fmt.bold('Checker Unexpectedly Exceeded Memory Limit!')} (${DEFAULT_MEMORY_LIMIT} MB)`
         );
-        executor.cleanup();
+        await executor.cleanup();
         process.exit(1);
       },
     }
@@ -141,9 +141,10 @@ export async function testCheckerItself() {
     }
 
     if (!config.checker.testsFilePath) {
-      throw new Error(
-        'Checker tests file path is not specified in the configuration.'
+      fmt.warning(
+        'No checker tests file path specified in configuration. Skipping checker self-tests.'
       );
+      return;
     }
 
     await makeCheckerTests(config.checker.testsFilePath);
@@ -151,7 +152,7 @@ export async function testCheckerItself() {
   } catch (error) {
     throwError(error, 'Failed to test checker');
   } finally {
-    executor.cleanup();
+    await executor.cleanup();
     removeDirectoryRecursively('checker_tests');
   }
 }
@@ -242,7 +243,7 @@ export async function runCheckerTests(checker: LocalChecker) {
   } catch (error) {
     throwError(error, 'Failed to run checker tests');
   } finally {
-    executor.cleanup();
+    await executor.cleanup();
   }
 
   if (someFailed) throw new Error('Some checker tests failed');
