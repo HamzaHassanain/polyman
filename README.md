@@ -383,13 +383,9 @@ Polyman provides complete integration with Codeforces Polygon, allowing you to w
 ### Setup
 
 **`polyman remote register`**
-Register your Polygon API credentials (API key and secret). Credentials are securely stored in `~/.polyman/credentials.json`.
 
 ```bash
-polyman remote register
-# You'll be prompted for:
-# - API Key
-# - API Secret
+polyman remote register <api-key> <api-secret>
 ```
 
 **Getting API Credentials:**
@@ -408,7 +404,6 @@ List all problems accessible on your Polygon account.
 
 **Options:**
 
-- `--id-only` - Display only problem IDs (useful for scripts)
 - `--owner <handle>` - Filter by owner handle
 
 Examples:
