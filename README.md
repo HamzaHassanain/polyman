@@ -396,7 +396,7 @@ polyman remote register
 
 1. Visit [https://polygon.codeforces.com](https://polygon.codeforces.com/)
 2. Log in to your account.
-3. On the top left, go to settings.
+3. On the top right, go to settings.
 4. Go down to the bottom, and select API Keys.
 5. Generate an API key and secret
 6. Use `polyman remote register` to save them
