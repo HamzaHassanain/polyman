@@ -716,10 +716,12 @@ Before you can work with Polygon, you need to register your API credentials once
 
 #### Get Your API Credentials
 
-1. Go to [Polygon API Help](https://polygon.codeforces.com/api/help)
-2. Log in with your Codeforces account
-3. Click on "Generate API Key" or use your existing key
-4. You'll see:
+1. Visit [https://polygon.codeforces.com](https://polygon.codeforces.com/)
+2. Log in to your account.
+3. On the top right, go to settings.
+4. Go down to the bottom, and select API Keys.
+5. Generate an API key and secret
+6. You'll see:
    - **API Key** (a long string like `abc123def456...`)
    - **API Secret** (another long string)
 5. Copy both of these
@@ -732,11 +734,6 @@ Run:
 polyman remote register <api-key> <api-secret>
 ```
 
-You'll be prompted to enter:
-
-- **API Key**: Paste your API key
-- **API Secret**: Paste your API secret
-
 These credentials are securely stored in your local machine for future use.
 
 #### Push Your Prblem to Polygon
@@ -745,7 +742,7 @@ These credentials are securely stored in your local machine for future use.
 polyman remote push . . -a
 ```
 
-The first `.` refers to your local problem directory that has a Config.json that has a problem id, if it does not have a problem id, it will create a new problem on polygon and set the problem id in the Config.json file. The first `.` can also be replaced with your problem's ID.
+The first `.` refers to your local problem directory that has a Config.json that has a problem id. If it does not have a problem id, it will create a new problem on polygon and set the problem ID in the Config.json file. The first `.` can also be replaced with your problem's ID.
 
 The second `.` refers to the directory of your problem to be pushed to polygon.
 
@@ -754,7 +751,7 @@ The second `.` refers to the directory of your problem to be pushed to polygon.
 To save your changes permanently to Polygon's repository:
 
 ```bash
-polyman remote commit . -m "Updated solutions and added new test cases"
+polyman remote commit . "Updated solutions and added new test cases"
 ```
 
 ### Building Packages
@@ -769,7 +766,7 @@ polyman remote package . standard
 Polyman will:
 
 1. Request package build from Polygon
-2. Poll every 60 seconds to check if it's ready
+2. Poll every 30 seconds to check if it's ready
 3. Wait up to 30 minutes
 
 You'll see status updates like:
@@ -824,10 +821,6 @@ polyman remote view 123456
 - Make sure all solutions compile on Polygon's servers
 - Verify validator and checker work correctly
 
-**Q: "I don't want to upload all my tests (too many/too large)"**
-
-- Use `--skip-tests` flag: `polyman remote push . --skip-tests`
-- You can generate tests directly on Polygon instead
 
 ---
 
@@ -844,27 +837,6 @@ Congratulations! You've created your first competitive programming problem and l
 5. **Custom checker** - For a problem with multiple valid answers, write a custom checker
 6. **Work with Polygon** - Use `polyman remote` commands to sync with Codeforces Polygon
 
-### Remote Operations Quick Start
-
-If you want to work with Polygon, here's a quick workflow:
-
-```bash
-# Register your API credentials (one-time)
-polyman remote register <api-key> <secret>
-
-# Pull a problem from Polygon
-polyman remote pull 123456 ./my-problem
-
-# Work on it locally...
-# Then push changes back
-polyman remote push ./my-problem
-
-# Commit your changes
-polyman remote commit ./my-problem -m "Updated solutions"
-
-# Build a package
-polyman remote package ./my-problem standard
-```
 
 ### Learning Resources
 
@@ -872,33 +844,6 @@ polyman remote package ./my-problem standard
 - **testlib.h Documentation**: [https://github.com/MikeMirzayanov/testlib](https://github.com/MikeMirzayanov/testlib)
 - **Polygon Platform**: [https://polygon.codeforces.com/](https://polygon.codeforces.com/)
 - **Polyman Commands**: Run `polyman --help` to see all available commands
-
-### Common Issues and Solutions
-
-**Q: "Validator failed - integer out of range"**
-
-- Check your generator creates numbers within 1-1000
-- Make sure validator limits match your problem constraints
-
-**Q: "Solution gets TLE (Time Limit Exceeded)"**
-
-- Increase `timeLimit` in Config.json
-- Or optimize your solution
-
-**Q: "Checker says Wrong Answer but output looks correct"**
-
-- Make sure output format exactly matches (spaces, newlines)
-- Use `polyman test checker` to test your checker
-
-**Q: "Generator creates invalid tests"**
-
-- Run `polyman validate -a` to see which tests fail
-- Fix the generator to follow validator rules
-
-**Q: "Can't find testlib.h"**
-
-- Make sure you ran `polyman download-testlib` in your problem directory
-- The file should be in your problem root folder
 
 ---
 
