@@ -394,9 +394,12 @@ polyman remote register
 
 **Getting API Credentials:**
 
-1. Visit [https://polygon.codeforces.com/api/help](https://polygon.codeforces.com/api/help)
-2. Generate an API key and secret
-3. Use `polyman remote register` to save them
+1. Visit [https://polygon.codeforces.com](https://polygon.codeforces.com/)
+2. Log in to your account.
+3. On the top left, go to settings.
+4. Go down to the bottom, and select API Keys.
+5. Generate an API key and secret
+6. Use `polyman remote register` to save them
 
 ### Problem Management
 
@@ -412,7 +415,6 @@ Examples:
 
 ```bash
 polyman remote list                    # List all problems with details
-polyman remote list --id-only          # List only problem IDs
 polyman remote list --owner tourist    # List problems owned by tourist
 ```
 
@@ -428,10 +430,6 @@ polyman remote view 123456
 **`polyman remote pull <problemId> <directory> [options]`**
 Download a problem from Polygon to work on locally. Creates complete problem structure with all components.
 
-**Options:**
-
-- `--skip-tests` - Don't download test files (useful for large test sets)
-- `--skip-statements` - Don't download problem statements
 
 **Downloads:**
 
@@ -446,21 +444,22 @@ Download a problem from Polygon to work on locally. Creates complete problem str
 Examples:
 
 ```bash
-polyman remote pull 123456 ./my-problem           # Full download
-polyman remote pull 123456 ./my-problem --skip-tests  # Skip tests
+polyman remote pull 123456 ./my-problem           # Full download, by default, testsets are not included
+polyman remote pull 123456 ./my-problem -t tests  # spacify the testset to download
 ```
 
 **`polyman remote push <directory> [options]`**
-Upload your local changes back to Polygon. Updates all problem components on Polygon.
+Upload your local changes back to Polygon. Updates all problem components on Polygon. 
+
+By default, it pushes ALL the changes to Polygon.
 
 **Options:**
 
-- `--skip-tests` - Don't upload test files
-- `--skip-statements` - Don't upload problem statements
-- `--skip-solutions` - Don't upload solution files
-- `--skip-checker` - Don't upload checker
-- `--skip-validator` - Don't upload validator
-- `--skip-generators` - Don't upload generator files
+- `-t <testset-name>` - upload testset files
+- `-s` - upload solution files
+- `-c` - upload checker
+- `-v` - upload validator
+- `-g` - upload generator files
 
 **Uploads:**
 
@@ -481,29 +480,20 @@ polyman remote push ./my-problem --skip-tests     # Push without tests
 
 **Important:** After pushing, your changes are in the working copy. Use `commit` to save them to the repository.
 
-**`polyman remote commit <directory> -m <message>`**
+**`polyman remote commit <problem-id> <message>`**
 Commit your changes to the Polygon repository with a descriptive message.
+Careful, the problem ID may be replaced by the directory containing `Config.json`
 
 ```bash
-polyman remote commit ./my-problem -m "Added new test cases"
-polyman remote commit ./my-problem -m "Fixed validator bug"
+polyman remote commit ./my-problem "Added new test cases."
+polyman remote commit ./my-problem "Fixed validator bug"
 ```
 
 ### Package Building
 
-**`polyman remote package <directory> [options]`**
-Build a complete problem package on Polygon. The tool waits for the package to finish building (polls every 60 seconds, maximum 30 minutes).
+**`polyman remote package <problem-id> <package-type>`**
+Build a complete problem package on Polygon. The tool waits for the package to finish building (polls every 30 seconds, maximum 30 minutes).
 
-**Options:**
-
-- `--full` - Build full package (default: standard package)
-- `--verify` - Verify package during build
-
-```bash
-polyman remote package ./my-problem              # Build standard package
-polyman remote package ./my-problem --full       # Build full package
-polyman remote package ./my-problem --full --verify  # Build and verify
-```
 
 **Package States:**
 
@@ -516,7 +506,7 @@ polyman remote package ./my-problem --full --verify  # Build and verify
 
 ```bash
 # 1. Register API credentials (one-time setup)
-polyman remote register
+polyman remote register <api-key> <api-secret>
 
 # 2. List your problems
 polyman remote list
@@ -533,13 +523,13 @@ vim generators/new-gen.cpp
 polyman verify
 
 # 6. Push changes to Polygon
-polyman remote push .
+polyman remote push . .
 
 # 7. Commit changes
-polyman remote commit . -m "Added optimized solution and harder tests"
+polyman remote commit ."Added optimized solution and harder tests."
 
 # 8. Build package
-polyman remote package . --full --verify
+polyman remote package . standard
 ```
 
 ## Solution Types
@@ -661,6 +651,7 @@ Configure a standard checker in `Config.json`:
 {
   "checker": {
     "name": "ncmp",
+    "source": "ncmp.cpp",
     "isStandard": true
   }
 }
@@ -795,6 +786,7 @@ int main(int argc, char* argv[]) {
   ],
   "checker": {
     "name": "ncmp",
+    "source": "ncmp.cpp",
     "isStandard": true
   },
   "validator": {
