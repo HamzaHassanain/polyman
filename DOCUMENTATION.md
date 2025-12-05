@@ -254,7 +254,7 @@ interface LocalValidator {
 
 ```typescript
 interface GeneratorScriptCommand {
-  type:  'manual' | 'generator';
+  type: 'manual' | 'generator';
   generator?: string;
   number?: number;
   index?: number;
@@ -773,13 +773,13 @@ interface PushOptions {
 
 ```bash
 # Push everything (default)
-polyman remote push ./my-problem
+polyman remote push . ./my-problem
 
 # Push only solutions and checker
-polyman remote push ./my-problem -s -c
+polyman remote push . ./my-problem -s -c
 
 # Push only tests
-polyman remote push ./my-problem -t
+polyman remote push . ./my-problem -t
 ```
 
 **Important Notes:**
@@ -787,6 +787,7 @@ polyman remote push ./my-problem -t
 - Line endings are automatically normalized (Unix → Windows)
 - Manual tests are uploaded in parallel for performance
 - Changes are NOT automatically committed (use `polyman remote commit`)
+- If you replace the problem ID with a directory path that Contains `Config.json` that has a valid problem ID, it will be used.
 
 ---
 
@@ -2659,7 +2660,7 @@ Success! Problem ready for local work
 ```
 User Command
     ↓
-polyman remote push ./my-problem
+polyman remote push . ./my-problem
     ↓
 remotePushProblemAction
     ↓

@@ -75,6 +75,7 @@
     - [Setup and Registration](#setup-and-registration)
     - [Listing Problems](#listing-problems)
     - [Pulling Problems](#pulling-problems)
+    - [Quick Note before you read on:](#quick-note-before-you-read-on)
     - [Pushing Problems](#pushing-problems)
     - [Viewing Problem Details](#viewing-problem-details)
     - [Committing Changes](#committing-changes)
@@ -2606,6 +2607,11 @@ Lists only problems owned by the specified user.
 
 Download an existing problem from Polygon to your local machine.
 
+#### Quick Note before you read on:
+
+Any value spacifed by `<problem-id>` can be resolved normaly if you prodive the relative path to a folder containing a `Config.json` file with a valid problem ID. This way you can avoid looking up the problem ID on Polygon website.
+
+
 #### Basic Pull
 
 ```bash
@@ -2707,13 +2713,13 @@ Upload your local problem changes to Polygon.
 #### Basic Push
 
 ```bash
-polyman remote push <directory>
+polyman remote push <problem-id> <directory>
 ```
 
 **Example:**
 
 ```bash
-polyman remote push ./my-problem
+polyman remote push 123456 ./my-problem
 ```
 
 **What Happens:**
@@ -2748,16 +2754,16 @@ Push only specific components:
 
 ```bash
 # Push only solutions and checker
-polyman remote push ./my-problem -s -c
+polyman remote push 123456 ./my-problem -s -c
 
 # Push only tests
-polyman remote push ./my-problem -t
+polyman remote push 123456 ./my-problem -t
 
 # Push everything except tests
-polyman remote push ./my-problem -s -c -v -g -S -m -i
+polyman remote push 123456 ./my-problem -s -c -v -g -S -m -i
 
 # Push everything (default)
-polyman remote push ./my-problem --all
+polyman remote push 123456 ./my-problem --all
 ```
 
 **Available Options:**
@@ -2779,6 +2785,7 @@ polyman remote push ./my-problem --all
 - After pushing, you must **commit changes** on Polygon
 - Use selective push to update specific parts without affecting others
 - Always pull before pushing to avoid conflicts
+- If you replace the problem ID with a directory path that Contains `Config.json` that has a valid problem ID, it will be used.
 
 ---
 
@@ -3037,13 +3044,13 @@ polyman verify
 
 ```bash
 # Push all changes
-polyman remote push .
+polyman remote push 123456 ./my-problem
 
 # Or push selectively
-polyman remote push . -s -c -t
+polyman remote push 123456 ./my-problem -sct  # Solutions, checker, tests
 
 # Commit changes
-polyman remote commit . "Updated solutions and added stress tests"
+polyman remote commit ./my-problem "Updated solutions and added stress tests"
 ```
 
 #### 5. Build and Test Package
@@ -3065,10 +3072,10 @@ polyman remote pull 123456 ./my-problem
 polyman verify
 
 # Push updates
-polyman remote push .
+polyman remote push 123456 ./my-problem
 
 # Commit
-polyman remote commit . "Fixed edge cases"
+polyman remote commit ./my-problem "Fixed edge cases"
 ```
 
 ---
@@ -3079,20 +3086,14 @@ polyman remote commit . "Fixed edge cases"
 
 **✅ Do's:**
 
-1. **Always pull before pushing**
-   ```bash
-   polyman remote pull 123456 ./problem
-   # Make changes
-   polyman remote push ./problem
-   ```
 
-2. **Use selective push for quick updates**
+1. **Use selective push for quick updates**
    ```bash
    # Only updated solutions
-   polyman remote push . -s
+   polyman remote push . . -s
    
    # Only updated tests
-   polyman remote push . -t
+   polyman remote push . . -t
    ```
 
 3. **Commit frequently with descriptive messages**
@@ -3105,7 +3106,7 @@ polyman remote commit . "Fixed edge cases"
 4. **Test locally before pushing**
    ```bash
    polyman verify  # Always verify before pushing
-   polyman remote push .
+   polyman remote push . .
    ```
 
 5. **View problem details to verify**
@@ -3113,6 +3114,18 @@ polyman remote commit . "Fixed edge cases"
    polyman remote view 123456
    # Verify your changes are correct
    ```
+6. **Make sure your `pwd` contains `Config.json` when using `.` as problem identifier.**
+  ```bash
+   pwd
+   cat Config.json
+  {
+    ...Config content with problemId
+    "problemId": 123456,  
+    ... 
+  }
+
+  polyman remote push . . # Push changes to problem 123456
+  ```
 
 **❌ Don'ts:**
 
@@ -3135,42 +3148,6 @@ polyman remote commit . "Fixed edge cases"
    - Test thoroughly with self-tests
    - Verify compilation succeeds
 
-#### Managing Multiple Problems
-
-```bash
-# Organize by problem name/ID
-mkdir -p polygon-problems
-cd polygon-problems
-
-# Pull multiple problems
-polyman remote pull 123456 ./problem-a
-polyman remote pull 789012 ./problem-b
-polyman remote pull 345678 ./problem-c
-
-# Work on each independently
-cd problem-a
-polyman verify
-polyman remote push .
-polyman remote commit . "Updates"
-```
-
-#### Team Collaboration
-
-```bash
-# Person A: Makes changes
-polyman remote pull 123456 ./problem
-# Edit files...
-polyman remote push ./problem
-polyman remote commit ./problem "Added generator"
-
-# Person B: Gets updates
-polyman remote pull 123456 ./problem  # Overwrites local with Polygon version
-# Edit different files...
-polyman remote push ./problem
-polyman remote commit ./problem "Updated checker"
-```
-
-**⚠️ Note:** Polygon doesn't have built-in merge conflict resolution. Coordinate with your team to avoid simultaneous edits to the same files.
 
 ---
 
@@ -3211,8 +3188,8 @@ ls -la <file-path>
 cat Config.json | grep problemId
 
 # Try selective push to isolate issue
-polyman remote push . -s  # Just solutions
-polyman remote push . -c  # Just checker
+polyman remote push . . -s  # Just solutions
+polyman remote push . . -c  # Just checker
 ```
 
 #### Package Build Timeout
