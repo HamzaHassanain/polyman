@@ -84,8 +84,8 @@ polyman remote register
 polyman remote pull 123456 ./my-problem
 
 # Work locally, then push back
-polyman remote push .
-polyman remote commit . -m "Updated solutions"
+polyman remote push . .
+polyman remote commit . "Updated solutions"
 ```
 
 ## Commands
@@ -104,14 +104,14 @@ polyman remote commit . -m "Updated solutions"
 
 ### Polygon Commands
 
-| Command                                | Purpose              |
-| -------------------------------------- | -------------------- |
-| `polyman remote register`              | Save API credentials |
-| `polyman remote list`                  | List your problems   |
-| `polyman remote pull <id> <dir>`       | Download problem     |
-| `polyman remote push <dir>`            | Upload changes       |
-| `polyman remote commit <dir> -m "msg"` | Commit changes       |
-| `polyman remote package <dir> <type>`  | Build package        |
+| Command                              | Purpose              |
+| ------------------------------------ | -------------------- |
+| `polyman remote register`            | Save API credentials |
+| `polyman remote list`                | List your problems   |
+| `polyman remote pull <id> <dir>`     | Download problem     |
+| `polyman remote push <id> <dir>`     | Upload changes       |
+| `polyman remote commit <id> "msg"`   | Commit changes       |
+| `polyman remote package <id> <type>` | Build package        |
 
 For detailed usage, see [GUIDE.md](GUIDE.md#cli-commands-reference).
 
