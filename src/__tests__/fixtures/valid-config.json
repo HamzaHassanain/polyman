@@ -1,0 +1,85 @@
+{
+  "problemId": 12345,
+  "name": "test-problem",
+  "owner": "testuser",
+  "revision": 1,
+  "timeLimit": 2000,
+  "memoryLimit": 256,
+  "inputFile": "stdin",
+  "outputFile": "stdout",
+  "interactive": false,
+  "tags": ["math", "implementation"],
+  "description": "Test problem description",
+  "tutorial": "Test tutorial",
+  "statements": {
+    "english": {
+      "encoding": "UTF-8",
+      "name": "A+B Problem",
+      "legend": "statements/english/legend.tex",
+      "input": "statements/english/input.tex",
+      "output": "statements/english/output.tex",
+      "notes": "statements/english/notes.tex"
+    }
+  },
+  "solutions": [
+    {
+      "name": "main",
+      "source": "solutions/main.cpp",
+      "tag": "MA",
+      "sourceType": "cpp.g++17"
+    },
+    {
+      "name": "wrong",
+      "source": "solutions/wrong.cpp",
+      "tag": "WA",
+      "sourceType": "cpp.g++17"
+    }
+  ],
+  "generators": [
+    {
+      "name": "gen-random",
+      "source": "generators/gen-random.cpp",
+      "sourceType": "cpp.g++17"
+    }
+  ],
+  "checker": {
+    "name": "wcmp",
+    "source": "wcmp.cpp",
+    "isStandard": true,
+    "sourceType": "cpp.g++17"
+  },
+  "validator": {
+    "name": "validator",
+    "source": "validators/validator.cpp",
+    "sourceType": "cpp.g++17"
+  },
+  "testsets": [
+    {
+      "name": "tests",
+      "generatorScript": {
+        "commands": [
+          {
+            "type": "manual",
+            "manualFile": "tests/manual/sample1.txt",
+            "group": "samples"
+          },
+          {
+            "type": "generator",
+            "generator": "gen-random",
+            "args": ["10", "100"]
+          }
+        ]
+      },
+      "groupsEnabled": true,
+      "pointsEnabled": false,
+      "groups": [
+        {
+          "name": "samples",
+          "pointsPolicy": "EACH_TEST",
+          "feedbackPolicy": "COMPLETE",
+          "dependencies": []
+        }
+      ]
+    }
+  ]
+}

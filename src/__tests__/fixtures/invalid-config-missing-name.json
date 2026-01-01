@@ -1,0 +1,17 @@
+{
+  "timeLimit": 2000,
+  "memoryLimit": 256,
+  "inputFile": "stdin",
+  "outputFile": "stdout",
+  "interactive": false,
+  "statements": {},
+  "solutions": [],
+  "checker": {
+    "name": "wcmp",
+    "source": "wcmp.cpp"
+  },
+  "validator": {
+    "name": "validator",
+    "source": "validators/validator.cpp"
+  }
+}
