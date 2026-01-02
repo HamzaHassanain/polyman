@@ -691,21 +691,21 @@ describe('CommandExecutor', () => {
       const mockChild = createMockChild();
       mockSpawn.mockReturnValue(mockChild);
       const onTimeout = vi.fn();
-      
+
       const promise = executor.execute('slow', { timeout: 100, onTimeout });
-      
+
       // Trigger timeout
       await vi.advanceTimersByTimeAsync(1000);
-      
+
       // Now trigger close - should be ignored
       const handleCloseSpy = vi.spyOn(executor as any, 'handleProcessClose');
       mockChild.emit('close', 0, null);
-      
+
       await promise;
-      
+
       expect(onTimeout).toHaveBeenCalled();
       expect(handleCloseSpy).not.toHaveBeenCalled();
-      
+
       vi.useRealTimers();
     });
 
@@ -713,17 +713,20 @@ describe('CommandExecutor', () => {
       vi.useFakeTimers();
       const mockChild = createMockChild();
       mockSpawn.mockReturnValue(mockChild);
-      
-      const promise = executor.execute('slow', { timeout: 100, onTimeout: vi.fn() });
-      
+
+      const promise = executor.execute('slow', {
+        timeout: 100,
+        onTimeout: vi.fn(),
+      });
+
       await vi.advanceTimersByTimeAsync(1000);
-      
+
       // Trigger error - should be ignored
       const handleErrorSpy = vi.spyOn(executor as any, 'handleProcessError');
       mockChild.emit('error', new Error('Late Error'));
-      
+
       await promise;
-      
+
       expect(handleErrorSpy).not.toHaveBeenCalled();
       vi.useRealTimers();
     });
@@ -732,236 +735,257 @@ describe('CommandExecutor', () => {
       const mockChild = createMockChild();
       mockSpawn.mockReturnValue(mockChild);
       const onMemoryExceeded = vi.fn();
-      
+
       const { fmt } = await import('../src/formatter');
-      
-      const promise = executor.execute('oom', { 
-        timeout: 1000, 
+
+      const promise = executor.execute('oom', {
+        timeout: 1000,
         silent: true,
-        onMemoryExceeded
+        onMemoryExceeded,
       });
 
       mockChild.emit('close', 137, null);
       await promise;
-      
+
       expect(onMemoryExceeded).toHaveBeenCalled();
       expect(fmt.warning).not.toHaveBeenCalled();
     });
-    
+
     it('should handle silent mode for process errors', async () => {
-        const mockChild = createMockChild();
-        mockSpawn.mockReturnValue(mockChild);
-        
-        const { fmt } = await import('../src/formatter');
-        
-        const promise = executor.execute('fail', { 
-            timeout: 1000, 
-            silent: true 
-        });
-        
-        mockChild.emit('error', new Error('Spawn fail'));
-        await expect(promise).rejects.toThrow();
-        
-        expect(fmt.error).not.toHaveBeenCalled();
+      const mockChild = createMockChild();
+      mockSpawn.mockReturnValue(mockChild);
+
+      const { fmt } = await import('../src/formatter');
+
+      const promise = executor.execute('fail', {
+        timeout: 1000,
+        silent: true,
+      });
+
+      mockChild.emit('error', new Error('Spawn fail'));
+      await expect(promise).rejects.toThrow();
+
+      expect(fmt.error).not.toHaveBeenCalled();
     });
 
     it('should handle Windows redirection with parent directory (../)', async () => {
-        Object.defineProperty(process, 'platform', { value: 'win32' });
-        const mockChild = createMockChild();
-        mockSpawn.mockReturnValue(mockChild);
-        
-        const promise = executor.executeWithRedirect('cmd', { timeout: 1000 }, '../input.txt', '../output.txt');
-        mockChild.emit('close', 0);
-        await promise;
-        
-        const cmd = mockSpawn.mock.calls[0][0];
-        expect(cmd).toContain('..\\input.txt');
-        expect(cmd).toContain('..\\output.txt');
-        
-        Object.defineProperty(process, 'platform', { value: 'linux' });
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+      const mockChild = createMockChild();
+      mockSpawn.mockReturnValue(mockChild);
+
+      const promise = executor.executeWithRedirect(
+        'cmd',
+        { timeout: 1000 },
+        '../input.txt',
+        '../output.txt'
+      );
+      mockChild.emit('close', 0);
+      await promise;
+
+      const cmd = mockSpawn.mock.calls[0][0];
+      expect(cmd).toContain('..\\input.txt');
+      expect(cmd).toContain('..\\output.txt');
+
+      Object.defineProperty(process, 'platform', { value: 'linux' });
     });
-    
+
     it('should handle killing process that is already dead in cleanup', async () => {
-        const mockChild = createMockChild();
-        mockChild.kill.mockImplementation(() => { throw new Error('Process dead'); });
-        mockSpawn.mockReturnValue(mockChild);
-        
-        void executor.execute('run', { timeout: 1000 });
-        
-        // Should not throw
-        await executor.cleanup();
-        expect(mockChild.kill).toHaveBeenCalledWith('SIGKILL');
+      const mockChild = createMockChild();
+      mockChild.kill.mockImplementation(() => {
+        throw new Error('Process dead');
+      });
+      mockSpawn.mockReturnValue(mockChild);
+
+      void executor.execute('run', { timeout: 1000 });
+
+      // Should not throw
+      await executor.cleanup();
+      expect(mockChild.kill).toHaveBeenCalledWith('SIGKILL');
     });
 
     it('should handle handleProcessClose without silence and with success', async () => {
-        const mockChild = createMockChild();
-        mockSpawn.mockReturnValue(mockChild);
-        const { fmt } = await import('../src/formatter');
-        
-        const promise = executor.execute('ok', { timeout: 1000, silent: false });
-        
-        // Emit data after listener attached
-        mockChild.stdout.emit('data', 'Output');
-        mockChild.emit('close', 0);
-        
-        await promise;
-        expect(fmt.dim).toHaveBeenCalledWith('Output');
+      const mockChild = createMockChild();
+      mockSpawn.mockReturnValue(mockChild);
+      const { fmt } = await import('../src/formatter');
+
+      const promise = executor.execute('ok', { timeout: 1000, silent: false });
+
+      // Emit data after listener attached
+      mockChild.stdout.emit('data', 'Output');
+      mockChild.emit('close', 0);
+
+      await promise;
+      expect(fmt.dim).toHaveBeenCalledWith('Output');
     });
 
     it('should handle memory error message explicitly', async () => {
-        const mockChild = createMockChild();
-        mockSpawn.mockReturnValue(mockChild);
-        const onMemoryExceeded = vi.fn();
-        
-        const promise = executor.execute('oom', { 
-            timeout: 1000,
-            onMemoryExceeded
-        });
-        
-        mockChild.stderr.emit('data', 'MemoryError: Out of memory');
-        mockChild.emit('close', 1);
-        
-        await promise;
-        expect(onMemoryExceeded).toHaveBeenCalled();
+      const mockChild = createMockChild();
+      mockSpawn.mockReturnValue(mockChild);
+      const onMemoryExceeded = vi.fn();
+
+      const promise = executor.execute('oom', {
+        timeout: 1000,
+        onMemoryExceeded,
+      });
+
+      mockChild.stderr.emit('data', 'MemoryError: Out of memory');
+      mockChild.emit('close', 1);
+
+      await promise;
+      expect(onMemoryExceeded).toHaveBeenCalled();
     });
 
     it('should normalize executable path starting with ./ on Windows', async () => {
-        Object.defineProperty(process, 'platform', { value: 'win32' });
-        const mockChild = createMockChild();
-        mockSpawn.mockReturnValue(mockChild);
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+      const mockChild = createMockChild();
+      mockSpawn.mockReturnValue(mockChild);
 
-        const promise = executor.execute('./solution', { timeout: 1000 });
-        mockChild.emit('close', 0);
-        await promise;
+      const promise = executor.execute('./solution', { timeout: 1000 });
+      mockChild.emit('close', 0);
+      await promise;
 
-        const cmd = mockSpawn.mock.calls[0][0];
-        expect(cmd).toEqual('.\\solution');
+      const cmd = mockSpawn.mock.calls[0][0];
+      expect(cmd).toEqual('.\\solution');
 
-        Object.defineProperty(process, 'platform', { value: 'linux' });
+      Object.defineProperty(process, 'platform', { value: 'linux' });
     });
-    
+
     it('should normalize executable path containing / on Windows', async () => {
-        Object.defineProperty(process, 'platform', { value: 'win32' });
-        const mockChild = createMockChild();
-        mockSpawn.mockReturnValue(mockChild);
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+      const mockChild = createMockChild();
+      mockSpawn.mockReturnValue(mockChild);
 
-        const promise = executor.execute('bin/solution', { timeout: 1000 });
-        mockChild.emit('close', 0);
-        await promise;
+      const promise = executor.execute('bin/solution', { timeout: 1000 });
+      mockChild.emit('close', 0);
+      await promise;
 
-        const cmd = mockSpawn.mock.calls[0][0];
-        expect(cmd).toEqual('bin\\solution');
+      const cmd = mockSpawn.mock.calls[0][0];
+      expect(cmd).toEqual('bin\\solution');
 
-        Object.defineProperty(process, 'platform', { value: 'linux' });
+      Object.defineProperty(process, 'platform', { value: 'linux' });
     });
 
     it('should handle timeout without onTimeout callback (fallback path)', async () => {
-        vi.useFakeTimers();
-        const mockChild = createMockChild();
-        mockSpawn.mockReturnValue(mockChild);
+      vi.useFakeTimers();
+      const mockChild = createMockChild();
+      mockSpawn.mockReturnValue(mockChild);
 
-        const promise = executor.execute('sleep', { timeout: 100 });
-        
-        const testPromise = expect(promise).rejects.toThrow('Process killed after 100ms timeout');
-        await vi.advanceTimersByTimeAsync(1000);
-        
-        await testPromise;
-        vi.useRealTimers();
+      const promise = executor.execute('sleep', { timeout: 100 });
+
+      const testPromise = expect(promise).rejects.toThrow(
+        'Process killed after 100ms timeout'
+      );
+      await vi.advanceTimersByTimeAsync(1000);
+
+      await testPromise;
+      vi.useRealTimers();
     });
     it('should handle partial redirection (input only)', async () => {
-        const mockChild = createMockChild();
-        mockSpawn.mockReturnValue(mockChild);
-        const promise = executor.executeWithRedirect('cmd', { timeout: 1000 }, 'in.txt');
-        mockChild.emit('close', 0);
-        await promise;
-        const cmd = mockSpawn.mock.calls[0][0];
-        expect(cmd).toContain('< "in.txt"');
-        expect(cmd).not.toContain('>');
+      const mockChild = createMockChild();
+      mockSpawn.mockReturnValue(mockChild);
+      const promise = executor.executeWithRedirect(
+        'cmd',
+        { timeout: 1000 },
+        'in.txt'
+      );
+      mockChild.emit('close', 0);
+      await promise;
+      const cmd = mockSpawn.mock.calls[0][0];
+      expect(cmd).toContain('< "in.txt"');
+      expect(cmd).not.toContain('>');
     });
 
     it('should handle partial redirection (output only)', async () => {
-        const mockChild = createMockChild();
-        mockSpawn.mockReturnValue(mockChild);
-        const promise = executor.executeWithRedirect('cmd', { timeout: 1000 }, undefined, 'out.txt');
-        mockChild.emit('close', 0);
-        await promise;
-        const cmd = mockSpawn.mock.calls[0][0];
-        expect(cmd).toContain('> "out.txt"');
-        expect(cmd).not.toContain('<');
+      const mockChild = createMockChild();
+      mockSpawn.mockReturnValue(mockChild);
+      const promise = executor.executeWithRedirect(
+        'cmd',
+        { timeout: 1000 },
+        undefined,
+        'out.txt'
+      );
+      mockChild.emit('close', 0);
+      await promise;
+      const cmd = mockSpawn.mock.calls[0][0];
+      expect(cmd).toContain('> "out.txt"');
+      expect(cmd).not.toContain('<');
     });
 
     it('should default exit code to 1 if null (signal termination)', async () => {
-        const mockChild = createMockChild();
-        mockSpawn.mockReturnValue(mockChild);
-        // Expect rejection because exit code 1 means failure
-        const promise = executor.execute('run', { timeout: 1000 });
-        mockChild.emit('close', null, 'SIGTERM');
-        
-        await expect(promise).rejects.toThrow();
+      const mockChild = createMockChild();
+      mockSpawn.mockReturnValue(mockChild);
+      // Expect rejection because exit code 1 means failure
+      const promise = executor.execute('run', { timeout: 1000 });
+      mockChild.emit('close', null, 'SIGTERM');
+
+      await expect(promise).rejects.toThrow();
     });
 
     it('should handle non-Error rejection in timeout cleanup', async () => {
-         vi.useFakeTimers();
-         const mockChild = createMockChild();
-         mockSpawn.mockReturnValue(mockChild);
-         
-         vi.spyOn(executor, 'cleanup').mockRejectedValue('String Error');
-         
-         const promise = executor.execute('run', { timeout: 100, onTimeout: vi.fn() });
-         const testPromise = expect(promise).rejects.toThrow('String Error');
-         
-         await vi.advanceTimersByTimeAsync(1000);
-         await testPromise;
-         vi.useRealTimers();
+      vi.useFakeTimers();
+      const mockChild = createMockChild();
+      mockSpawn.mockReturnValue(mockChild);
+
+      vi.spyOn(executor, 'cleanup').mockRejectedValue('String Error');
+
+      const promise = executor.execute('run', {
+        timeout: 100,
+        onTimeout: vi.fn(),
+      });
+      const testPromise = expect(promise).rejects.toThrow('String Error');
+
+      await vi.advanceTimersByTimeAsync(1000);
+      await testPromise;
+      vi.useRealTimers();
     });
-    
+
     it('should handle active process with no pid in cleanup', async () => {
-        const mockChild = createMockChild();
-        mockChild.pid = undefined;
-        // Manually add to set
-        (executor as any).activeProcesses.add(mockChild);
-        
-        await executor.cleanup();
-        // Should not throw and not call kill
-        expect(mockChild.kill).not.toHaveBeenCalled();
+      const mockChild = createMockChild();
+      mockChild.pid = undefined;
+      // Manually add to set
+      (executor as any).activeProcesses.add(mockChild);
+
+      await executor.cleanup();
+      // Should not throw and not call kill
+      expect(mockChild.kill).not.toHaveBeenCalled();
     });
 
     it('should ignore timeout if child is already killed', async () => {
-        vi.useFakeTimers();
-        const mockChild = createMockChild();
-        mockChild.killed = true;
-        mockSpawn.mockReturnValue(mockChild);
-        const onTimeout = vi.fn();
-        
-        const promise = executor.execute('run', { timeout: 100, onTimeout });
-        await vi.advanceTimersByTimeAsync(1000);
-        
-        expect(onTimeout).not.toHaveBeenCalled();
-        // Manually resolve promise to finish test
-        mockChild.emit('close', 0);
-        await promise;
-        vi.useRealTimers();
+      vi.useFakeTimers();
+      const mockChild = createMockChild();
+      mockChild.killed = true;
+      mockSpawn.mockReturnValue(mockChild);
+      const onTimeout = vi.fn();
+
+      const promise = executor.execute('run', { timeout: 100, onTimeout });
+      await vi.advanceTimersByTimeAsync(1000);
+
+      expect(onTimeout).not.toHaveBeenCalled();
+      // Manually resolve promise to finish test
+      mockChild.emit('close', 0);
+      await promise;
+      vi.useRealTimers();
     });
 
     it('should handle spawn with missing stdout/stderr', async () => {
-        const mockChild = createMockChild();
-        mockChild.stdout = undefined;
-        mockChild.stderr = undefined;
-        mockSpawn.mockReturnValue(mockChild);
-        
-        const promise = executor.execute('run', { timeout: 1000 });
-        mockChild.emit('close', 0);
-        const result = await promise;
-        expect(result.stdout).toBe('');
+      const mockChild = createMockChild();
+      mockChild.stdout = undefined;
+      mockChild.stderr = undefined;
+      mockSpawn.mockReturnValue(mockChild);
+
+      const promise = executor.execute('run', { timeout: 1000 });
+      mockChild.emit('close', 0);
+      const result = await promise;
+      expect(result.stdout).toBe('');
     });
-    
+
     it('should handle empty command string', async () => {
-        const mockChild = createMockChild();
-        mockSpawn.mockReturnValue(mockChild);
-        const promise = executor.execute('', { timeout: 1000 });
-        mockChild.emit('close', 0);
-        await promise;
-        expect(mockSpawn).toHaveBeenCalledWith('', expect.anything());
+      const mockChild = createMockChild();
+      mockSpawn.mockReturnValue(mockChild);
+      const promise = executor.execute('', { timeout: 1000 });
+      mockChild.emit('close', 0);
+      await promise;
+      expect(mockSpawn).toHaveBeenCalledWith('', expect.anything());
     });
   });
 });
