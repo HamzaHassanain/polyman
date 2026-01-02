@@ -1,7 +1,6 @@
 {
   "name": "polyman-cli",
   "version": "2.2.2",
-  "type": "module",
   "description": "Polyman is a CLI tool that will allow codeforces problem setters to never get out of their coding environment to create a new problem. You can create, test, or update your problems and then submit them to polygon directly from your terminal.",
   "author": "Hamza Hassanain",
   "license": "MIT",
