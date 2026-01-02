@@ -58,7 +58,7 @@ npm install -g polyman-cli
 
 Before we start coding, let's understand what makes up a competitive programming problem. Every problem needs these components:
 
-### 1. **Problem Statement** 📝
+### 1. **Problem Statement**
 
 The description contestants read. It explains:
 
@@ -70,7 +70,7 @@ The description contestants read. It explains:
 
 **Location:** `statements/english/` folder
 
-### 2. **Solution** 💻
+### 2. **Solution**
 
 The correct program that solves the problem. This is your reference answer.
 
@@ -80,7 +80,7 @@ The correct program that solves the problem. This is your reference answer.
 
 **Location:** `solutions/` folder
 
-### 3. **Validator** ✅
+### 3. **Validator**
 
 A program that checks if test **inputs** are valid according to your constraints.
 
@@ -90,7 +90,7 @@ A program that checks if test **inputs** are valid according to your constraints
 
 **Location:** `validator/` folder
 
-### 4. **Generator** 🎲
+### 4. **Generator**
 
 A program that automatically creates test cases.
 
@@ -103,7 +103,7 @@ A program that automatically creates test cases.
 
 **Location:** `generators/` folder
 
-### 5. **Checker** ⚖️
+### 5. **Checker**
 
 A program that compares contestant's output with the correct answer.
 
@@ -114,7 +114,7 @@ A program that compares contestant's output with the correct answer.
 
 **Location:** `checker/` folder (only needed for custom checkers)
 
-### 6. **Tests** 📁
+### 6. **Tests**
 
 The actual test input files used to judge solutions.
 
@@ -125,7 +125,7 @@ The actual test input files used to judge solutions.
 
 **Location:** `testsets/tests/` folder
 
-### 7. **Configuration** ⚙️
+### 7. **Configuration**
 
 The `Config.json` file that ties everything together:
 
@@ -693,16 +693,16 @@ This does everything:
 - Verifies solution verdicts match their tags
 - Reports any issues
 
-If everything is correct, you'll see a beautiful success message! 🎉
+If everything is correct, you'll see a beautiful success message!
 
 **What verification checks:**
 
-1. ✅ All tests are generated
-2. ✅ All tests pass validation
-3. ✅ Main solution compiles and runs
-4. ✅ Main solution produces correct output
-5. ✅ Checker correctly identifies correct/wrong answers
-6. ✅ All solution tags match their actual behavior
+1. All tests are generated
+2. All tests pass validation
+3. Main solution compiles and runs
+4. Main solution produces correct output
+5. Checker correctly identifies correct/wrong answers
+6. All solution tags match their actual behavior
 
 ---
 

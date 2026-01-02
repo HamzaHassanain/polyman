@@ -15,7 +15,7 @@
 
 ---
 
-**📚 Quick Links** | [Installation](#installation) • [Quick Start](#quick-start) • [Commands](#commands) • [Docs](#documentation) • [License](#license)
+**Quick Links** | [Why?](#why-polyman) • [Installation](#installation) • [Quick Start](#quick-start) • [Commands](#commands) • [Tags](#solution-tags) • [Checkers](#standard-checkers) • [Structure](#project-structure) • [Config](#configuration) • [Docs](#documentation) • [Workflow](#workflow-summary) • [Issues](#common-issues) • [Support](#support) • [Contributing](#contributing) • [License](#license)
 
 </div>
 
@@ -23,14 +23,14 @@
 
 Stop switching between environments. Create competitive programming problems entirely in your terminal:
 
-✅ **Problem Templates** – Generate complete folder structures in one command  
-✅ **Test Generation** – Automate test case creation with C++ generators  
-✅ **Validation** – Validate inputs against problem constraints  
-✅ **Multi-Solution Testing** – Test correct, wrong, TLE, and RE solutions simultaneously  
-✅ **Smart Checkers** – Use standard checkers or write custom ones  
-✅ **Complete Verification** – Full workflow in a single `verify` command  
-✅ **Polygon Sync** – Pull problems, work locally, push changes back  
-✅ **Multi-Language** – C++, Java, and Python support
+- **Problem Templates** – Generate complete folder structures in one command  
+- **Test Generation** – Automate test case creation with C++ generators  
+- **Validation** – Validate inputs against problem constraints  
+- **Multi-Solution Testing** – Test correct, wrong, TLE, and RE solutions simultaneously  
+- **Smart Checkers** – Use standard checkers or write custom ones  
+- **Complete Verification** – Full workflow in a single `verify` command  
+- **Polygon Sync** – Pull problems, work locally, push changes back  
+- **Multi-Language** – C++, Java, and Python support
 
 Polyman eliminates manual testing and syncing, letting you focus on problem design.
 
@@ -224,23 +224,23 @@ See [GUIDE.md - Configuration Reference](GUIDE.md#configuration-file-reference) 
 
 Choose your learning path:
 
-### 📖 For Beginners
+### For Beginners
 
 **[Complete User Guide](GUIDE.md)** - Comprehensive reference with configuration examples, validators, generators, checkers, and best practices.
 
-### 🎓 Step-by-Step
+### Step-by-Step
 
 **[Step-by-Step Tutorial](TUTORIAL.md)** - Learn by creating a simple "Sum of Two Numbers" problem from scratch.
 
-### 🔧 For Developers
+### For Developers
 
 **[Technical Documentation](DOCUMENTATION.md)** - Architecture overview, type system, API reference, and implementation details.
 
-### ⚙️ Platform-Specific
+### Platform-Specific
 
 **[Windows Notes](NOTES.md)** - Important considerations for Windows users regarding line endings and process cleanup.
 
-### 📚 API Reference
+### API Reference
 
 **[TypeDoc Documentation](https://hamzahassanain.github.io/polyman/)** - Generated API documentation for developers.
 

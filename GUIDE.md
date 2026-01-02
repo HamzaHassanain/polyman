@@ -117,11 +117,11 @@ Polyman is a command-line tool designed for competitive programming problem sett
 
 ### Key Features
 
-- ✅ **Local Problem Development**: Create and test problems entirely on your machine
-- ✅ **Comprehensive Validation**: Validate inputs, check outputs, and verify solutions
-- ✅ **Multiple Languages**: Support for C++, Java, and Python solutions
-- ✅ **Standard Checkers**: Built-in testlib checkers for common comparison types
-- ✅ **Full Verification**: Complete workflow automation for problem testing
+- **Local Problem Development**: Create and test problems entirely on your machine
+- **Comprehensive Validation**: Validate inputs, check outputs, and verify solutions
+- **Multiple Languages**: Support for C++, Java, and Python solutions
+- **Standard Checkers**: Built-in testlib checkers for common comparison types
+- **Full Verification**: Complete workflow automation for problem testing
 
 ### Prerequisites
 
@@ -213,7 +213,7 @@ my-problem/
 | `outputFile`  | string  | Output destination         | `"stdout"` or filename like `"output.txt"` |
 | `interactive` | boolean | Interactive problem flag   | `true` or `false`                          |
 
-**⚠️ Important Notes:**
+**Important Notes:**
 
 - Time limits are in **milliseconds** (1000ms = 1 second)
 - Memory limits are in **megabytes**
@@ -256,13 +256,13 @@ Define problem statements in multiple languages:
 }
 ```
 
-**✅ Do's:**
+**Do's:**
 
 - Always use UTF-8 encoding
 - Store statement files in respective language folders
 - Use LaTeX format for mathematical expressions
 
-**❌ Don'ts:**
+**Don'ts:**
 
 - Don't use absolute paths for statement files
 - Don't mix encodings within the same problem
@@ -326,14 +326,14 @@ Define all solutions with their expected behavior:
 
 - `python.2`, `python.3`, `python.pypy2`, `python.pypy3`
 
-**✅ Do's:**
+**Do's:**
 
 - Always include exactly **one** solution with tag `MA`
 - Include solutions with different expected behaviors (WA, TL, etc.)
 - Use appropriate sourceType for each solution
 - You May Leave The Source Types Empty to Use Default Compilers
 
-**❌ Don'ts:**
+**Don'ts:**
 
 - Don't have multiple `MA` solutions
 - Don't forget to test non-MA solutions
@@ -360,9 +360,9 @@ Define test generators:
 }
 ```
 
-**⚠️ Important:** Generators **must** be C++ and use testlib.h
+**Important:** Generators **must** be C++ and use testlib.h
 
-**❌ Don'ts:**
+**Don'ts:**
 
 - Don't use absolute paths for statement files
 - Don't mix encodings within the same problem
@@ -405,13 +405,13 @@ Use `polyman list checkers` to see all available checkers:
 - **yesno**: Compare yes/no answers
 - And many more...
 
-**✅ Do's:**
+**Do's:**
 
 - Use standard checkers when possible (wcmp for most problems)
 - Include checker tests in `checker_tests.json`
 - Test your custom checker thoroughly
 
-**❌ Don'ts:**
+**Don'ts:**
 
 - Don't write custom checkers unless necessary
 
@@ -429,9 +429,9 @@ Define input validator:
 }
 ```
 
-**⚠️ Important:** Validators **must** be C++ and use testlib.h
+**Important:** Validators **must** be C++ and use testlib.h
 
-**❌ Don'ts:**
+**Don'ts:**
 
 - Don't write custom checkers unless necessary
 
@@ -469,7 +469,7 @@ Testsets are collections of test cases that define how your problem will be test
 }
 ```
 
-**⚠️ For Most Problems:** Use a single testset named `"tests"`
+**For Most Problems:** Use a single testset named `"tests"`
 
 ---
 
@@ -483,7 +483,7 @@ Testsets are collections of test cases that define how your problem will be test
 
 **When to Use Groups:**
 
-✅ **Use Groups (`groupsEnabled: true`):**
+**Use Groups (`groupsEnabled: true`):**
 
 - When you want to organize tests by type (samples, edge cases, stress tests)
 - When you need to run specific categories of tests separately
@@ -513,7 +513,7 @@ Testsets are collections of test cases that define how your problem will be test
 }
 ```
 
-**⚠️ Important:** If `groupsEnabled: true`, you **must**:
+**Important:** If `groupsEnabled: true`, you **must**:
 
 1. Define groups in the `groups` array
 2. Specify a `group` field in each command
@@ -626,7 +626,7 @@ echo "10 7" > tests/manual/sample2.txt
 - `testsets/tests/test1.txt` (contains: `5 3`)
 - `testsets/tests/test2.txt` (contains: `10 7`)
 
-**⚠️ Important:**
+**Important:**
 
 - File must exist before running `polyman generate`
 - Use relative paths from `Config.json` location
@@ -692,7 +692,7 @@ int main(int argc, char* argv[]) {
 }
 ```
 
-**⚠️ Important:**
+**Important:**
 
 - Generator must be defined in `generators` array
 - Generator must handle the parameter correctly
@@ -753,7 +753,7 @@ Executes a generator multiple times with different parameters.
 - Tests 11-910: Runs `gen-random 100`, `gen-random 101`, ..., `gen-random 1000`
 - **Total:** 910 tests created
 
-**⚠️ Important:**
+**Important:**
 
 - Range is **inclusive**: `[1, 100]` generates 100 tests
 - Be careful with large ranges (can create many files)
