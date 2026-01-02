@@ -1,8 +1,6 @@
-
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as generator from '../../src/helpers/generator';
 import { executor } from '../../src/executor';
-import * as utils from '../../src/helpers/utils';
 
 vi.mock('../../src/executor', () => ({
   executor: {
@@ -20,13 +18,15 @@ vi.mock('../../src/helpers/utils');
 vi.mock('../../src/formatter');
 
 describe('generator.ts', () => {
-    beforeEach(() => {
-        vi.clearAllMocks();
-    });
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
 
   describe('ensureGeneratorsExist', () => {
     it('should not throw if generators are defined', () => {
-      expect(() => generator.ensureGeneratorsExist([{ name: 'gen', source: 'gen.cpp' }])).not.toThrow();
+      expect(() =>
+        generator.ensureGeneratorsExist([{ name: 'gen', source: 'gen.cpp' }])
+      ).not.toThrow();
     });
   });
 
@@ -34,13 +34,20 @@ describe('generator.ts', () => {
   // we can try to test logic that doesn't rely deeply on it or skip strictly runGenerator test if implementation is opaque.
   // But we want 100% coverage.
   // Let's mock executeWithRedirect as well.
-  
+
   describe('runGenerator', () => {
-      it('should execute generator successfully', async () => {
-         // Assuming it uses executeWithRedirect for output redirection
-          vi.mocked(executor.executeWithRedirect).mockResolvedValue({ stdout: '', stderr: '', exitCode: 0, success: true });
-          
-          await expect(generator.runGenerator('./gen', ['arg'], 'out.txt')).resolves.not.toThrow();
+    it('should execute generator successfully', async () => {
+      // Assuming it uses executeWithRedirect for output redirection
+      vi.mocked(executor.executeWithRedirect).mockResolvedValue({
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+        success: true,
       });
+
+      await expect(
+        generator.runGenerator('./gen', ['arg'], 'out.txt')
+      ).resolves.not.toThrow();
+    });
   });
 });
