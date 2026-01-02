@@ -58,10 +58,10 @@ export interface ExecutionOptions {
   timeout: number;
   memoryLimitMB?: number;
   cwd?: string;
-  onSuccess?: (result: ExecutionResult) => void;
-  onError?: (result: ExecutionResult) => void;
-  onTimeout?: (result: ExecutionResult) => void;
-  onMemoryExceeded?: (result: ExecutionResult) => void;
+  onSuccess?: (result: ExecutionResult) => void | Promise<void>;
+  onError?: (result: ExecutionResult) => void | Promise<void>;
+  onTimeout?: (result: ExecutionResult) => void | Promise<void>;
+  onMemoryExceeded?: (result: ExecutionResult) => void | Promise<void>;
   silent?: boolean;
 }
 
@@ -400,9 +400,9 @@ export class CommandExecutor {
 
         if (options.onTimeout) {
           this.cleanup()
-            .then(() => {
+            .then(async () => {
               try {
-                options.onTimeout!(result);
+                await options.onTimeout!(result);
                 resolve(result);
               } catch (error) {
                 reject(
@@ -614,8 +614,14 @@ export class CommandExecutor {
     }
 
     if (options.onMemoryExceeded) {
-      options.onMemoryExceeded(result);
-      resolve(result);
+      void (async () => {
+        try {
+          await options.onMemoryExceeded!(result);
+          resolve(result);
+        } catch (error) {
+          reject(error);
+        }
+      })();
     } else {
       reject(new Error('Memory limit exceeded'));
     }
@@ -645,8 +651,12 @@ export class CommandExecutor {
       fmt.dim(result.stdout.trim());
     }
 
-    options.onSuccess?.(result);
-    resolve(result);
+    void (async () => {
+      if (options.onSuccess) {
+        await options.onSuccess(result);
+      }
+      resolve(result);
+    })();
   }
 
   /**
@@ -676,8 +686,10 @@ export class CommandExecutor {
     }
 
     if (options.onError) {
-      options.onError(result);
-      resolve(result);
+      void (async () => {
+        await options.onError!(result);
+        resolve(result);
+      })();
     } else {
       reject(
         new Error(
@@ -718,8 +730,10 @@ export class CommandExecutor {
     }
 
     if (options.onError) {
-      options.onError(result);
-      resolve(result);
+      void (async () => {
+        await options.onError!(result);
+        resolve(result);
+      })();
     } else {
       reject(err);
     }
@@ -757,9 +771,10 @@ export class CommandExecutor {
           process.kill(pid, 'SIGSEGV');
         }
       }
-    } catch (error) {
-      console.log(error);
-
+    } catch (error: unknown) {
+      if ((error as { code?: string }).code !== 'ESRCH') {
+        console.log(error);
+      }
       // Process already terminated
     }
   }
