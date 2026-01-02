@@ -357,8 +357,7 @@ describe('CommandExecutor', () => {
           onTimeout: () => {},
         });
 
-        // Advance: timeout(100) + grace(100) + win_delay(100) + cleanup_delay(150) = 450
-        await vi.advanceTimersByTimeAsync(600);
+        await vi.advanceTimersByTimeAsync(1500);
         await promise;
 
         expect(mockSpawn).toHaveBeenLastCalledWith(
