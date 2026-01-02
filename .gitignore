@@ -3,3 +3,6 @@ dist
 docs/
 temp/
 .vscode/
+
+coverage/
+./coverage
