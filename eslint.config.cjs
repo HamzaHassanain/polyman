@@ -43,8 +43,15 @@ module.exports = defineConfig([
   },
   {
     files: ['eslint.config.cjs'],
+    ...tseslint.configs.disableTypeChecked,
+    languageOptions: {
+      parserOptions: {
+        project: null,
+      },
+    },
     rules: {
       '@typescript-eslint/no-require-imports': 'off',
+      ...tseslint.configs.disableTypeChecked.rules,
       'no-undef': 'off',
     },
   },
