@@ -24,7 +24,6 @@ module.exports = tseslint.config(
         'error',
         { argsIgnorePattern: '^_' },
       ],
-      '@typescript-eslint/no-explicit-any': 'warn',
     },
   },
   {

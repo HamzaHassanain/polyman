@@ -66,18 +66,16 @@ export async function runChecker(
         }
         didCatchInvalid = true;
       },
-      onTimeout: async () => {
+      onTimeout: () => {
         fmt.error(
           `${fmt.cross()} ${fmt.bold('Checker Unexpectedly Exceeded Time Limit!')} (${DEFAULT_TIMEOUT}ms)`
         );
-        await executor.cleanup();
         process.exit(1);
       },
-      onMemoryExceeded: async () => {
+      onMemoryExceeded: () => {
         fmt.error(
           `${fmt.cross()} ${fmt.bold('Checker Unexpectedly Exceeded Memory Limit!')} (${DEFAULT_MEMORY_LIMIT} MB)`
         );
-        await executor.cleanup();
         process.exit(1);
       },
     }

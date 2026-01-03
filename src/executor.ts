@@ -60,8 +60,8 @@ export interface ExecutionOptions {
   cwd?: string;
   onSuccess?: (result: ExecutionResult) => void;
   onError?: (result: ExecutionResult) => void;
-  onTimeout?: (result: ExecutionResult) => Promise<void>;
-  onMemoryExceeded?: (result: ExecutionResult) => Promise<void>;
+  onTimeout?: (result: ExecutionResult) => void;
+  onMemoryExceeded?: (result: ExecutionResult) => void;
   silent?: boolean;
 }
 
@@ -396,20 +396,17 @@ export class CommandExecutor {
       const cleanupDelay = process.platform === 'win32' ? 1000 : 0;
 
       setTimeout(() => {
-        this.activeProcesses.delete(child);
-
         if (options.onTimeout) {
           this.cleanup()
             .then(() => {
-              options.onTimeout!(result)
-                .then(() => {
-                  resolve(result);
-                })
-                .catch(error => {
-                  reject(
-                    error instanceof Error ? error : new Error(String(error))
-                  );
-                });
+              try {
+                options.onTimeout!(result);
+                resolve(result);
+              } catch (error) {
+                reject(
+                  error instanceof Error ? error : new Error(String(error))
+                );
+              }
             })
             .catch(error =>
               reject(error instanceof Error ? error : new Error(String(error)))
@@ -615,14 +612,8 @@ export class CommandExecutor {
     }
 
     if (options.onMemoryExceeded) {
-      options
-        .onMemoryExceeded(result)
-        .then(() => {
-          resolve(result);
-        })
-        .catch(error => {
-          reject(error instanceof Error ? error : new Error(String(error)));
-        });
+      options.onMemoryExceeded(result);
+      resolve(result);
     } else {
       reject(new Error('Memory limit exceeded'));
     }
@@ -880,7 +871,7 @@ export class CommandExecutor {
   async cleanup(): Promise<void> {
     // On Windows, wait for file handles to be released
     if (process.platform === 'win32' && this.activeProcesses.size > 0) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 150));
     }
 
     this.killAllActiveProcesses();
