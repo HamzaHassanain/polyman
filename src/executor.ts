@@ -60,8 +60,8 @@ export interface ExecutionOptions {
   cwd?: string;
   onSuccess?: (result: ExecutionResult) => void;
   onError?: (result: ExecutionResult) => void;
-  onTimeout?: (result: ExecutionResult) => void;
-  onMemoryExceeded?: (result: ExecutionResult) => void;
+  onTimeout?: (result: ExecutionResult) => Promise<void>;
+  onMemoryExceeded?: (result: ExecutionResult) => Promise<void>;
   silent?: boolean;
 }
 
@@ -401,14 +401,15 @@ export class CommandExecutor {
         if (options.onTimeout) {
           this.cleanup()
             .then(() => {
-              try {
-                options.onTimeout!(result);
-                resolve(result);
-              } catch (error) {
-                reject(
-                  error instanceof Error ? error : new Error(String(error))
-                );
-              }
+              options.onTimeout!(result)
+                .then(() => {
+                  resolve(result);
+                })
+                .catch(error => {
+                  reject(
+                    error instanceof Error ? error : new Error(String(error))
+                  );
+                });
             })
             .catch(error =>
               reject(error instanceof Error ? error : new Error(String(error)))
@@ -614,8 +615,14 @@ export class CommandExecutor {
     }
 
     if (options.onMemoryExceeded) {
-      options.onMemoryExceeded(result);
-      resolve(result);
+      options
+        .onMemoryExceeded(result)
+        .then(() => {
+          resolve(result);
+        })
+        .catch(error => {
+          reject(error instanceof Error ? error : new Error(String(error)));
+        });
     } else {
       reject(new Error('Memory limit exceeded'));
     }
@@ -871,13 +878,12 @@ export class CommandExecutor {
    * }
    */
   async cleanup(): Promise<void> {
-    this.killAllActiveProcesses();
-
     // On Windows, wait for file handles to be released
     if (process.platform === 'win32' && this.activeProcesses.size > 0) {
-      await new Promise(resolve => setTimeout(resolve, 150));
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
+    this.killAllActiveProcesses();
     this.activeProcesses.clear();
     this.tempFiles = [];
   }
