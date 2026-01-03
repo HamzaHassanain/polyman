@@ -25,9 +25,9 @@ import { fmt } from '../formatter';
  * //   6. Run 'polyman verify' for full verification
  */
 export function logTemplateCreationSuccess(directory: string) {
-  console.log();
+  fmt.newLine();
   fmt.info(`  ${fmt.infoIcon()} ${fmt.bold('Next steps:')}`);
-  console.log();
+  fmt.newLine();
   fmt.log(`    ${fmt.primary('1.')} cd ${fmt.highlight(directory)}`);
   fmt.log(
     `    ${fmt.primary('2.')} Add your solutions, generators, and validator`
@@ -50,7 +50,7 @@ export function logTemplateCreationSuccess(directory: string) {
   fmt.log(
     `    ${fmt.primary('Full Guide ->')} Visit ${fmt.highlight('https://github.com/HamzaHassanain/polyman/blob/master/GUIDE.md')}`
   );
-  console.log();
+  fmt.newLine();
 }
 
 /**

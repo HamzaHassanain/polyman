@@ -2,9 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as utils from '../../src/helpers/utils';
 import fs from 'fs';
 import { executor } from '../../src/executor';
-import path from 'path';
 import { fmt } from '../../src/formatter';
-
 // Manual mock for fs
 vi.mock('fs', () => {
   return {
@@ -159,7 +157,7 @@ describe('utils.ts', () => {
     it('should return first line from stream', async () => {
       const mockOn = vi.fn();
       // Simulate data event then end
-      mockOn.mockImplementation((event, cb) => {
+      mockOn.mockImplementation((event: string, cb: (data: string) => void) => {
         if (event === 'data') {
           setTimeout(() => cb('first line\nsecond line'), 0);
         }
@@ -175,7 +173,7 @@ describe('utils.ts', () => {
     it('should handle empty file', async () => {
       const mockOn = vi.fn();
       // Simulate end without data
-      mockOn.mockImplementation((event, cb) => {
+      mockOn.mockImplementation((event: string, cb: () => void) => {
         if (event === 'end') {
           setTimeout(cb, 0);
         }
@@ -191,7 +189,7 @@ describe('utils.ts', () => {
     it('should handle stream error', async () => {
       const mockOn = vi.fn();
       // Simulate error
-      mockOn.mockImplementation((event, cb) => {
+      mockOn.mockImplementation((event: string, cb: (err: Error) => void) => {
         if (event === 'error') {
           setTimeout(() => cb(new Error('Stream Error')), 0);
         }

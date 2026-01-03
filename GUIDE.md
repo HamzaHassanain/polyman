@@ -1289,7 +1289,7 @@ Create `validator_tests.json`:
 ### ✅ Do's:
 
 1. **Validate all constraints** mentioned in the problem statement
-2. **Check format exactly** (spaces, newlines, EOF)
+2. **Check format exactly** (spaces, newLines, EOF)
 3. **Use meaningful variable names** in validation messages
 4. **End with `readEof()`** to ensure no extra data
 5. **Test validator** with both valid and invalid inputs
@@ -3729,7 +3729,7 @@ FAIL: Expected EOLN but found space
 
 **Solution:**
 
-- Use `readEoln()` only when newline is required
+- Use `readEoln()` only when newLine is required
 - Use `readSpace()` for required spaces
 - Use `readSpaces()` if multiple spaces allowed
 - Check problem statement format specification

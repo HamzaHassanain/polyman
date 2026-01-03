@@ -163,7 +163,7 @@ function displayBasicInfo(info: ProblemInfo): void {
   fmt.info(
     `    • Memory Limit: ${fmt.highlight(info.memoryLimit.toString() + 'MB')}`
   );
-  console.log();
+  fmt.newLine();
 }
 
 /**
@@ -177,7 +177,7 @@ function displayCheckerValidator(checker: string, validator: string): void {
   if (validator) {
     fmt.info(`    • Validator: ${fmt.highlight(validator)}`);
   }
-  console.log();
+  fmt.newLine();
 }
 
 /**
@@ -196,7 +196,7 @@ function displayStatements(
       fmt.info(`      Legend: ${preview}...`);
     }
   }
-  console.log();
+  fmt.newLine();
 }
 
 /**
@@ -207,7 +207,7 @@ function displaySampleTests(samples: Test[]): void {
 
   fmt.info(`  ${fmt.highlight('Sample Tests:')}`);
   fmt.info(`    • ${samples.length} sample(s) for problem statement`);
-  console.log();
+  fmt.newLine();
 }
 
 /**
@@ -220,7 +220,7 @@ function displayGenerators(generators: File[]): void {
   for (const gen of generators) {
     fmt.info(`    • ${gen.name}`);
   }
-  console.log();
+  fmt.newLine();
 }
 
 /**
@@ -242,7 +242,7 @@ function displaySolutions(solutions: Solution[]): void {
   for (const [tag, names] of Object.entries(grouped)) {
     fmt.info(`    • ${tag}: ${names.join(', ')}`);
   }
-  console.log();
+  fmt.newLine();
 }
 
 /**
@@ -266,7 +266,7 @@ function displayFiles(files: FilesResponse): void {
   if (files.auxFiles.length > 0) {
     fmt.info(`    • Auxiliary files: ${files.auxFiles.length}`);
   }
-  console.log();
+  fmt.newLine();
 }
 
 /**
@@ -285,7 +285,7 @@ function displayPackages(packages: Package[]): void {
       `    • Latest ready: ${latestReady.type} (revision ${latestReady.revision})`
     );
   }
-  console.log();
+  fmt.newLine();
 }
 
 /**

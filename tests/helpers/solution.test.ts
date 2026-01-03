@@ -53,6 +53,7 @@ vi.mock('../../src/formatter', () => ({
     error: vi.fn(),
     warn: vi.fn(),
     success: vi.fn(),
+    newLine: vi.fn(),
     infoIcon: () => 'ℹ',
     highlight: (s: string) => s,
     dim: (s: string) => s,
@@ -63,7 +64,7 @@ vi.mock('../../src/formatter', () => ({
 }));
 
 describe('solution.ts', () => {
-  const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => {
+  vi.spyOn(process, 'exit').mockImplementation(() => {
     throw new Error('process.exit called');
   });
 
@@ -226,9 +227,9 @@ describe('solution.ts', () => {
 
     it('should handle runtime error (onError callback)', async () => {
       vi.mocked(executor.executeWithRedirect).mockImplementation(
-        async (_cmd, options: any) => {
+        (_cmd, options: any) => {
           options.onError({ stderr: 'Segfault' });
-          return {} as any;
+          return {} as any; // eslint-disable-line @typescript-eslint/no-unsafe-return
         }
       );
       vi.mocked(fs.writeFileSync).mockImplementation(() => {});
@@ -250,9 +251,9 @@ describe('solution.ts', () => {
 
     it('should handle timeout (onTimeout callback)', async () => {
       vi.mocked(executor.executeWithRedirect).mockImplementation(
-        async (_cmd, options: any) => {
+        (_cmd, options: any) => {
           options.onTimeout();
-          return {} as any;
+          return {} as any; // eslint-disable-line @typescript-eslint/no-unsafe-return
         }
       );
 
@@ -273,9 +274,9 @@ describe('solution.ts', () => {
 
     it('should handle memory exceeded (onMemoryExceeded callback)', async () => {
       vi.mocked(executor.executeWithRedirect).mockImplementation(
-        async (_cmd, options: any) => {
+        (_cmd, options: any) => {
           options.onMemoryExceeded();
-          return {} as any;
+          return {} as any; // eslint-disable-line @typescript-eslint/no-unsafe-return
         }
       );
 
@@ -605,12 +606,10 @@ describe('solution.ts', () => {
         beforeEach(() => {
           vi.mocked(utils.getTestFiles).mockReturnValue(['t1.txt']);
           // Default: main solution OK
-          vi.mocked(utils.readFirstLine).mockImplementation(
-            async (p: string) => {
-              if (p.includes('sol_main')) return '42'; // Main OK
-              return ''; // Target default
-            }
-          );
+          vi.mocked(utils.readFirstLine).mockImplementation((p: string) => {
+            if (p.includes('sol_main')) return Promise.resolve('42'); // Main OK
+            return Promise.resolve(''); // Target default
+          });
         });
 
         it('should pass if solution tag is TL and it gets TLE', async () => {
@@ -627,13 +626,12 @@ describe('solution.ts', () => {
             sourceType: 'cpp.g++17',
           } as any;
 
-          vi.mocked(utils.readFirstLine).mockImplementation(
-            async (p: string) => {
-              if (p.includes('sol_main')) return '42';
-              if (p.includes('sol_target')) return 'Time Limit Exceeded';
-              return '';
-            }
-          );
+          vi.mocked(utils.readFirstLine).mockImplementation((p: string) => {
+            if (p.includes('sol_main')) return Promise.resolve('42');
+            if (p.includes('sol_target'))
+              return Promise.resolve('Time Limit Exceeded');
+            return Promise.resolve('');
+          });
 
           await expect(
             solution.startTheComparisonProcess(
@@ -659,13 +657,12 @@ describe('solution.ts', () => {
             sourceType: 'cpp.g++17',
           } as any;
 
-          vi.mocked(utils.readFirstLine).mockImplementation(
-            async (p: string) => {
-              if (p.includes('sol_main')) return '42';
-              if (p.includes('sol_target')) return 'Time Limit Exceeded';
-              return '';
-            }
-          );
+          vi.mocked(utils.readFirstLine).mockImplementation((p: string) => {
+            if (p.includes('sol_main')) return Promise.resolve('42');
+            if (p.includes('sol_target'))
+              return Promise.resolve('Time Limit Exceeded');
+            return Promise.resolve('');
+          });
 
           await expect(
             solution.startTheComparisonProcess(
@@ -691,13 +688,12 @@ describe('solution.ts', () => {
             sourceType: 'cpp.g++17',
           } as any;
 
-          vi.mocked(utils.readFirstLine).mockImplementation(
-            async (p: string) => {
-              if (p.includes('sol_main')) return '42';
-              if (p.includes('sol_target')) return 'Memory Limit Exceeded';
-              return '';
-            }
-          );
+          vi.mocked(utils.readFirstLine).mockImplementation((p: string) => {
+            if (p.includes('sol_main')) return Promise.resolve('42');
+            if (p.includes('sol_target'))
+              return Promise.resolve('Memory Limit Exceeded');
+            return Promise.resolve('');
+          });
 
           await expect(
             solution.startTheComparisonProcess(
@@ -723,13 +719,12 @@ describe('solution.ts', () => {
             sourceType: 'cpp.g++17',
           } as any;
 
-          vi.mocked(utils.readFirstLine).mockImplementation(
-            async (p: string) => {
-              if (p.includes('sol_main')) return '42';
-              if (p.includes('sol_target')) return 'Memory Limit Exceeded';
-              return '';
-            }
-          );
+          vi.mocked(utils.readFirstLine).mockImplementation((p: string) => {
+            if (p.includes('sol_main')) return Promise.resolve('42');
+            if (p.includes('sol_target'))
+              return Promise.resolve('Memory Limit Exceeded');
+            return Promise.resolve('');
+          });
 
           await expect(
             solution.startTheComparisonProcess(
@@ -755,13 +750,12 @@ describe('solution.ts', () => {
             sourceType: 'cpp.g++17',
           } as any;
 
-          vi.mocked(utils.readFirstLine).mockImplementation(
-            async (p: string) => {
-              if (p.includes('sol_main')) return '42';
-              if (p.includes('sol_target')) return 'Runtime Error';
-              return '';
-            }
-          );
+          vi.mocked(utils.readFirstLine).mockImplementation((p: string) => {
+            if (p.includes('sol_main')) return Promise.resolve('42');
+            if (p.includes('sol_target'))
+              return Promise.resolve('Runtime Error');
+            return Promise.resolve('');
+          });
 
           await expect(
             solution.startTheComparisonProcess(
@@ -787,13 +781,12 @@ describe('solution.ts', () => {
             sourceType: 'cpp.g++17',
           } as any;
 
-          vi.mocked(utils.readFirstLine).mockImplementation(
-            async (p: string) => {
-              if (p.includes('sol_main')) return '42';
-              if (p.includes('sol_target')) return 'Runtime Error';
-              return '';
-            }
-          );
+          vi.mocked(utils.readFirstLine).mockImplementation((p: string) => {
+            if (p.includes('sol_main')) return Promise.resolve('42');
+            if (p.includes('sol_target'))
+              return Promise.resolve('Runtime Error');
+            return Promise.resolve('');
+          });
 
           await expect(
             solution.startTheComparisonProcess(

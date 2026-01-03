@@ -386,7 +386,7 @@ int main(int argc, char* argv[]) {
     // Read second integer B (must be between 1 and 1000)
     int b = inf.readInt(1, 1000, "b");
 
-    // Must end with a newline
+    // Must end with a newLine
     inf.readEoln();
 
     // Must be end of file (no extra input)
@@ -403,7 +403,7 @@ int main(int argc, char* argv[]) {
    - If the number is outside this range, validation FAILS
 3. **`inf.readSpace()`**: Expects exactly one space
 4. **`inf.readInt(1, 1000, "b")`**: Reads the second integer
-5. **`inf.readEoln()`**: Expects end of line (newline character)
+5. **`inf.readEoln()`**: Expects end of line (newLine character)
 6. **`inf.readEof()`**: Expects end of file (nothing more)
 
 If the input doesn't match this format exactly, the validator will reject it. This ensures all your tests are properly formatted.

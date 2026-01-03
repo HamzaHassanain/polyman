@@ -36,6 +36,7 @@ vi.mock('../../src/formatter', () => ({
     warning: vi.fn(),
     info: vi.fn(),
     error: vi.fn(),
+    newLine: vi.fn(),
     cross: vi.fn().mockReturnValue('❌'),
     bold: vi.fn().mockImplementation(s => `BOLD(${s})`),
     highlight: vi.fn().mockImplementation(s => `HIGHLIGHT(${s})`),
