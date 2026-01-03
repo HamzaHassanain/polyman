@@ -71,3 +71,5 @@ DOCUMENTATION.md
 # - dist/ (compiled code)
 # - assets/ (checkers needed at runtime)
 # - template/ (needed for 'polyman new' command, except PDF)
+
+coverage
