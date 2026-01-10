@@ -58,10 +58,10 @@ export interface ExecutionOptions {
   timeout: number;
   memoryLimitMB?: number;
   cwd?: string;
-  onSuccess?: (result: ExecutionResult) => void | Promise<void>;
-  onError?: (result: ExecutionResult) => void | Promise<void>;
-  onTimeout?: (result: ExecutionResult) => void | Promise<void>;
-  onMemoryExceeded?: (result: ExecutionResult) => void | Promise<void>;
+  onSuccess?: (result: ExecutionResult) => void;
+  onError?: (result: ExecutionResult) => void;
+  onTimeout?: (result: ExecutionResult) => void;
+  onMemoryExceeded?: (result: ExecutionResult) => void;
   silent?: boolean;
 }
 
@@ -400,9 +400,9 @@ export class CommandExecutor {
 
         if (options.onTimeout) {
           this.cleanup()
-            .then(async () => {
+            .then(() => {
               try {
-                await options.onTimeout!(result);
+                options.onTimeout!(result);
                 resolve(result);
               } catch (error) {
                 reject(
@@ -535,7 +535,7 @@ export class CommandExecutor {
     }
 
     if (code === 0) {
-      this.handleSuccess(options, result, resolve);
+      this.handleSuccess(options, result, resolve, reject);
     } else {
       this.handleError(options, result, resolve, reject);
     }
@@ -614,14 +614,12 @@ export class CommandExecutor {
     }
 
     if (options.onMemoryExceeded) {
-      void (async () => {
-        try {
-          await options.onMemoryExceeded!(result);
-          resolve(result);
-        } catch (error) {
-          reject(error);
-        }
-      })();
+      try {
+        options.onMemoryExceeded(result);
+        resolve(result);
+      } catch (error) {
+        reject(error);
+      }
     } else {
       reject(new Error('Memory limit exceeded'));
     }
@@ -643,7 +641,8 @@ export class CommandExecutor {
   private handleSuccess(
     options: ExecutionOptions,
     result: ExecutionResult,
-    resolve: (value: ExecutionResult) => void
+    resolve: (value: ExecutionResult) => void,
+    reject: (reason?: unknown) => void
   ) {
     result.success = true;
 
@@ -651,12 +650,14 @@ export class CommandExecutor {
       fmt.dim(result.stdout.trim());
     }
 
-    void (async () => {
+    try {
       if (options.onSuccess) {
-        await options.onSuccess(result);
+        options.onSuccess(result);
       }
       resolve(result);
-    })();
+    } catch (error) {
+      reject(error instanceof Error ? error : new Error(String(error)));
+    }
   }
 
   /**
@@ -686,10 +687,12 @@ export class CommandExecutor {
     }
 
     if (options.onError) {
-      void (async () => {
-        await options.onError!(result);
+      try {
+        options.onError(result);
         resolve(result);
-      })();
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
     } else {
       reject(
         new Error(
@@ -730,10 +733,12 @@ export class CommandExecutor {
     }
 
     if (options.onError) {
-      void (async () => {
-        await options.onError!(result);
+      try {
+        options.onError(result);
         resolve(result);
-      })();
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
     } else {
       reject(err);
     }

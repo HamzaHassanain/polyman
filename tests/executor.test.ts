@@ -525,7 +525,9 @@ describe('CommandExecutor', () => {
       const error = new Error('Callback Error');
       const promise = executor.execute('run', {
         timeout: 100,
-        onTimeout: () => Promise.reject(error),
+        onTimeout: () => {
+          throw error;
+        },
       });
 
       const testPromise = expect(promise).rejects.toThrow('Callback Error');
@@ -541,7 +543,9 @@ describe('CommandExecutor', () => {
       const error = new Error('MLE Callback Error');
       const promise = executor.execute('run', {
         timeout: 1000,
-        onMemoryExceeded: () => Promise.reject(error),
+        onMemoryExceeded: () => {
+          throw error;
+        },
       });
 
       mockChild.emit('close', 137, null);

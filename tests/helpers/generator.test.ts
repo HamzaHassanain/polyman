@@ -139,16 +139,21 @@ describe('generator.ts', () => {
         .mockImplementation((() => {}) as any);
 
       vi.mocked(executor.executeWithRedirect).mockImplementation(
-        async (cmd, options) => {
+        (cmd, options, _inputFile?, _outputFile?) => {
           if (options?.onTimeout) {
-            await options.onTimeout({
+            options.onTimeout({
               stdout: '',
               stderr: '',
               exitCode: 124,
               success: false,
             });
           }
-          return { stdout: '', stderr: '', exitCode: 124, success: false };
+          return Promise.resolve({
+            stdout: '',
+            stderr: '',
+            exitCode: 124,
+            success: false,
+          });
         }
       );
 
@@ -167,16 +172,21 @@ describe('generator.ts', () => {
         .mockImplementation((() => {}) as any);
 
       vi.mocked(executor.executeWithRedirect).mockImplementation(
-        async (cmd, options) => {
+        (cmd, options, _inputFile?, _outputFile?) => {
           if (options?.onMemoryExceeded) {
-            await options.onMemoryExceeded({
+            options.onMemoryExceeded({
               stdout: '',
               stderr: '',
               exitCode: 137,
               success: false,
             });
           }
-          return { stdout: '', stderr: '', exitCode: 137, success: false };
+          return Promise.resolve({
+            stdout: '',
+            stderr: '',
+            exitCode: 137,
+            success: false,
+          });
         }
       );
 

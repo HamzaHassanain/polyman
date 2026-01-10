@@ -158,21 +158,21 @@ describe('checker.ts', () => {
 
     it('should throw error if expected OK but executor returns fail (stderr)', async () => {
       // Mock onError behavior inside execute
-      vi.mocked(executor.execute).mockImplementation(async (cmd, options) => {
+      vi.mocked(executor.execute).mockImplementation((cmd, options) => {
         if (options?.onError) {
-          await options.onError({
+          options.onError({
             stdout: '',
             stderr: 'Wrong answer expected...',
             exitCode: 1,
             success: false,
           });
         }
-        return {
+        return Promise.resolve({
           stdout: '',
           stderr: 'Wrong answer expected...',
           exitCode: 1,
           success: false,
-        };
+        });
       });
 
       await expect(
@@ -187,16 +187,21 @@ describe('checker.ts', () => {
     });
 
     it('should throw "Expected OK but got WA" if stderr is empty on failure', async () => {
-      vi.mocked(executor.execute).mockImplementation(async (cmd, options) => {
+      vi.mocked(executor.execute).mockImplementation((cmd, options) => {
         if (options?.onError) {
-          await options.onError({
+          options.onError({
             stdout: '',
             stderr: '',
             exitCode: 1,
             success: false,
           });
         }
-        return { stdout: '', stderr: '', exitCode: 1, success: false };
+        return Promise.resolve({
+          stdout: '',
+          stderr: '',
+          exitCode: 1,
+          success: false,
+        });
       });
 
       await expect(
@@ -212,17 +217,22 @@ describe('checker.ts', () => {
 
     it('should pass if expected verdict is WA and executor fails (catches invalid)', async () => {
       // If we expect WA, the checker MUST fail.
-      vi.mocked(executor.execute).mockImplementation(async (cmd, options) => {
+      vi.mocked(executor.execute).mockImplementation((cmd, options) => {
         // Simulate checker finding WA
         if (options?.onError) {
-          await options.onError({
+          options.onError({
             stdout: '',
             stderr: 'wrong answer 1st tokens differ',
             exitCode: 1,
             success: false,
           });
         }
-        return { stdout: '', stderr: '', exitCode: 1, success: false };
+        return Promise.resolve({
+          stdout: '',
+          stderr: '',
+          exitCode: 1,
+          success: false,
+        });
       });
 
       await expect(
@@ -261,16 +271,21 @@ describe('checker.ts', () => {
         .spyOn(process, 'exit')
         .mockImplementation((() => {}) as any);
 
-      vi.mocked(executor.execute).mockImplementation(async (cmd, options) => {
+      vi.mocked(executor.execute).mockImplementation((cmd, options) => {
         if (options?.onTimeout) {
-          await options.onTimeout({
+          options.onTimeout({
             stdout: '',
             stderr: '',
             exitCode: 124,
             success: false,
           });
         }
-        return { stdout: '', stderr: '', exitCode: 124, success: false };
+        return Promise.resolve({
+          stdout: '',
+          stderr: '',
+          exitCode: 124,
+          success: false,
+        });
       });
 
       await checker.runChecker(
@@ -297,16 +312,21 @@ describe('checker.ts', () => {
         .spyOn(process, 'exit')
         .mockImplementation((() => {}) as any);
 
-      vi.mocked(executor.execute).mockImplementation(async (cmd, options) => {
+      vi.mocked(executor.execute).mockImplementation((cmd, options) => {
         if (options?.onMemoryExceeded) {
-          await options.onMemoryExceeded({
+          options.onMemoryExceeded({
             stdout: '',
             stderr: '',
             exitCode: 137,
             success: false,
           });
         }
-        return { stdout: '', stderr: '', exitCode: 137, success: false };
+        return Promise.resolve({
+          stdout: '',
+          stderr: '',
+          exitCode: 137,
+          success: false,
+        });
       });
 
       await checker.runChecker(
@@ -565,15 +585,20 @@ describe('checker.ts', () => {
       vi.mocked(utils.getCompiledCommandToRun).mockReturnValue('./c.exe');
 
       // Check fails
-      vi.mocked(executor.execute).mockImplementation(async (cmd, opts) => {
+      vi.mocked(executor.execute).mockImplementation((cmd, opts) => {
         if (opts?.onError)
-          await opts.onError({
+          opts.onError({
             stdout: '',
             stderr: 'WA',
             exitCode: 1,
             success: false,
           });
-        return { stdout: '', stderr: 'WA', exitCode: 1, success: false };
+        return Promise.resolve({
+          stdout: '',
+          stderr: 'WA',
+          exitCode: 1,
+          success: false,
+        });
       });
 
       await expect(checker.runCheckerTests(mockChecker as any)).rejects.toThrow(
