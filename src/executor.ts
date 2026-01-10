@@ -932,3 +932,52 @@ export class CommandExecutor {
  * });
  */
 export const executor = new CommandExecutor();
+
+
+/**
+ * Register signal handlers to ensure child processes are cleaned up
+ * when the parent process is terminated (e.g., via Ctrl+C).
+ * This prevents orphan/zombie processes from lingering after exit.
+ */
+const setupProcessCleanup = () => {
+  let isCleaningUp = false;
+
+  const cleanupAndExit = async (signal: string) => {
+    if (isCleaningUp) return;
+    isCleaningUp = true;
+
+    try {
+      await executor.cleanup();
+    } catch {
+      // Ignore cleanup errors during exit
+    }
+
+    // Re-emit the signal after cleanup so the process exits properly
+    process.exit(signal === 'SIGINT' ? 130 : signal === 'SIGTERM' ? 143 : 1);
+  };
+
+  // Handle Ctrl+C
+  process.on('SIGINT', () => {
+    void cleanupAndExit('SIGINT');
+  });
+
+  // Handle termination signal (e.g., from kill command)
+  process.on('SIGTERM', () => {
+    void cleanupAndExit('SIGTERM');
+  });
+
+  // Handle uncaught exceptions - kill children before crashing
+  process.on('uncaughtException', err => {
+    console.error('Uncaught exception:', err);
+    void cleanupAndExit('uncaughtException');
+  });
+
+  // Handle unhandled promise rejections
+  process.on('unhandledRejection', reason => {
+    console.error('Unhandled rejection:', reason);
+    void cleanupAndExit('unhandledRejection');
+  });
+};
+
+// Initialize cleanup handlers
+setupProcessCleanup();
