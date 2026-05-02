@@ -1,9 +1,30 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as testlibDownload from '../../src/helpers/testlib-download';
 import https from 'https';
+import type { IncomingMessage, ClientRequest } from 'http';
 import { EventEmitter } from 'events';
 
 vi.mock('https');
+
+type GetCallback = (res: IncomingMessage) => void;
+type HttpsGet = (url: string, cb: GetCallback) => ClientRequest;
+const mockedGet: import('vitest').MockedFunction<HttpsGet> =
+  https.get as unknown as import('vitest').MockedFunction<HttpsGet>;
+
+interface MockResponse extends EventEmitter {
+  statusCode?: number;
+  headers: { location?: string };
+}
+
+function createMockResponse(
+  statusCode: number,
+  headers: { location?: string } = {}
+): MockResponse {
+  const emitter = new EventEmitter() as MockResponse;
+  emitter.statusCode = statusCode;
+  emitter.headers = headers;
+  return emitter;
+}
 
 describe('testlib-download.ts', () => {
   beforeEach(() => {
@@ -12,15 +33,12 @@ describe('testlib-download.ts', () => {
 
   describe('downloadFile', () => {
     it('should download file successfully', async () => {
-      const mockResponse = new EventEmitter() as any;
-      mockResponse.statusCode = 200;
+      const mockResponse = createMockResponse(200);
 
-      (https.get as unknown as any).mockImplementation(
-        (_url: unknown, cb: unknown) => {
-          if (cb && cb instanceof Function) cb(mockResponse);
-          return new EventEmitter();
-        }
-      );
+      mockedGet.mockImplementation((_url, cb) => {
+        if (cb instanceof Function) cb(mockResponse as IncomingMessage);
+        return new EventEmitter() as unknown as ClientRequest;
+      });
 
       const promise = testlibDownload.downloadFile('http://example.com');
 
@@ -31,23 +49,19 @@ describe('testlib-download.ts', () => {
     });
 
     it('should handle redirect', async () => {
-      // Mock first response (302)
-      // This is tricky because recursion calls https.get again.
-      // We can mock implementation to return different responses based on call count or URL.
-      const reqEmitter = new EventEmitter();
+      const reqEmitter = new EventEmitter() as unknown as ClientRequest;
 
-      (https.get as unknown as any)
-        .mockImplementationOnce((_url: unknown, cb: unknown) => {
-          const resStart = new EventEmitter() as any;
-          resStart.statusCode = 302;
-          resStart.headers = { location: 'http://redirect.com' };
-          if (cb && cb instanceof Function) cb(resStart);
+      mockedGet
+        .mockImplementationOnce((_url, cb) => {
+          const resStart = createMockResponse(302, {
+            location: 'http://redirect.com',
+          });
+          if (cb instanceof Function) cb(resStart as IncomingMessage);
           return reqEmitter;
         })
-        .mockImplementationOnce((_url: unknown, cb: unknown) => {
-          const resFinal = new EventEmitter() as any;
-          resFinal.statusCode = 200;
-          if (cb && cb instanceof Function) cb(resFinal);
+        .mockImplementationOnce((_url, cb) => {
+          const resFinal = createMockResponse(200);
+          if (cb instanceof Function) cb(resFinal as IncomingMessage);
           setTimeout(() => {
             resFinal.emit('data', Buffer.from('redirected'));
             resFinal.emit('end');
@@ -61,14 +75,11 @@ describe('testlib-download.ts', () => {
     });
 
     it('should reject on error status', async () => {
-      (https.get as unknown as any).mockImplementation(
-        (_url: unknown, cb: unknown) => {
-          const res = new EventEmitter() as any;
-          res.statusCode = 404;
-          if (cb && cb instanceof Function) cb(res);
-          return new EventEmitter();
-        }
-      );
+      mockedGet.mockImplementation((_url, cb) => {
+        const res = createMockResponse(404);
+        if (cb instanceof Function) cb(res as IncomingMessage);
+        return new EventEmitter() as unknown as ClientRequest;
+      });
 
       await expect(
         testlibDownload.downloadFile('http://fail.com')
@@ -77,7 +88,7 @@ describe('testlib-download.ts', () => {
 
     it('should reject on request error', async () => {
       const req = new EventEmitter();
-      (https.get as unknown as any).mockReturnValue(req as any);
+      mockedGet.mockReturnValue(req as unknown as ClientRequest);
 
       const promise = testlibDownload.downloadFile('http://error.com');
       req.emit('error', new Error('network error'));

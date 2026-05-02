@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { Dirent } from 'fs';
 import * as createTemplate from '../../src/helpers/create-template';
 import fs from 'fs';
 import path from 'path';
@@ -14,9 +15,11 @@ describe('create-template.ts', () => {
 
   describe('logTemplateCreationSuccess', () => {
     it('should log success messages', () => {
+      const infoSpy = vi.spyOn(fmt, 'info');
+      const logSpy = vi.spyOn(fmt, 'log');
       createTemplate.logTemplateCreationSuccess('my-problem');
-      expect(fmt.info).toHaveBeenCalled();
-      expect(fmt.log).toHaveBeenCalledTimes(8);
+      expect(infoSpy).toHaveBeenCalled();
+      expect(logSpy).toHaveBeenCalledTimes(8);
     });
   });
 
@@ -25,17 +28,18 @@ describe('create-template.ts', () => {
       const srcDir = 'template';
       const destDir = 'problem';
 
-      const mockEntries = [
-        { name: 'file.txt', isDirectory: () => false },
-        { name: 'subdir', isDirectory: () => true },
+      const mockEntries: Dirent[] = [
+        { name: 'file.txt', isDirectory: () => false } as Dirent,
+        { name: 'subdir', isDirectory: () => true } as Dirent,
       ];
 
       // Mock readdirSync to return entries for srcDir, and empty for subdir to stop recursion
-      vi.mocked(fs.readdirSync).mockImplementation(dir => {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-return
-        if (dir === srcDir) return mockEntries as any;
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-return
-        return [] as any;
+      const readdirMock = vi.mocked(fs.readdirSync) as unknown as ReturnType<
+        typeof vi.fn<(dir: string) => Dirent[]>
+      >;
+      readdirMock.mockImplementation((dir: string): Dirent[] => {
+        if (dir === srcDir) return mockEntries;
+        return [];
       });
 
       createTemplate.copyTemplate(srcDir, destDir);
@@ -62,9 +66,12 @@ describe('create-template.ts', () => {
     it('should log error and exit', () => {
       const mockExit = vi
         .spyOn(process, 'exit')
-        .mockImplementation((() => {}) as any);
+        .mockImplementation((_code?: string | number | null) => {
+          return undefined as never;
+        });
+      const errorSpy = vi.spyOn(fmt, 'error');
       createTemplate.handleTemplateCreationError(new Error('fail'));
-      expect(fmt.error).toHaveBeenCalled();
+      expect(errorSpy).toHaveBeenCalled();
       expect(mockExit).toHaveBeenCalledWith(1);
       mockExit.mockRestore();
     });

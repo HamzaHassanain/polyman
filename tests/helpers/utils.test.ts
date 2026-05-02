@@ -1,8 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { ReadStream } from 'fs';
 import * as utils from '../../src/helpers/utils';
 import fs from 'fs';
 import { executor } from '../../src/executor';
 import { fmt } from '../../src/formatter';
+import type {
+  LocalChecker,
+  LocalSolution,
+  LocalGenerator,
+  LocalValidator,
+} from '../../src/types';
+
 // Manual mock for fs
 vi.mock('fs', () => {
   return {
@@ -22,9 +30,39 @@ vi.mock('../../src/executor');
 vi.mock('../../src/formatter');
 
 // Mock specific console methods to avoid clutter
-const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {
-  throw new Error('process.exit called');
-}) as any);
+const mockExit = vi
+  .spyOn(process, 'exit')
+  .mockImplementation((_code?: string | number | null) => {
+    throw new Error('process.exit called');
+  });
+
+const executorMocked = vi.mocked(executor);
+const fmtMocked = vi.mocked(fmt);
+const executeMock = () => executorMocked['execute'];
+const fmtErrorMock = () => fmtMocked['error'];
+
+// Typed helpers for fs mocks (avoid `unbound-method` from passing mocked fns directly)
+const readdirSyncMock = vi.mocked(fs.readdirSync);
+const existsSyncMock = vi.mocked(fs.existsSync);
+const mkdirSyncMock = vi.mocked(fs.mkdirSync);
+const rmSyncMock = vi.mocked(fs.rmSync);
+const readFileSyncMock = vi.mocked(fs.readFileSync);
+const createReadStreamMock = vi.mocked(fs.createReadStream);
+
+/**
+ * Builds a minimal stand-in for `fs.ReadStream` whose `on` method routes to
+ * the supplied implementation. Returned through `ReadStream` so the mocked
+ * `createReadStream` signature is satisfied without `any`.
+ */
+function makeReadStreamStub(
+  on: (event: string, cb: (arg: string | Error | undefined) => void) => unknown
+): ReadStream {
+  const stub: Pick<ReadStream, 'on' | 'close'> = {
+    on: on as unknown as ReadStream['on'],
+    close: vi.fn() as unknown as ReadStream['close'],
+  };
+  return stub as ReadStream;
+}
 
 describe('utils.ts', () => {
   beforeEach(() => {
@@ -69,11 +107,12 @@ describe('utils.ts', () => {
 
   describe('getTestFiles', () => {
     it('should return sorted test files', () => {
-      vi.mocked(fs.readdirSync).mockReturnValue([
-        'test10.txt',
-        'test2.txt',
-        'other.txt',
-      ] as any);
+      // `fs.readdirSync` is overloaded; cast to the string-array branch.
+      (
+        readdirSyncMock as unknown as ReturnType<
+          typeof vi.fn<(p: string) => string[]>
+        >
+      ).mockReturnValue(['test10.txt', 'test2.txt', 'other.txt']);
       const result = utils.getTestFiles('dir');
       expect(result).toEqual(['test2.txt', 'test10.txt']);
     });
@@ -83,7 +122,7 @@ describe('utils.ts', () => {
     describe('compileCPP', () => {
       it('should compile cpp file', async () => {
         await utils.compileCPP('main.cpp');
-        expect(executor.execute).toHaveBeenCalledWith(
+        expect(executeMock()).toHaveBeenCalledWith(
           expect.stringContaining('g++ -o'),
           expect.anything()
         );
@@ -98,7 +137,7 @@ describe('utils.ts', () => {
     describe('compileJava', () => {
       it('should compile java file', async () => {
         await utils.compileJava('Main.java');
-        expect(executor.execute).toHaveBeenCalledWith(
+        expect(executeMock()).toHaveBeenCalledWith(
           expect.stringContaining('javac'),
           expect.anything()
         );
@@ -109,44 +148,48 @@ describe('utils.ts', () => {
   describe('Directories', () => {
     describe('ensureDirectoryExists', () => {
       it('should create directory if missing', () => {
-        vi.mocked(fs.existsSync).mockReturnValue(false);
+        existsSyncMock.mockReturnValue(false);
         utils.ensureDirectoryExists('new-dir');
-        expect(fs.mkdirSync).toHaveBeenCalledWith(
+        expect(mkdirSyncMock).toHaveBeenCalledWith(
           expect.stringContaining('new-dir'),
           { recursive: true }
         );
       });
       it('should do nothing if directory exists', () => {
-        vi.mocked(fs.existsSync).mockReturnValue(true);
+        existsSyncMock.mockReturnValue(true);
         utils.ensureDirectoryExists('exists');
-        expect(fs.mkdirSync).not.toHaveBeenCalled();
+        expect(mkdirSyncMock).not.toHaveBeenCalled();
       });
     });
 
     describe('removeDirectoryRecursively', () => {
       it('should remove directory if exists', () => {
-        vi.mocked(fs.existsSync).mockReturnValue(true);
+        existsSyncMock.mockReturnValue(true);
         utils.removeDirectoryRecursively('del-dir');
-        expect(fs.rmSync).toHaveBeenCalledWith(
+        expect(rmSyncMock).toHaveBeenCalledWith(
           expect.stringContaining('del-dir'),
           { recursive: true, force: true }
         );
       });
       it('should do nothing if directory missing', () => {
-        vi.mocked(fs.existsSync).mockReturnValue(false);
+        existsSyncMock.mockReturnValue(false);
         utils.removeDirectoryRecursively('missing');
-        expect(fs.rmSync).not.toHaveBeenCalled();
+        expect(rmSyncMock).not.toHaveBeenCalled();
       });
     });
   });
 
   describe('readConfigFile', () => {
     it('should return parsed config', () => {
-      vi.mocked(fs.readFileSync).mockReturnValue('{"solutions": []}');
+      (
+        readFileSyncMock as unknown as ReturnType<
+          typeof vi.fn<(...args: unknown[]) => string>
+        >
+      ).mockReturnValue('{"solutions": []}');
       expect(utils.readConfigFile()).toEqual({ solutions: [] });
     });
     it('should throw if file reading fails', () => {
-      vi.mocked(fs.readFileSync).mockImplementation(() => {
+      readFileSyncMock.mockImplementation(() => {
         throw new Error('Fail');
       });
       expect(() => utils.readConfigFile()).toThrow('Fail');
@@ -155,50 +198,44 @@ describe('utils.ts', () => {
 
   describe('readFirstLine', () => {
     it('should return first line from stream', async () => {
-      const mockOn = vi.fn();
-      // Simulate data event then end
-      mockOn.mockImplementation((event: string, cb: (data: string) => void) => {
+      const onImpl = (
+        event: string,
+        cb: (arg: string | Error | undefined) => void
+      ): unknown => {
         if (event === 'data') {
           setTimeout(() => cb('first line\nsecond line'), 0);
         }
-      });
-
-      vi.mocked(fs.createReadStream).mockReturnValue({
-        on: mockOn,
-        close: vi.fn(),
-      } as any);
+        return undefined;
+      };
+      createReadStreamMock.mockReturnValue(makeReadStreamStub(onImpl));
       await expect(utils.readFirstLine('file.txt')).resolves.toBe('first line');
     });
 
     it('should handle empty file', async () => {
-      const mockOn = vi.fn();
-      // Simulate end without data
-      mockOn.mockImplementation((event: string, cb: () => void) => {
+      const onImpl = (
+        event: string,
+        cb: (arg: string | Error | undefined) => void
+      ): unknown => {
         if (event === 'end') {
-          setTimeout(cb, 0);
+          setTimeout(() => cb(undefined), 0);
         }
-      });
-
-      vi.mocked(fs.createReadStream).mockReturnValue({
-        on: mockOn,
-        close: vi.fn(),
-      } as any);
+        return undefined;
+      };
+      createReadStreamMock.mockReturnValue(makeReadStreamStub(onImpl));
       await expect(utils.readFirstLine('file.txt')).resolves.toBe('');
     });
 
     it('should handle stream error', async () => {
-      const mockOn = vi.fn();
-      // Simulate error
-      mockOn.mockImplementation((event: string, cb: (err: Error) => void) => {
+      const onImpl = (
+        event: string,
+        cb: (arg: string | Error | undefined) => void
+      ): unknown => {
         if (event === 'error') {
           setTimeout(() => cb(new Error('Stream Error')), 0);
         }
-      });
-
-      vi.mocked(fs.createReadStream).mockReturnValue({
-        on: mockOn,
-        close: vi.fn(),
-      } as any);
+        return undefined;
+      };
+      createReadStreamMock.mockReturnValue(makeReadStreamStub(onImpl));
       await expect(utils.readFirstLine('file.txt')).rejects.toThrow(
         'Stream Error'
       );
@@ -207,36 +244,56 @@ describe('utils.ts', () => {
 
   describe('getCompiledCommandToRun', () => {
     it('should handle .cpp', () => {
-      const obj = { source: 'main.cpp', name: 'main' } as any;
+      const obj: LocalSolution = {
+        source: 'main.cpp',
+        name: 'main',
+        tag: 'MA',
+      };
       expect(utils.getCompiledCommandToRun(obj)).toContain('main');
       expect(utils.getCompiledCommandToRun(obj)).not.toContain('.cpp');
     });
 
     it('should handle .java', () => {
-      const obj = { source: 'pkg/Main.java', name: 'Main' } as any;
+      const obj: LocalSolution = {
+        source: 'pkg/Main.java',
+        name: 'Main',
+        tag: 'MA',
+      };
       // Should return java -cp ... Main
       expect(utils.getCompiledCommandToRun(obj)).toContain('java -cp');
     });
 
     it('should handle .py', () => {
-      const obj = { source: 'script.py', name: 'script' } as any;
+      const obj: LocalSolution = {
+        source: 'script.py',
+        name: 'script',
+        tag: 'MA',
+      };
       expect(utils.getCompiledCommandToRun(obj)).toContain('python');
     });
 
     it('should handle .js', () => {
-      const obj = { source: 'script.js', name: 'script' } as any;
+      const obj: LocalSolution = {
+        source: 'script.js',
+        name: 'script',
+        tag: 'MA',
+      };
       expect(utils.getCompiledCommandToRun(obj)).toContain('node');
     });
 
     it('should throw on unknown extension', () => {
-      const obj = { source: 'script.rb', name: 'script' } as any;
+      const obj: LocalGenerator = { source: 'script.rb', name: 'script' };
       expect(() => utils.getCompiledCommandToRun(obj)).toThrow(
         /Unsupported source file extension/
       );
     });
 
     it('should handle standard checkers', () => {
-      const obj = { source: 'std.cpp', isStandard: true } as any;
+      const obj: LocalChecker = {
+        source: 'std.cpp',
+        name: 'std',
+        isStandard: true,
+      };
       const res = utils.getCompiledCommandToRun(obj);
       expect(res).toContain('assets/checkers/std');
     });
@@ -245,7 +302,7 @@ describe('utils.ts', () => {
   describe('Error Handling', () => {
     it('logError should call fmt.error', () => {
       utils.logError('message');
-      expect(fmt.error).toHaveBeenCalled();
+      expect(fmtErrorMock()).toHaveBeenCalled();
     });
 
     it('logErrorAndExit should call process.exit', () => {
@@ -268,4 +325,7 @@ describe('utils.ts', () => {
       );
     });
   });
+
+  // Reference unused imports so TypeScript keeps them when stripping.
+  void ([] as LocalValidator[]);
 });

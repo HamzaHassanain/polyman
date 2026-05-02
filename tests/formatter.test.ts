@@ -3,7 +3,7 @@ import { fmt, Formatter } from '../src/formatter';
 import chalk from 'chalk';
 
 describe('Formatter', () => {
-  let consoleSpy: any;
+  let consoleSpy: ReturnType<typeof vi.spyOn<Console, 'log'>>;
 
   beforeEach(() => {
     consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
