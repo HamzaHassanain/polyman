@@ -896,74 +896,6 @@ You can specify the test number explicitly for manual tests:
 
 ---
 
-**Example 3: Multiple Generators**
-
-```json
-{
-  "generators": [
-    { "name": "gen-random", "source": "./generators/random.cpp" },
-    { "name": "gen-worst", "source": "./generators/worst-case.cpp" },
-    { "name": "gen-special", "source": "./generators/special.cpp" }
-  ],
-  "testsets": [
-    {
-      "name": "tests",
-      "groupsEnabled": true,
-      "groups": [
-        { "name": "samples" },
-        { "name": "random" },
-        { "name": "worst" },
-        { "name": "special" }
-      ],
-      "generatorScript": {
-        "commands": [
-          // Samples
-          {
-            "type": "manual",
-            "manualFile": "./tests/manual/sample1.txt",
-            "group": "samples"
-          },
-
-          // Random tests
-          {
-            "type": "generator",
-            "generator": "gen-random",
-            "range": [1, 30],
-            "group": "random"
-          },
-
-          // Worst case tests
-          {
-            "type": "generator",
-            "generator": "gen-worst",
-            "range": [1, 20],
-            "group": "worst"
-          },
-
-            // Special cases
-            {
-              "type": "generator",
-              "generator": "gen-special",
-              "range": [1, 1],
-              "group": "special"
-            },
-            {
-              "type": "generator",
-              "generator": "gen-special",
-              "range": [2, 2],
-              "group": "special"
-            }
-        ]
-      }
-    }
-  ]
-}
-```
-
-**Result:** 53 tests from 3 different generators
-
----
-
 #### Important Notes and Best Practices
 
 **✅ Do's:**
@@ -1640,40 +1572,7 @@ Creates a new problem template in the specified directory.
 polyman new my-problem
 ```
 
-**What Happens:**
-
-1. Creates the directory `my-problem/`
-2. Copies template structure with:
-   - `Config.json` - Pre-configured problem settings
-   - `checker/` - Sample checker with tests
-   - `validator/` - Sample validator with tests
-   - `generators/` - Sample generator
-   - `solutions/` - Example solutions (C++, Java, Python)
-   - `statements/` - Statement template files
-   - `tests/manual/` - Directory for manual test files
-3. All files are ready to customize
-
-**After Running:**
-
-```
-my-problem/
-├── Config.json
-├── checker/
-│   ├── chk.cpp
-│   └── checker_tests.json
-├── validator/
-│   ├── val.cpp
-│   └── validator_tests.json
-├── generators/
-│   └── gen.cpp
-├── solutions/
-│   ├── acc.cpp
-│   ├── acc2.java
-│   └── tle.py
-└── statements/
-    ├── english/
-    └── russian/
-```
+Creates a new problem directory mirroring `template/` — see [Directory Structure](#directory-structure).
 
 ---
 
@@ -1689,15 +1588,8 @@ polyman download-testlib
 
 **What Happens:**
 
-1. Connects to https://github.com/MikeMirzayanov/testlib
-2. Downloads the latest `testlib.h` file
-3. Saves it to the current directory
-4. Displays installation instructions for system-wide usage
-
-**Output:**
-
-- File: `testlib.h` in current directory
-- Instructions for copying to system include directory (optional)
+1. Downloads the latest `testlib.h` from https://github.com/MikeMirzayanov/testlib
+2. Saves it to the current directory and prints instructions for system-wide install
 
 **Note:** Required for compiling validators, checkers, and generators.
 
@@ -1707,425 +1599,112 @@ polyman download-testlib
 
 #### `polyman list checkers`
 
-Lists all available standard checkers from testlib.
-
-**Usage:**
+Lists all available standard checkers from testlib (name, description, use case).
 
 ```bash
 polyman list checkers
-```
-
-**What Happens:**
-
-1. Reads the internal checker database
-2. Displays each checker with:
-   - **Name** (e.g., `wcmp`, `ncmp`)
-   - **Description** (what it checks)
-   - **Use case** (when to use it)
-
-**Example Output:**
-
-```
-Available Standard Checkers:
-  wcmp   - Compare tokens (whitespace-insensitive)
-  ncmp   - Compare numbers with absolute/relative error
-  fcmp   - Compare floating-point numbers
-  lcmp   - Compare lines exactly
-  ...
 ```
 
 ---
 
 #### `polyman list testsets`
 
-Lists all available testsets defined in Config.json.
-
-**Usage:**
+Lists all testsets defined in `Config.json` with their test counts and groups.
 
 ```bash
 polyman list testsets
-```
-
-**What Happens:**
-
-1. Reads `Config.json`
-2. Displays all testsets with their details
-3. Shows number of tests and groups in each testset
-
-**Example Output:**
-
-```
-Available Testsets:
-  tests     - 52 tests, 3 groups (samples, main, edge)
-  pretests  - 10 tests, 1 group (samples)
 ```
 
 ---
 
 #### `polyman list solutions`
 
-Lists all available solutions defined in Config.json.
-
-**Usage:**
+Lists all solutions defined in `Config.json` with names, tags, and source files.
 
 ```bash
 polyman list solutions
-```
-
-**What Happens:**
-
-1. Reads `Config.json`
-2. Displays all solutions with their names, tags, and source files
-
-**Example Output:**
-
-```
-Available Solutions:
-  main       (MA)  - solutions/acc.cpp
-  alt        (OK)  - solutions/acc2.java
-  wa-solution (WA) - solutions/wa.cpp
-  tle-solution (TL) - solutions/tle.py
 ```
 
 ---
 
 #### `polyman list generators`
 
-Lists all available generators defined in Config.json.
-
-**Usage:**
+Lists all generators defined in `Config.json` with names and source files.
 
 ```bash
 polyman list generators
-```
-
-**What Happens:**
-
-1. Reads `Config.json`
-2. Displays all generators with their names and source files
-
-**Example Output:**
-
-```
-Available Generators:
-  gen-random - generators/gen.cpp
-  gen-special - generators/special.cpp
 ```
 
 ---
 
 ### Test Management
 
-#### `polyman generate --all`
+#### `polyman generate`
 
-Generates all tests for all testsets defined in Config.json.
-
-**Usage:**
-
-```bash
-polyman generate --all
-```
-
-**What Happens:**
-
-1. **Reads Config.json** and validates testset configuration
-2. **For each testset:**
-   - Creates directory `testsets/<testset-name>/`
-   - **For each command in generatorScript:**
-     - **If manual:** Copies file from `manualFile` path
-     - **If generator:**
-       - Compiles generator if needed
-       - Runs generator for each number in range
-       - Saves each output to `test<N>.txt`
-3. **Reports:** Number of tests generated per testset
-
-**Example Output:**
-
-```
-✓ Step 1: Validating configuration for test generation
-✓ Step 2: Compiling generators for testset 'tests'
-  Compiling gen-random.cpp...
-✓ Step 3: Generating tests for testset 'tests'
-  Generated test 1 (manual)
-  Generated test 2 (manual)
-  Generated test 3 from gen-random 1
-  Generated test 4 from gen-random 2
-  ...
-  Generated 52 tests
-```
-
----
-
-#### `polyman generate --testset <testset>`
-
-Generates tests for a specific testset only.
+Generates tests by executing the `generatorScript` commands for each testset.
 
 **Usage:**
 
 ```bash
-polyman generate --testset tests
-```
-
-**What Happens:**
-Same as `generate all`, but only for the specified testset.
-
-**Use Case:** When you have multiple testsets and want to regenerate just one.
-
----
-
-#### `polyman generate --testset <testset> --group <group>`
-
-Generates tests for a specific group within a testset.
-
-**Usage:**
-
-```bash
-polyman generate --testset tests --group samples
+polyman generate --all                                    # All testsets
+polyman generate --testset tests                          # One testset only
+polyman generate --testset tests --group samples          # Just one group
+polyman generate --testset tests --index 5                # Single test by command index
 ```
 
 **What Happens:**
 
-1. Reads Config.json
-2. Filters commands to only those with `"group": "samples"`
-3. Generates only those tests
-4. Skips tests from other groups
+1. Compiles any generators required by the matching commands
+2. Runs each `manual` (copy) or `generator` (execute over `range`) command and writes outputs to `testsets/<testset-name>/test<N>.txt`
 
-**Use Case:** Quickly regenerate just sample tests or a specific category.
-
----
-
-#### `polyman generate --testset <testset> --index <index>`
-
-Generates a specific test by number.
-
-**Usage:**
-
-```bash
-polyman generate --testset tests --index 5
-```
-
-**What Happens:**
-
-1. Reads Config.json
-2. Finds the 5th command in the generator script
-3. Executes only that command
-4. Generates only `test5.txt`
-
-**Use Case:** Regenerate a single test after fixing a generator bug.
+The `--testset`, `--group`, and `--index` flags successively narrow which commands are executed.
 
 ---
 
 ### Validation
 
-#### `polyman validate --all`
+#### `polyman validate`
 
-Validates all generated tests using the validator.
-
-**Usage:**
-
-```bash
-polyman validate --all
-```
-
-**What Happens:**
-
-1. **Reads Config.json** and locates validator source
-2. **Compiles validator** (e.g., `val.cpp`)
-   - Uses C++ compiler (g++, clang, or MSVC)
-   - Creates executable `val` or `val.exe`
-3. **For each testset:**
-   - **For each test file** in `testsets/<testset-name>/`:
-     - Runs `./val < test<N>.txt`
-     - Captures validator verdict (VALID/INVALID)
-     - If INVALID: Shows error message
-4. **Reports:**
-   - ✓ Valid tests (green)
-   - ✗ Invalid tests (red) with error details
-   - Total: X/Y tests passed
-
-**Example Output:**
-
-```
-✓ Step 1: Validating configuration for validator
-✓ Step 2: Compiling validator
-  Compiling val.cpp...
-✓ Step 3: Validating tests for testset 'tests'
-  ✓ test1.txt - VALID
-  ✓ test2.txt - VALID
-  ✗ test3.txt - INVALID (Integer n out of range [1, 1000])
-  ...
-  50/52 tests valid
-```
-
-**What to Do if Tests Fail:**
-
-- Check validator constraints
-- Fix generator to produce valid output
-- Verify manual test files
-
----
-
-#### `polyman validate --testset <testset>`
-
-Validates tests for a specific testset.
+Validates generated tests by piping each test file through the compiled validator.
 
 **Usage:**
 
 ```bash
-polyman validate --testset tests
-```
-
-**What Happens:**
-Same as `validate all`, but only for specified testset.
-
----
-
-#### `polyman validate --testset <testset> --group <group>`
-
-Validates tests in a specific group.
-
-**Usage:**
-
-```bash
-polyman validate --testset tests --group samples
+polyman validate --all                                    # All tests in all testsets
+polyman validate --testset tests                          # One testset
+polyman validate --testset tests --group samples          # One group
+polyman validate --testset tests --index 5                # One test
 ```
 
 **What Happens:**
 
-1. Compiles validator
-2. Only validates tests that belong to the "samples" group
-3. Skips other groups
+1. Compiles the validator
+2. Runs `./val < test<N>.txt` for each selected test and reports VALID / INVALID with error details
 
-**How It Knows Which Tests:**
-
-- Reads Config.json to determine which test numbers belong to which group
-- Only runs validator on those specific tests
-
----
-
-#### `polyman validate --testset <testset> --index <index>`
-
-Validates a single test.
-
-**Usage:**
-
-```bash
-polyman validate --testset tests --index 5
-```
-
-**What Happens:**
-
-1. Compiles validator
-2. Runs `./val < testsets/tests/test5.txt`
-3. Shows verdict (VALID/INVALID) with details
-
-**Use Case:** Debug a specific failing test.
+If tests fail: check validator constraints, fix the generator, or correct manual test files.
 
 ---
 
 ### Solution Execution
 
-#### `polyman run <name> --all`
+#### `polyman run <name>`
 
-Runs a solution on all tests in all testsets.
-
-**Usage:**
-
-```bash
-polyman run main --all
-```
-
-**What Happens:**
-
-1. **Reads Config.json** and finds solution by name
-2. **Compiles solution:**
-   - C++: Uses g++/clang
-   - Java: Uses javac
-   - Python: No compilation
-3. **For each testset:**
-   - Creates output directory: `solutions-outputs/<solution-name>/<testset>/`
-   - **For each test:**
-     - Runs solution: `./solution < test<N>.txt > output<N>.txt`
-     - Measures execution time
-     - Detects crashes, TLE, MLE
-4. **Runs main solution** (if not already) to generate answers
-5. **Compiles and runs checker:**
-   - For each test: `./checker input.txt jury_answer.txt contestant_output.txt`
-   - Gets verdict: OK, WA, PE, etc.
-6. **Reports:**
-   - Verdict for each test
-   - Execution time
-   - Summary statistics
-
-**Example Output:**
-
-```
-✓ Step 1: Validating configuration for solutions
-✓ Step 2: Compiling solutions
-  Compiling main (acc.cpp)...
-✓ Step 3: Running solution 'main' on testset 'tests'
-  Test 1: OK (15 ms)
-  Test 2: OK (18 ms)
-  Test 3: OK (142 ms)
-  ...
-  Summary: 52/52 tests passed
-  Max time: 142 ms / 1000 ms
-```
-
----
-
-#### `polyman run <name> --testset <testset>`
-
-Runs solution on specific testset.
+Runs a solution on selected tests and checks outputs against the main solution's answers.
 
 **Usage:**
 
 ```bash
-polyman run main --testset tests
-```
-
-**What Happens:**
-Same as above, but only for the specified testset.
-
----
-
-#### `polyman run <name> --testset <testset> --group <group>`
-
-Runs solution on specific group.
-
-**Usage:**
-
-```bash
-polyman run main --testset tests --group samples
+polyman run main --all                                    # All testsets
+polyman run main --testset tests                          # One testset
+polyman run main --testset tests --group samples          # One group
+polyman run main --testset tests --index 5                # One test
 ```
 
 **What Happens:**
 
-1. Compiles solution
-2. Runs only on tests in the "samples" group
-3. Shows results for those tests only
-
-**Use Case:** Quick check on sample tests before full testing.
-
----
-
-#### `polyman run <name> --testset <testset> --index <index>`
-
-Runs solution on single test.
-
-**Usage:**
-
-```bash
-polyman run main --testset tests --index 5
-```
-
-**What Happens:**
-
-1. Compiles solution
-2. Runs on test 5 only
-3. Shows detailed verdict and timing
-
-**Use Case:** Debug specific test failure.
+1. Compiles the solution (C++: g++/clang, Java: javac, Python: none) and the checker
+2. Runs the solution against each selected test, measuring time and detecting TLE/MLE/crashes
+3. Invokes the checker against the main solution's answers and reports per-test verdicts plus a summary
 
 ---
 
@@ -2133,7 +1712,7 @@ polyman run main --testset tests --index 5
 
 #### `polyman test validator`
 
-Tests the validator against its self-tests.
+Runs the validator against its self-tests in `validator/validator_tests.json`.
 
 **Usage:**
 
@@ -2143,38 +1722,14 @@ polyman test validator
 
 **What Happens:**
 
-1. **Reads** `validator/validator_tests.json`
-2. **Compiles validator**
-3. **For each test case:**
-   - Creates temporary input file with test input
-   - Runs `./val < temp_input.txt`
-   - Compares actual verdict with expected verdict
-   - Reports PASS or FAIL
-4. **Summary:** X/Y tests passed
-
-**Example Output:**
-
-```
-✓ Compiling validator
-✓ Running validator self-tests
-  Test 1: ✓ PASS (expected VALID, got VALID)
-  Test 2: ✓ PASS (expected INVALID, got INVALID)
-  Test 3: ✗ FAIL (expected INVALID, got VALID)
-  ...
-  2/3 tests passed
-```
-
-**What to Do if Tests Fail:**
-
-- Check validator logic
-- Verify expected verdicts in validator_tests.json
-- Update validator code or test expectations
+1. Compiles the validator
+2. For each self-test, runs `./val` on the input and compares the actual verdict to the expected one; prints PASS/FAIL summary
 
 ---
 
 #### `polyman test checker`
 
-Tests the checker against its self-tests.
+Runs the checker against its self-tests in `checker/checker_tests.json`.
 
 **Usage:**
 
@@ -2184,34 +1739,14 @@ polyman test checker
 
 **What Happens:**
 
-1. **Reads** `checker/checker_tests.json`
-2. **Compiles checker**
-3. **For each test case:**
-   - Creates temporary files:
-     - `input.txt` (test input)
-     - `answer.txt` (jury answer)
-     - `output.txt` (contestant output)
-   - Runs `./checker input.txt answer.txt output.txt`
-   - Compares actual verdict with expected verdict
-4. **Summary:** X/Y tests passed
-
-**Example Output:**
-
-```
-✓ Compiling checker
-✓ Running checker self-tests
-  Test 1: ✓ PASS (expected OK, got OK)
-  Test 2: ✓ PASS (expected WRONG_ANSWER, got WRONG_ANSWER)
-  Test 3: ✓ PASS (expected PRESENTATION_ERROR, got PRESENTATION_ERROR)
-  ...
-  3/3 tests passed
-```
+1. Compiles the checker
+2. For each self-test, runs `./checker input answer output` and compares the actual verdict to the expected one
 
 ---
 
 #### `polyman test <solution-name>`
 
-Tests a solution against the main correct solution.
+Tests a solution against the main correct solution and verifies it matches its declared tag (WA/TL/RE/ML/OK).
 
 **Usage:**
 
@@ -2221,35 +1756,8 @@ polyman test wa-solution
 
 **What Happens:**
 
-1. **Validates** solution exists in Config.json
-2. **Generates all tests** (if not already generated)
-3. **Runs main solution** (tag: MA) on all tests to get correct answers
-4. **Runs target solution** (e.g., wa-solution) on all tests
-5. **Compares outputs** using checker
-6. **Verifies expected behavior:**
-   - If tag is `WA`: Expects at least one Wrong Answer
-   - If tag is `TL`: Expects at least one Time Limit
-   - If tag is `OK`: Expects all Accepted
-   - If tag is `RE`: Expects at least one Runtime Error
-   - If tag is `ML`: Expects at least one Memory Limit
-7. **Reports:**
-   - Whether solution behaves as expected
-   - Which tests failed/passed
-   - If behavior doesn't match tag
-
-**Example Output:**
-
-```
-✓ Step 1: Validating configuration
-✓ Step 2: Generating tests (if needed)
-✓ Step 3: Running main solution
-✓ Step 4: Running solution 'wa-solution'
-  Test 1: OK
-  Test 2: OK
-  Test 3: WA (Wrong answer: expected 42, got 24)
-  ...
-✓ Solution behaves as expected (tag: WA, got WA on test 3)
-```
+1. Generates tests if needed, runs the main solution to get jury answers, then runs the target solution
+2. Uses the checker to compare outputs and confirms the target solution behaves as its tag advertises (e.g., a `WA`-tagged solution must fail at least one test)
 
 **Use Case:** Verify that WA/TL/RE solutions actually fail as expected.
 
@@ -2494,20 +2002,6 @@ polyman remote list
 2. Fetches all problems you own or have access to
 3. Displays problem information in a formatted table
 
-**Example Output:**
-
-```
-╔════════════════════════════════════════════════════════════════╗
-║  YOUR PROBLEMS ON POLYGON                                       ║
-╚════════════════════════════════════════════════════════════════╝
-
-ID      | Name                    | Owner    | Access | Modified
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-123456  | A Plus B                | tourist  | WRITE  | Yes
-789012  | Graph Problem           | you      | OWNER  | No
-345678  | Dynamic Programming     | you      | OWNER  | Yes
-```
-
 #### Filter by Owner
 
 ```bash
@@ -2556,36 +2050,7 @@ polyman remote pull 123456 ./my-problem
 6. **Step 6:** Generates `Config.json` with all settings
 7. **Step 7:** Downloads tests for specified testsets
 
-**Result:**
-
-```
-my-problem/
-├── Config.json           # Complete problem configuration
-├── checker/
-│   ├── checker.cpp
-│   └── checker_tests.json
-├── validator/
-│   ├── validator.cpp
-│   └── validator_tests.json
-├── generators/
-│   ├── gen1.cpp
-│   └── gen2.cpp
-├── solutions/
-│   ├── main.cpp
-│   ├── wa.cpp
-│   └── tle.py
-├── statements/
-│   ├── english/
-│   │   ├── legend.tex
-│   │   ├── input-format.tex
-│   │   └── output-format.tex
-│   └── russian/
-│       └── ...
-└── manual/
-    └── tests/
-        ├── test1.txt
-        └── test2.txt
-```
+Result: a complete problem directory matching the polyman layout (see [Directory Structure](#directory-structure)).
 
 #### Selective Pull
 
@@ -2723,40 +2188,6 @@ polyman remote view 123456
 1. Fetches problem information from Polygon
 2. Displays detailed problem overview
 
-**Example Output:**
-
-```
-╔════════════════════════════════════════════════════════════════╗
-║  PROBLEM DETAILS                                                ║
-╚════════════════════════════════════════════════════════════════╝
-
-Basic Information:
-  ID: 123456
-  Name: A Plus B
-  Owner: tourist
-  Access: WRITE
-  Modified: Yes
-  Revision: 42
-
-Limits:
-  Time Limit: 1000 ms
-  Memory Limit: 256 MB
-  Input: stdin
-  Output: stdout
-  Interactive: No
-
-Components:
-  Solutions: 5 files
-  Checker: custom_checker.cpp
-  Validator: validator.cpp
-  Generators: 3 files
-  Statements: 2 languages (english, russian)
-
-Packages:
-  Latest Package: Revision 40 (Available)
-  Total Packages: 12
-```
-
 ---
 
 ### Committing Changes
@@ -2784,26 +2215,6 @@ polyman remote commit ./my-problem "Added edge case tests"
 1. Reads problem ID from Config.json (if directory path is provided)
 2. Commits all pending changes on Polygon
 3. Creates a new revision with your commit message
-
-**Example Output:**
-
-```
-╔════════════════════════════════════════════════════════════════╗
-║  COMMIT CHANGES TO POLYGON                                      ║
-╚════════════════════════════════════════════════════════════════╝
-
-✓ Step 1: Reading API Credentials
-✓ Step 2: Initializing Polygon SDK
-✓ Step 3: Getting Problem ID
-  Problem ID: 123456
-✓ Step 4: Committing Changes to Polygon
-  Message: "Updated test cases and fixed validator"
-  Changes committed
-
-╔════════════════════════════════════════════════════════════════╗
-║  CHANGES COMMITTED SUCCESSFULLY!                                ║
-╚════════════════════════════════════════════════════════════════╝
-```
 
 **Best Practices:**
 
@@ -2862,39 +2273,6 @@ polyman remote package ./my-problem standard
    - Maximum wait time: 30 minutes
 6. **Step 6:** Displays package information
 
-**Example Output:**
-
-```
-╔════════════════════════════════════════════════════════════════╗
-║  BUILD AND DOWNLOAD PACKAGE                                     ║
-╚════════════════════════════════════════════════════════════════╝
-
-✓ Step 1: Reading API Credentials
-✓ Step 2: Initializing Polygon SDK
-✓ Step 3: Getting Problem ID
-  Problem ID: 123456
-✓ Step 4: Validating Package Type
-  Package type: standard
-✓ Step 5: Building Package on Polygon
-  Current packages: 5
-  Starting build (this may take several minutes)...
-  Build job queued, waiting for completion...
-  Waiting... (1 minute elapsed)
-  Waiting... (2 minutes elapsed)
-  Package detected (ID: 789, State: RUNNING)
-  Package still building, waiting...
-  Package detected (ID: 789, State: READY)
-  Package built successfully (ID: 789)
-
-╔════════════════════════════════════════════════════════════════╗
-║  PACKAGE BUILT SUCCESSFULLY!                                    ║
-╚════════════════════════════════════════════════════════════════╝
-  Package ID: 789
-  State: READY
-  Message: Build completed successfully
-  You can download the package from Polygon
-```
-
 **Important Notes:**
 
 - Package building is **asynchronous** - it may take several minutes
@@ -2914,83 +2292,22 @@ polyman remote package ./my-problem standard
 
 ### Complete Workflow Example
 
-Here's a typical workflow for working with Polygon problems:
-
-#### 1. Initial Setup (One Time)
-
 ```bash
-# Register your Polygon API credentials
+# One-time setup
 polyman remote register <your-api-key> <your-api-secret>
-
-# List your problems to find the ID
 polyman remote list
-```
 
-#### 2. Pull Existing Problem
-
-```bash
-# Pull problem from Polygon
+# Pull, edit, verify, push, commit
 polyman remote pull 123456 ./my-problem
-
-# Navigate to problem directory
 cd my-problem
-
-# Download testlib if needed
 polyman download-testlib
-```
-
-#### 3. Make Local Changes
-
-```bash
-# Edit files locally
-# - Modify solutions
-# - Update checker/validator
-# - Add new generators
-# - Create manual tests
-
-# Test locally
-polyman generate --all
-polyman validate --all
-polyman run main --all
+# ... edit files ...
 polyman verify
-```
+polyman remote push 123456 ./my-problem            # or -sct for selective
+polyman remote commit . "Updated solutions and added stress tests"
 
-#### 4. Push Changes Back
-
-```bash
-# Push all changes
-polyman remote push 123456 ./my-problem
-
-# Or push selectively
-polyman remote push 123456 ./my-problem -sct  # Solutions, checker, tests
-
-# Commit changes
-polyman remote commit ./my-problem "Updated solutions and added stress tests"
-```
-
-#### 5. Build and Test Package
-
-```bash
-# Build standard package
+# Build a package
 polyman remote package . standard
-
-# Download and test package from Polygon
-```
-
-#### 6. Iterative Development
-
-```bash
-# Pull latest changes (if working with others)
-polyman remote pull 123456 ./my-problem
-
-# Make changes, test locally
-polyman verify
-
-# Push updates
-polyman remote push 123456 ./my-problem
-
-# Commit
-polyman remote commit ./my-problem "Fixed edge cases"
 ```
 
 ---
@@ -3001,67 +2318,29 @@ polyman remote commit ./my-problem "Fixed edge cases"
 
 **✅ Do's:**
 
-
-1. **Use selective push for quick updates**
+1. **Test locally before pushing**
    ```bash
-   # Only updated solutions
-   polyman remote push . . -s
-   
-   # Only updated tests
-   polyman remote push . . -t
+   polyman verify  # Always verify before pushing
+   polyman remote push . .
+   ```
+
+2. **Use selective push for quick updates**
+   ```bash
+   polyman remote push . . -s   # Only updated solutions
+   polyman remote push . . -t   # Only updated tests
    ```
 
 3. **Commit frequently with descriptive messages**
    ```bash
    polyman remote commit . "feat: Added worst-case generator"
    polyman remote commit . "fix: Corrected validator bounds"
-   polyman remote commit . "test: Added edge case for n=1"
    ```
-
-4. **Test locally before pushing**
-   ```bash
-   polyman verify  # Always verify before pushing
-   polyman remote push . .
-   ```
-
-5. **View problem details to verify**
-   ```bash
-   polyman remote view 123456
-   # Verify your changes are correct
-   ```
-6. **Make sure your `pwd` contains `Config.json` when using `.` as problem identifier.**
-  ```bash
-   pwd
-   cat Config.json
-  {
-    ...Config content with problemId
-    "problemId": 123456,  
-    ... 
-  }
-
-  polyman remote push . . # Push changes to problem 123456
-  ```
 
 **❌ Don'ts:**
 
-1. **Don't push without testing**
-   - Always run `polyman verify` first
-
-2. **Don't forget to commit**
-   - Changes are not permanent until committed
-   - Polygon shows uncommitted changes
-
-3. **Don't push conflicting changes**
-   - Pull latest version first
-   - Resolve conflicts locally
-
-4. **Don't share API credentials**
-   - Keep credentials secure
-   - Don't commit to version control
-
-5. **Don't push broken validators/checkers**
-   - Test thoroughly with self-tests
-   - Verify compilation succeeds
+1. **Don't push without testing** — always run `polyman verify` first.
+2. **Don't forget to commit** — changes are not permanent until committed.
+3. **Don't share API credentials** — keep them secure and out of version control.
 
 
 ---
