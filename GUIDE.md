@@ -362,10 +362,7 @@ Define test generators:
 
 **Important:** Generators **must** be C++ and use testlib.h
 
-**Don'ts:**
-
-- Don't use absolute paths for statement files
-- Don't mix encodings within the same problem
+For authoring guidance see [Writing Generators](#writing-generators).
 
 ### Checker
 
@@ -405,15 +402,7 @@ Use `polyman list checkers` to see all available checkers:
 - **yesno**: Compare yes/no answers
 - And many more...
 
-**Do's:**
-
-- Use standard checkers when possible (wcmp for most problems)
-- Include checker tests in `checker_tests.json`
-- Test your custom checker thoroughly
-
-**Don'ts:**
-
-- Don't write custom checkers unless necessary
+For authoring guidance see [Writing Checkers](#writing-checkers).
 
 ### Validator
 
@@ -431,9 +420,7 @@ Define input validator:
 
 **Important:** Validators **must** be C++ and use testlib.h
 
-**Don'ts:**
-
-- Don't write custom checkers unless necessary
+For authoring guidance see [Writing Validators](#writing-validators).
 
 ### Testsets
 
@@ -1137,78 +1124,6 @@ testsets/
     ├── test3.txt       # And so on...
     └── test100.txt     # Last test
 ```
-
----
-
-#### Summary
-
-| Command Type         | Purpose                      | Creates | Use When                                |
-| -------------------- | ---------------------------- | ------- | --------------------------------------- |
-| **manual**           | Use pre-written file         | 1 test  | Sample tests, specific edge cases       |
-| **generator**  | Run generator multiple times | N tests | Many similar tests with different sizes |
-
-**Key Points:**
-
-- **Testsets** = Collections of tests (usually just one named "tests")
-- **Groups** = Categories within testsets (optional but recommended)
-- **Commands** = Instructions for creating individual tests
-- **Test files** = Stored in `testsets/<testset-name>/test<N>.txt`
-
-**Typical Configuration:**
-
-```json
-{
-  "testsets": [
-    {
-      "name": "tests",
-      "groupsEnabled": true,
-      "groups": [{ "name": "samples" }, { "name": "main" }, { "name": "edge" }],
-      "generatorScript": {
-        "commands": [
-          // 2-3 manual samples
-          {
-            "type": "manual",
-            "manualFile": "./tests/manual/sample1.txt",
-            "group": "samples"
-          },
-
-          // 30-50 main tests
-          {
-            "type": "generator",
-            "generator": "gen-random",
-            "range": [10, 60],
-            "group": "main"
-          },
-
-          // 5-10 edge cases
-          {
-            "type": "generator",
-            "generator": "gen-edge",
-            "range": [1, 10],
-            "group": "edge"
-          },
-        ]
-      }
-    }
-  ]
-}
-```
-
-**Total:** ~55-65 tests with good coverage
-
----
-
-**✅ Do's:**
-
-- Always include sample tests in a separate group
-- Use meaningful group names
-- Order tests from simple to complex
-
-**❌ Don'ts:**
-
-- Don't create too many small testsets (combine related tests)
-- Don't forget to specify groups if groupsEnabled is true
-- Don't use the same test number twice
 
 ---
 
@@ -3151,65 +3066,7 @@ polyman remote commit ./my-problem "Fixed edge cases"
 
 ---
 
-### Troubleshooting Remote Operations
-
-#### Authentication Errors
-
-**Error:** `Authentication failed` or `Invalid API credentials`
-
-**Solution:**
-```bash
-# Re-register credentials
-polyman remote register <api-key> <api-secret>
-
-# Verify credentials on Polygon website
-# Settings → API → Check if key is active
-```
-
-#### Problem Not Found
-
-**Error:** `Problem 123456 not found` or `Access denied`
-
-**Solutions:**
-- Verify problem ID: `polyman remote list`
-- Check you have access to the problem on Polygon
-- Ensure problem hasn't been deleted
-
-#### Push Failures
-
-**Error:** `Failed to upload file` or `Polygon API error`
-
-**Solutions:**
-```bash
-# Check file exists and is valid
-ls -la <file-path>
-
-# Verify Config.json has problemId
-cat Config.json | grep problemId
-
-# Try selective push to isolate issue
-polyman remote push . . -s  # Just solutions
-polyman remote push . . -c  # Just checker
-```
-
-#### Package Build Timeout
-
-**Error:** `Package build timed out after 30 minutes`
-
-**Solutions:**
-- Problem may have too many tests or complex generation
-- Check Polygon web interface for actual package status
-- Package might still be building - wait and check later
-- Try building `standard` package instead of `full`
-
-#### Line Ending Issues
-
-**Issue:** Tests fail on Polygon but work locally
-
-**Solution:**
-- Polyman automatically handles line ending conversion
-- Ensure you're using latest version
-- Manually verify test files don't have mixed line endings
+For Polygon-specific errors see [Troubleshooting - Remote Operations](#remote-operations).
 
 ---
 
@@ -3531,6 +3388,66 @@ Timeout while compiling validator
 - Remove unnecessary includes
 - Use faster compilation flags
 - Check for infinite template recursion
+
+### Remote Operations
+
+#### Authentication Errors
+
+**Error:** `Authentication failed` or `Invalid API credentials`
+
+**Solution:**
+```bash
+# Re-register credentials
+polyman remote register <api-key> <api-secret>
+
+# Verify credentials on Polygon website
+# Settings → API → Check if key is active
+```
+
+#### Problem Not Found
+
+**Error:** `Problem 123456 not found` or `Access denied`
+
+**Solutions:**
+- Verify problem ID: `polyman remote list`
+- Check you have access to the problem on Polygon
+- Ensure problem hasn't been deleted
+
+#### Push Failures
+
+**Error:** `Failed to upload file` or `Polygon API error`
+
+**Solutions:**
+```bash
+# Check file exists and is valid
+ls -la <file-path>
+
+# Verify Config.json has problemId
+cat Config.json | grep problemId
+
+# Try selective push to isolate issue
+polyman remote push . . -s  # Just solutions
+polyman remote push . . -c  # Just checker
+```
+
+#### Package Build Timeout
+
+**Error:** `Package build timed out after 30 minutes`
+
+**Solutions:**
+- Problem may have too many tests or complex generation
+- Check Polygon web interface for actual package status
+- Package might still be building - wait and check later
+- Try building `standard` package instead of `full`
+
+#### Line Ending Issues
+
+**Issue:** Tests fail on Polygon but work locally
+
+**Solution:**
+- Polyman automatically handles line ending conversion
+- Ensure you're using latest version
+- Manually verify test files don't have mixed line endings
 
 ---
 
