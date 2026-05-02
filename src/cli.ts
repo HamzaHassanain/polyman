@@ -7,6 +7,8 @@
  */
 
 import { Command } from 'commander';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 
 import {
   createTemplateAction,
@@ -32,6 +34,12 @@ import { printComprehensiveHelp } from './help';
 
 const program = new Command();
 
+// Read version from package.json so the CLI's --version output always matches
+// the published package; previously this string was hand-edited and drifted.
+const pkg = JSON.parse(
+  readFileSync(join(__dirname, '..', 'package.json'), 'utf8')
+) as { version: string };
+
 /**
  * CLI Program Configuration
  * Sets up the polyman command-line tool with name, description, and version.
@@ -41,7 +49,7 @@ program
   .description(
     'CLI tool for Codeforces problem setters to manage problems via terminal'
   )
-  .version('2.2.2')
+  .version(pkg.version)
   .helpOption(false)
   .option('-h, --help', 'display help for command', () => {
     printComprehensiveHelp(program);
