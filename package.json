@@ -69,6 +69,7 @@
   },
   "dependencies": {
     "chalk": "^5.6.2",
-    "commander": "^14.0.2"
+    "commander": "^14.0.2",
+    "execa": "^5.1.1"
   }
 }

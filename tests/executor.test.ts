@@ -1,18 +1,24 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Mock, MockedFunction, MockInstance } from 'vitest';
-import { CommandExecutor } from '../src/executor';
-import type { ExecutionOptions, ExecutionResult } from '../src/executor';
 import { spawn } from 'child_process';
-import type { ChildProcess } from 'child_process';
-import EventEmitter from 'events';
+import execa from 'execa';
+import { CommandExecutor } from '../src/executor';
+import type { ExecutionOptions } from '../src/executor';
 import { fmt } from '../src/formatter';
 
-// Mock child_process
+// ---------------------------------------------------------------------------
+// Mocks
+// ---------------------------------------------------------------------------
+
+vi.mock('execa', () => ({
+  __esModule: true,
+  default: vi.fn(),
+}));
+
 vi.mock('child_process', () => ({
   spawn: vi.fn(),
 }));
 
-// Mock formatter to avoid console noise during tests
 vi.mock('../src/formatter', () => ({
   fmt: {
     dim: vi.fn(),
@@ -25,32 +31,88 @@ vi.mock('../src/formatter', () => ({
   },
 }));
 
-/**
- * Minimal typed mock of a {@link ChildProcess} suitable for the assertions in
- * this suite. Only the surface area touched by `CommandExecutor` is modelled.
- */
-interface MockChild extends EventEmitter {
-  pid: number | undefined;
-  stdout: EventEmitter | undefined;
-  stderr: EventEmitter | undefined;
-  kill: Mock;
+// ---------------------------------------------------------------------------
+// Mock subprocess: a then-able with `.pid` / `.kill()` matching the surface of
+// an `execa.ExecaChildProcess` that the executor actually touches.
+// ---------------------------------------------------------------------------
+
+interface MockExecaResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number | undefined;
+  signal: string | undefined;
+  failed: boolean;
+  shortMessage?: string;
+  message?: string;
+  command: string;
+  escapedCommand: string;
   killed: boolean;
+  isCanceled: boolean;
+  timedOut: boolean;
 }
 
-/**
- * Shape exposing the private members of {@link CommandExecutor} that the tests
- * need to spy on. Casting through this interface keeps the type system honest
- * without resorting to `any`.
- */
-interface ExecutorPrivate {
-  handleProcessClose: (...args: unknown[]) => unknown;
-  handleProcessError: (...args: unknown[]) => unknown;
-  cancellableDelay: (ms: number) => [Promise<void>, () => void];
-  activeProcesses: Set<ChildProcess>;
+interface MockSubprocess extends Promise<MockExecaResult> {
+  pid: number | undefined;
+  kill: Mock;
+  killed: boolean;
+  /** Resolve the underlying execa promise with the given (partial) result. */
+  __resolveWith: (overrides?: Partial<MockExecaResult>) => void;
+  __rejectWith: (err: unknown) => void;
 }
+
+const baseResult = (over: Partial<MockExecaResult> = {}): MockExecaResult => ({
+  stdout: '',
+  stderr: '',
+  exitCode: 0,
+  signal: undefined,
+  failed: false,
+  command: '',
+  escapedCommand: '',
+  killed: false,
+  isCanceled: false,
+  timedOut: false,
+  ...over,
+});
+
+/**
+ * Default `kill` behavior auto-resolves the promise with a killed-by-signal
+ * result, mimicking what real execa does after the child is killed. Tests that
+ * want to inspect kill without auto-resolving can overwrite `sub.kill`.
+ */
+const createMockSubprocess = (
+  pid: number | undefined = 12345
+): MockSubprocess => {
+  let resolveFn!: (r: MockExecaResult) => void;
+  let rejectFn!: (e: unknown) => void;
+  const promise = new Promise<MockExecaResult>((resolve, reject) => {
+    resolveFn = resolve;
+    rejectFn = reject;
+  }) as MockSubprocess;
+
+  promise.pid = pid;
+  promise.killed = false;
+  promise.kill = vi.fn((signal?: string) => {
+    promise.killed = true;
+    resolveFn(
+      baseResult({
+        killed: true,
+        exitCode: undefined,
+        signal: signal ?? 'SIGTERM',
+        failed: true,
+        shortMessage: `Command was killed with ${signal ?? 'SIGTERM'}`,
+      })
+    );
+  });
+  promise.__resolveWith = over => resolveFn(baseResult(over));
+  promise.__rejectWith = rejectFn;
+  return promise;
+};
+
+// ---------------------------------------------------------------------------
 
 describe('CommandExecutor', () => {
   let executor: CommandExecutor;
+  let mockExeca: MockedFunction<typeof execa>;
   let mockSpawn: MockedFunction<typeof spawn>;
 
   const originalPlatform = process.platform;
@@ -58,80 +120,60 @@ describe('CommandExecutor', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     executor = new CommandExecutor();
+    mockExeca = vi.mocked(execa);
     mockSpawn = vi.mocked(spawn);
-    // Default to linux for most tests to ensure stable baseline
-    Object.defineProperty(process, 'platform', {
-      value: 'linux',
-    });
+    Object.defineProperty(process, 'platform', { value: 'linux' });
     vi.spyOn(process, 'kill').mockImplementation(() => true);
   });
 
   afterEach(() => {
-    Object.defineProperty(process, 'platform', {
-      value: originalPlatform,
-    });
+    Object.defineProperty(process, 'platform', { value: originalPlatform });
   });
 
-  // Helper to create a mock child process
-  const createMockChild = (pid: number | undefined = 12345): MockChild => {
-    const child = new EventEmitter() as MockChild;
-    child.pid = pid;
-    child.stdout = new EventEmitter();
-    child.stderr = new EventEmitter();
-    child.kill = vi.fn();
-    child.killed = false;
-    return child;
+  /** Prime the next execa() call to return the given mock subprocess. */
+  const primeExeca = (sub: MockSubprocess) => {
+    (mockExeca as unknown as Mock).mockReturnValueOnce(sub);
   };
 
-  /**
-   * Convenience cast: the spawn mock returns a `ChildProcess`, but in tests we
-   * feed it our `MockChild`. This helper performs the unavoidable widening in
-   * one place so callers stay readable.
-   */
-  const asChildProcess = (child: MockChild): ChildProcess =>
-    child as unknown as ChildProcess;
-
-  const setSpawnReturn = (child: MockChild) => {
-    mockSpawn.mockReturnValue(asChildProcess(child));
-  };
+  // -------------------------------------------------------------------------
+  // execute() — happy path & basic error routing
+  // -------------------------------------------------------------------------
 
   describe('execute', () => {
-    it('should execute command successfully (exit code 0)', async () => {
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
+    it('returns a successful result on exit code 0', async () => {
+      const sub = createMockSubprocess();
+      primeExeca(sub);
 
       const promise = executor.execute('echo success', { timeout: 1000 });
-
-      // Emit some output
-      mockChild.stdout?.emit('data', Buffer.from('output line 1\n'));
-      mockChild.stdout?.emit('data', Buffer.from('output line 2'));
-
-      // Emit close
-      mockChild.emit('close', 0, null);
+      sub.__resolveWith({ stdout: 'output line 1\noutput line 2' });
 
       const result = await promise;
-
       expect(result.success).toBe(true);
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toBe('output line 1\noutput line 2');
-      expect(mockSpawn).toHaveBeenCalledWith('echo success', expect.anything());
+      expect(mockExeca).toHaveBeenCalledWith(
+        'echo success',
+        expect.objectContaining({ shell: true })
+      );
     });
 
-    it('should handle command failure (non-zero exit code)', async () => {
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
+    it('throws on non-zero exit when no onError callback is given', async () => {
+      const sub = createMockSubprocess();
+      primeExeca(sub);
 
       const promise = executor.execute('badcommand', { timeout: 1000 });
-
-      mockChild.stderr?.emit('data', Buffer.from('command not found'));
-      mockChild.emit('close', 1, null);
+      sub.__resolveWith({
+        exitCode: 1,
+        failed: true,
+        stderr: 'command not found',
+      });
 
       await expect(promise).rejects.toThrow('Command failed with exit code 1');
     });
 
-    it('should call onError callback on failure if provided', async () => {
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
+    it('routes failure through onError when provided', async () => {
+      const sub = createMockSubprocess();
+      primeExeca(sub);
       const onError: MockedFunction<NonNullable<ExecutionOptions['onError']>> =
         vi.fn();
 
@@ -139,33 +181,36 @@ describe('CommandExecutor', () => {
         timeout: 1000,
         onError,
       });
-
-      mockChild.stderr?.emit('data', Buffer.from('error details'));
-      mockChild.emit('close', 127, null);
+      sub.__resolveWith({
+        exitCode: 127,
+        failed: true,
+        stderr: 'error details',
+      });
 
       const result = await promise;
-
       expect(result.success).toBe(false);
       expect(result.exitCode).toBe(127);
       expect(onError).toHaveBeenCalledWith(result);
     });
 
-    it('should handle process error event (spawn failure)', async () => {
-      const mockChild = createMockChild();
-      // Ensure we don't resolve from close before error
-      setSpawnReturn(mockChild);
+    it('throws on spawn failure (failed + undefined exit) when no onError', async () => {
+      const sub = createMockSubprocess();
+      primeExeca(sub);
 
       const promise = executor.execute('fail_spawn', { timeout: 1000 });
-
-      const spawnError = new Error('spawn ENOENT');
-      mockChild.emit('error', spawnError);
+      sub.__resolveWith({
+        failed: true,
+        exitCode: undefined,
+        shortMessage: 'spawn ENOENT',
+        stderr: 'spawn ENOENT',
+      });
 
       await expect(promise).rejects.toThrow('spawn ENOENT');
     });
 
-    it('should use onError for spawn failure if provided', async () => {
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
+    it('routes spawn failure through onError when provided', async () => {
+      const sub = createMockSubprocess();
+      primeExeca(sub);
       const onError: MockedFunction<NonNullable<ExecutionOptions['onError']>> =
         vi.fn();
 
@@ -173,33 +218,36 @@ describe('CommandExecutor', () => {
         timeout: 1000,
         onError,
       });
-
-      mockChild.emit('error', new Error('spawn failed'));
+      sub.__resolveWith({
+        failed: true,
+        exitCode: undefined,
+        shortMessage: 'spawn ENOENT',
+        stderr: '',
+      });
 
       const result = await promise;
       expect(result.success).toBe(false);
       expect(onError).toHaveBeenCalled();
     });
 
-    it('should handle silent mode', async () => {
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
+    it('runs in silent mode without throwing on success', async () => {
+      const sub = createMockSubprocess();
+      primeExeca(sub);
+      const dimMock = vi.spyOn(fmt, 'dim');
 
       const promise = executor.execute('quiet', {
         timeout: 1000,
         silent: true,
       });
-
-      mockChild.emit('close', 0, null);
+      sub.__resolveWith({ stdout: 'should not be printed' });
       await promise;
 
-      // Since we mocked formatter, we can't easily check if it wasn't called without spying on the mock module itself
-      // But assuming the code logic uses `if (!options.silent) fmt...`, coverage will verify the branch.
+      expect(dimMock).not.toHaveBeenCalled();
     });
 
-    it('should call onSuccess callback', async () => {
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
+    it('invokes onSuccess on exit 0', async () => {
+      const sub = createMockSubprocess();
+      primeExeca(sub);
       const onSuccess: MockedFunction<
         NonNullable<ExecutionOptions['onSuccess']>
       > = vi.fn();
@@ -208,8 +256,7 @@ describe('CommandExecutor', () => {
         timeout: 1000,
         onSuccess,
       });
-
-      mockChild.emit('close', 0, null);
+      sub.__resolveWith({ exitCode: 0 });
 
       const result = await promise;
       expect(result.success).toBe(true);
@@ -217,31 +264,33 @@ describe('CommandExecutor', () => {
     });
   });
 
-  describe('Timeout Handling', () => {
-    it('should reject with error when timeout occurs and no callback provided', async () => {
+  // -------------------------------------------------------------------------
+  // Timeout handling
+  // -------------------------------------------------------------------------
+
+  describe('Timeout handling', () => {
+    it('throws when the timeout fires and no onTimeout is provided', async () => {
       vi.useFakeTimers();
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
+      const sub = createMockSubprocess();
+      primeExeca(sub);
 
       const promise = executor.execute('sleep 10', { timeout: 100 });
-
-      // Expect rejection concurrently with timer advancement
-      const testPromise = expect(promise).rejects.toThrow(
+      const assertion = expect(promise).rejects.toThrow(
         'Process killed after 100ms timeout'
       );
 
-      // Advance time to trigger timeout
-      await vi.advanceTimersByTimeAsync(1000);
-
-      await testPromise;
+      // Advance past the timeout. Default `kill` auto-resolves the subprocess
+      // so the awaited execa promise unblocks.
+      await vi.advanceTimersByTimeAsync(200);
+      await assertion;
 
       vi.useRealTimers();
     });
 
-    it('should call onTimeout callback and cleanup', async () => {
+    it('invokes onTimeout and returns a timed-out result', async () => {
       vi.useFakeTimers();
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
+      const sub = createMockSubprocess();
+      primeExeca(sub);
       const onTimeout: MockedFunction<
         NonNullable<ExecutionOptions['onTimeout']>
       > = vi.fn();
@@ -250,11 +299,9 @@ describe('CommandExecutor', () => {
         timeout: 100,
         onTimeout,
       });
+      const advance = vi.advanceTimersByTimeAsync(500);
 
-      // Advance time and wait for promise
-      const advancePromise = vi.advanceTimersByTimeAsync(1000);
-
-      const [result] = await Promise.all([promise, advancePromise]);
+      const [result] = await Promise.all([promise, advance]);
 
       expect(result.timedOut).toBe(true);
       expect(result.success).toBe(false);
@@ -263,16 +310,13 @@ describe('CommandExecutor', () => {
       vi.useRealTimers();
     });
 
-    it('should resolve normally if process finishes before timeout', async () => {
+    it('resolves normally if the process finishes before the timeout', async () => {
       vi.useFakeTimers();
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
+      const sub = createMockSubprocess();
+      primeExeca(sub);
 
       const promise = executor.execute('quick', { timeout: 5000 });
-
-      // Finish quickly
-      mockChild.emit('close', 0, null);
-
+      sub.__resolveWith({ exitCode: 0 });
       await vi.runAllTimersAsync();
 
       const result = await promise;
@@ -282,10 +326,14 @@ describe('CommandExecutor', () => {
     });
   });
 
-  describe('Memory Limit Handling', () => {
-    it('should detect memory limit exceeded via exit code 137', async () => {
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
+  // -------------------------------------------------------------------------
+  // Memory limit / MLE detection
+  // -------------------------------------------------------------------------
+
+  describe('Memory limit handling', () => {
+    it('detects MLE via exit code 137', async () => {
+      const sub = createMockSubprocess();
+      primeExeca(sub);
       const onMemoryExceeded: MockedFunction<
         NonNullable<ExecutionOptions['onMemoryExceeded']>
       > = vi.fn();
@@ -294,8 +342,7 @@ describe('CommandExecutor', () => {
         timeout: 1000,
         onMemoryExceeded,
       });
-
-      mockChild.emit('close', 137, null);
+      sub.__resolveWith({ exitCode: 137, failed: true });
 
       const result = await promise;
       expect(result.memoryExceeded).toBe(true);
@@ -303,9 +350,9 @@ describe('CommandExecutor', () => {
       expect(onMemoryExceeded).toHaveBeenCalled();
     });
 
-    it('should detect memory limit exceeded via stderr message', async () => {
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
+    it('detects MLE via bad_alloc in stderr', async () => {
+      const sub = createMockSubprocess();
+      primeExeca(sub);
       const onMemoryExceeded: MockedFunction<
         NonNullable<ExecutionOptions['onMemoryExceeded']>
       > = vi.fn();
@@ -314,104 +361,126 @@ describe('CommandExecutor', () => {
         timeout: 1000,
         onMemoryExceeded,
       });
-
-      mockChild.stderr?.emit(
-        'data',
-        Buffer.from('terminate called after throwing bad_alloc')
-      );
-      mockChild.emit('close', 1, null);
+      sub.__resolveWith({
+        exitCode: 1,
+        failed: true,
+        stderr: 'terminate called after throwing bad_alloc',
+      });
 
       const result = await promise;
       expect(result.memoryExceeded).toBe(true);
       expect(onMemoryExceeded).toHaveBeenCalled();
     });
 
-    it('should throw error if memory exceeded and no callback provided', async () => {
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
+    it('detects MLE via Python MemoryError', async () => {
+      const sub = createMockSubprocess();
+      primeExeca(sub);
+      const onMemoryExceeded: MockedFunction<
+        NonNullable<ExecutionOptions['onMemoryExceeded']>
+      > = vi.fn();
+
+      const promise = executor.execute('py_oom', {
+        timeout: 1000,
+        onMemoryExceeded,
+      });
+      sub.__resolveWith({
+        exitCode: 1,
+        failed: true,
+        stderr: 'MemoryError: Out of memory',
+      });
+
+      await promise;
+      expect(onMemoryExceeded).toHaveBeenCalled();
+    });
+
+    it('throws when MLE detected and no callback provided', async () => {
+      const sub = createMockSubprocess();
+      primeExeca(sub);
 
       const promise = executor.execute('oom_no_cb', { timeout: 1000 });
-
-      mockChild.emit('close', 137, null);
+      sub.__resolveWith({ exitCode: 137, failed: true });
 
       await expect(promise).rejects.toThrow('Memory limit exceeded');
     });
   });
 
-  describe('Platform Specifics', () => {
+  // -------------------------------------------------------------------------
+  // Platform specifics
+  // -------------------------------------------------------------------------
+
+  describe('Platform specifics', () => {
     describe('Windows', () => {
       beforeEach(() => {
         Object.defineProperty(process, 'platform', { value: 'win32' });
       });
 
-      it('should normalize paths in command', async () => {
+      it('normalizes ./ paths to .\\', async () => {
         vi.useFakeTimers();
-        const mockChild = createMockChild();
-        setSpawnReturn(mockChild);
+        const sub = createMockSubprocess();
+        primeExeca(sub);
 
         const promise = executor.execute('./my-prog/bin', { timeout: 1000 });
-        mockChild.emit('close', 0);
-
-        await vi.advanceTimersByTimeAsync(100);
+        sub.__resolveWith({ exitCode: 0 });
+        // file-handle release delay
+        await vi.advanceTimersByTimeAsync(200);
         await promise;
 
-        expect(mockSpawn).toHaveBeenCalledWith(
+        expect(mockExeca).toHaveBeenCalledWith(
           expect.stringContaining('.\\my-prog\\bin'),
           expect.anything()
         );
         vi.useRealTimers();
       });
 
-      it('should quote executables with spaces if needed', async () => {
+      it('normalizes inner forward slashes in the executable', async () => {
         vi.useFakeTimers();
-        const mockChild = createMockChild();
-        setSpawnReturn(mockChild);
+        const sub = createMockSubprocess();
+        primeExeca(sub);
 
         const promise = executor.execute('bin/executable arg1', {
           timeout: 1000,
         });
-        mockChild.emit('close', 0);
-        await vi.advanceTimersByTimeAsync(100);
+        sub.__resolveWith({ exitCode: 0 });
+        await vi.advanceTimersByTimeAsync(200);
         await promise;
 
-        expect(mockSpawn).toHaveBeenCalledWith(
+        expect(mockExeca).toHaveBeenCalledWith(
           expect.stringContaining('bin\\executable arg1'),
           expect.anything()
         );
         vi.useRealTimers();
       });
 
-      it('should set detached: false for spawned process', async () => {
+      it('passes detached: false to execa', async () => {
         vi.useFakeTimers();
-        const mockChild = createMockChild();
-        setSpawnReturn(mockChild);
+        const sub = createMockSubprocess();
+        primeExeca(sub);
 
         const promise = executor.execute('cmd', { timeout: 1000 });
-        mockChild.emit('close', 0);
-        await vi.advanceTimersByTimeAsync(100);
+        sub.__resolveWith({ exitCode: 0 });
+        await vi.advanceTimersByTimeAsync(200);
         await promise;
 
-        expect(mockSpawn).toHaveBeenCalledWith(
+        expect(mockExeca).toHaveBeenCalledWith(
           expect.any(String),
           expect.objectContaining({ detached: false })
         );
         vi.useRealTimers();
       });
 
-      it('should use taskkill for killing process tree', async () => {
+      it('uses taskkill /T /F to kill the tree on timeout', async () => {
         vi.useFakeTimers();
-        const mockChild = createMockChild(9999);
-        setSpawnReturn(mockChild);
+        const sub = createMockSubprocess(9999);
+        primeExeca(sub);
 
         const promise = executor.execute('long_run', {
           timeout: 100,
           onTimeout: () => {},
         });
-
-        await vi.advanceTimersByTimeAsync(1500);
+        await vi.advanceTimersByTimeAsync(500);
         await promise;
 
-        expect(mockSpawn).toHaveBeenLastCalledWith(
+        expect(mockSpawn).toHaveBeenCalledWith(
           'taskkill',
           expect.arrayContaining(['/pid', '9999', '/T', '/F']),
           expect.anything()
@@ -419,84 +488,81 @@ describe('CommandExecutor', () => {
         vi.useRealTimers();
       });
 
-      it('should wait for file handles during cleanup (delay check)', async () => {
+      it('waits for the file-handle release delay during cleanup', async () => {
         vi.useFakeTimers();
+        const sub = createMockSubprocess();
+        primeExeca(sub);
 
-        const mockChild = createMockChild();
-        setSpawnReturn(mockChild);
-        void executor.execute('cmd', { timeout: 50 });
+        // Start a long-running process; it stays in activeProcesses.
+        void executor.execute('cmd', { timeout: 5000 }).catch(() => {});
 
         const cleanupPromise = executor.cleanup();
-
-        // Should be waiting 150ms
         await vi.advanceTimersByTimeAsync(200);
         await cleanupPromise;
         vi.useRealTimers();
       });
 
-      it('should ignore memory limit on Windows (line 193)', async () => {
-        const mockChild = createMockChild();
-        setSpawnReturn(mockChild);
+      it('does not wrap the command with ulimit / -Xmx on Windows', async () => {
+        const sub = createMockSubprocess();
+        primeExeca(sub);
 
-        // Pass memory limit, expecting it to be ignored in the command
         const promise = executor.execute('cmd', {
           timeout: 1000,
           memoryLimitMB: 256,
         });
-        mockChild.emit('close', 0, null);
-
+        sub.__resolveWith({ exitCode: 0 });
+        // Need to flush the post-resolve windows file-handle delay.
+        vi.useFakeTimers();
+        await vi.advanceTimersByTimeAsync(200);
         await promise;
+        vi.useRealTimers();
 
-        expect(mockSpawn).toHaveBeenCalledWith('cmd', expect.anything());
-        expect(mockSpawn).not.toHaveBeenCalledWith(
-          expect.stringContaining('ulimit'),
-          expect.anything()
-        );
-        expect(mockSpawn).not.toHaveBeenCalledWith(
-          expect.stringContaining('Xmx'),
-          expect.anything()
-        );
+        const cmd = mockExeca.mock.calls[0]?.[0];
+        expect(cmd).toBe('cmd');
+        expect(cmd).not.toContain('ulimit');
+        expect(cmd).not.toContain('Xmx');
       });
     });
 
     describe('Linux/Unix', () => {
-      beforeEach(() => {
-        Object.defineProperty(process, 'platform', { value: 'linux' });
-      });
+      it('wraps the command in `ulimit -v` for memory limits', async () => {
+        const sub = createMockSubprocess();
+        primeExeca(sub);
 
-      it('should use ulimit for memory limits', () => {
-        const mockChild = createMockChild();
-        setSpawnReturn(mockChild);
+        const promise = executor.execute('./prog', {
+          timeout: 1000,
+          memoryLimitMB: 128,
+        });
+        sub.__resolveWith({ exitCode: 0 });
+        await promise;
 
-        void executor.execute('./prog', { timeout: 1000, memoryLimitMB: 128 });
-        mockChild.emit('close', 0);
-
-        expect(mockSpawn).toHaveBeenCalledWith(
+        expect(mockExeca).toHaveBeenCalledWith(
           expect.stringContaining('ulimit -v 131072; ./prog'),
           expect.anything()
         );
       });
 
-      it('should use -Xmx for Java memory limits', () => {
-        const mockChild = createMockChild();
-        setSpawnReturn(mockChild);
+      it('rewrites Java commands with -Xmx', async () => {
+        const sub = createMockSubprocess();
+        primeExeca(sub);
 
-        void executor.execute('java Main', {
+        const promise = executor.execute('java Main', {
           timeout: 1000,
           memoryLimitMB: 256,
         });
-        mockChild.emit('close', 0);
+        sub.__resolveWith({ exitCode: 0 });
+        await promise;
 
-        expect(mockSpawn).toHaveBeenCalledWith(
+        expect(mockExeca).toHaveBeenCalledWith(
           expect.stringContaining('java -Xmx256m Main'),
           expect.anything()
         );
       });
 
-      it('should kill process group (negative pid)', async () => {
+      it('kills the process group with negative PID + SIGKILL on timeout', async () => {
         vi.useFakeTimers();
-        const mockChild = createMockChild(5555);
-        setSpawnReturn(mockChild);
+        const sub = createMockSubprocess(5555);
+        primeExeca(sub);
 
         const killSpy: MockInstance<typeof process.kill> = vi
           .spyOn(process, 'kill')
@@ -506,25 +572,23 @@ describe('CommandExecutor', () => {
           timeout: 100,
           onTimeout: () => {},
         });
-        // Timeout (100) + Grace (100) + Buffer
-        await vi.advanceTimersByTimeAsync(1000);
+        await vi.advanceTimersByTimeAsync(500);
         await promise;
 
-        expect(killSpy).toHaveBeenCalledWith(-5555, 'SIGSEGV');
+        expect(killSpy).toHaveBeenCalledWith(-5555, 'SIGKILL');
         vi.useRealTimers();
       });
 
-      it('should handle errors during process killing (ESRCH)', async () => {
+      it('swallows ESRCH errors from process.kill', async () => {
         vi.useFakeTimers();
-        const mockChild = createMockChild(5555);
-        setSpawnReturn(mockChild);
+        const sub = createMockSubprocess(5555);
+        primeExeca(sub);
 
-        const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
+        vi.spyOn(process, 'kill').mockImplementation(() => {
           const err = new Error('ESRCH') as Error & { code?: string };
           err.code = 'ESRCH';
           throw err;
         });
-
         const consoleSpy = vi
           .spyOn(console, 'log')
           .mockImplementation(() => {});
@@ -533,24 +597,22 @@ describe('CommandExecutor', () => {
           timeout: 100,
           onTimeout: () => {},
         });
-        await vi.advanceTimersByTimeAsync(1000);
+        await vi.advanceTimersByTimeAsync(500);
         await promise;
 
-        expect(killSpy).toHaveBeenCalled();
-        expect(consoleSpy).not.toHaveBeenCalled(); // Should be swallowed
-
+        expect(consoleSpy).not.toHaveBeenCalled();
         vi.useRealTimers();
       });
-      it('should log non-ESRCH errors during process killing', async () => {
+
+      it('logs non-ESRCH kill errors', async () => {
         vi.useFakeTimers();
-        const mockChild = createMockChild(5555);
-        setSpawnReturn(mockChild);
+        const sub = createMockSubprocess(5555);
+        primeExeca(sub);
 
-        const error = new Error('Unexpected Error');
-        const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
-          throw error;
+        const killErr = new Error('Unexpected Error');
+        vi.spyOn(process, 'kill').mockImplementation(() => {
+          throw killErr;
         });
-
         const consoleSpy = vi
           .spyOn(console, 'log')
           .mockImplementation(() => {});
@@ -559,135 +621,80 @@ describe('CommandExecutor', () => {
           timeout: 100,
           onTimeout: () => {},
         });
-        await vi.advanceTimersByTimeAsync(1000);
+        await vi.advanceTimersByTimeAsync(500);
         await promise;
 
-        expect(killSpy).toHaveBeenCalled();
-        expect(consoleSpy).toHaveBeenCalledWith(error);
-
+        expect(consoleSpy).toHaveBeenCalledWith(killErr);
         vi.useRealTimers();
       });
     });
   });
 
-  describe('Edge Case Error Handling', () => {
-    it('should reject if onTimeout callback throws', async () => {
-      vi.useFakeTimers();
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
+  // -------------------------------------------------------------------------
+  // Callback edge cases
+  // -------------------------------------------------------------------------
 
-      const error = new Error('Callback Error');
+  describe('Callback edge cases', () => {
+    it('propagates onTimeout callback errors', async () => {
+      vi.useFakeTimers();
+      const sub = createMockSubprocess();
+      primeExeca(sub);
+
+      const cbErr = new Error('Callback Error');
       const promise = executor.execute('run', {
         timeout: 100,
         onTimeout: () => {
-          throw error;
+          throw cbErr;
         },
       });
+      const assertion = expect(promise).rejects.toThrow('Callback Error');
+      await vi.advanceTimersByTimeAsync(500);
+      await assertion;
 
-      const testPromise = expect(promise).rejects.toThrow('Callback Error');
-      await vi.advanceTimersByTimeAsync(1000);
-      await testPromise;
       vi.useRealTimers();
     });
 
-    it('should reject if onMemoryExceeded callback throws', async () => {
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
+    it('propagates onMemoryExceeded callback errors', async () => {
+      const sub = createMockSubprocess();
+      primeExeca(sub);
 
-      const error = new Error('MLE Callback Error');
+      const cbErr = new Error('MLE Callback Error');
       const promise = executor.execute('run', {
         timeout: 1000,
         onMemoryExceeded: () => {
-          throw error;
+          throw cbErr;
         },
       });
-
-      mockChild.emit('close', 137, null);
+      sub.__resolveWith({ exitCode: 137, failed: true });
 
       await expect(promise).rejects.toThrow('MLE Callback Error');
     });
 
-    it('should handle error inside handleProcessClose (line 474)', async () => {
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
+    it('propagates onError callback errors', async () => {
+      const sub = createMockSubprocess();
+      primeExeca(sub);
 
-      // Spy on private method via the typed ExecutorPrivate cast
-      const error = new Error('Internal Close Error');
-      vi.spyOn(
-        executor as unknown as ExecutorPrivate,
-        'handleProcessClose'
-      ).mockImplementation(() => {
-        throw error;
+      const cbErr = new Error('onError Boom');
+      const promise = executor.execute('fail', {
+        timeout: 1000,
+        onError: () => {
+          throw cbErr;
+        },
       });
+      sub.__resolveWith({ exitCode: 1, failed: true, stderr: 'oops' });
 
-      const promise = executor.execute('run', { timeout: 1000 });
-      mockChild.emit('close', 0, null);
-
-      await expect(promise).rejects.toThrow('Internal Close Error');
-    });
-
-    it('should handle error inside handleProcessError (line 494)', async () => {
-      const mockChild = createMockChild();
-      // Ensure expect matches return value before emitting error
-      setSpawnReturn(mockChild);
-
-      const error = new Error('Internal Error Error');
-      vi.spyOn(
-        executor as unknown as ExecutorPrivate,
-        'handleProcessError'
-      ).mockImplementation(() => {
-        throw error;
-      });
-
-      const promise = executor.execute('run', { timeout: 1000 });
-      mockChild.emit('error', new Error('Spawn Failed'));
-
-      await expect(promise).rejects.toThrow('Internal Error Error');
-    });
-
-    it('should reject if cleanup fails during timeout (line 414)', async () => {
-      vi.useFakeTimers();
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
-
-      const error = new Error('Cleanup Error');
-      vi.spyOn(executor, 'cleanup').mockRejectedValue(error);
-
-      const promise = executor.execute('run', {
-        timeout: 100,
-        onTimeout: () => {},
-      });
-
-      const testPromise = expect(promise).rejects.toThrow('Cleanup Error');
-      await vi.advanceTimersByTimeAsync(1000);
-      await testPromise;
-
-      vi.useRealTimers();
-    });
-
-    it('should handle error inside timeout handling (line 151)', async () => {
-      vi.useFakeTimers();
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
-
-      const error = new Error('Timeout Handling Error');
-      // Spy on cancellableDelay to return a promise that rejects
-      vi.spyOn(
-        executor as unknown as ExecutorPrivate,
-        'cancellableDelay'
-      ).mockReturnValue([Promise.reject(error), () => {}]);
-
-      const promise = executor.execute('run', { timeout: 100 });
-
-      await expect(promise).rejects.toThrow('Timeout Handling Error');
-      vi.useRealTimers();
+      await expect(promise).rejects.toThrow('onError Boom');
     });
   });
 
-  describe('Redirection & Utils', () => {
-    it('should build redirected command correctly', async () => {
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
+  // -------------------------------------------------------------------------
+  // Redirection & utilities
+  // -------------------------------------------------------------------------
+
+  describe('Redirection & utilities', () => {
+    it('builds a redirected command with input and output files', async () => {
+      const sub = createMockSubprocess();
+      primeExeca(sub);
 
       const promise = executor.executeWithRedirect(
         './prog',
@@ -695,20 +702,19 @@ describe('CommandExecutor', () => {
         'in.txt',
         'out.txt'
       );
-
-      mockChild.emit('close', 0);
+      sub.__resolveWith({ exitCode: 0 });
       await promise;
 
-      const calledCommand = mockSpawn.mock.calls[0]?.[0];
-      expect(calledCommand).toContain('< "in.txt"');
-      expect(calledCommand).toContain('> "out.txt"');
+      const cmd = mockExeca.mock.calls[0]?.[0];
+      expect(cmd).toContain('< "in.txt"');
+      expect(cmd).toContain('> "out.txt"');
     });
 
-    it('should normalize paths in redirection for Windows', async () => {
+    it('normalizes redirected paths for Windows', async () => {
       vi.useFakeTimers();
       Object.defineProperty(process, 'platform', { value: 'win32' });
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
+      const sub = createMockSubprocess();
+      primeExeca(sub);
 
       const promise = executor.executeWithRedirect(
         './prog',
@@ -716,137 +722,20 @@ describe('CommandExecutor', () => {
         './folder/in.txt',
         'out.txt'
       );
-
-      mockChild.emit('close', 0);
-      // Advance for Windows close delay
-      await vi.advanceTimersByTimeAsync(100);
+      sub.__resolveWith({ exitCode: 0 });
+      await vi.advanceTimersByTimeAsync(200);
       await promise;
 
-      const calledCommand = mockSpawn.mock.calls[0]?.[0];
-      expect(calledCommand).toContain('< ".\\folder\\in.txt"');
-      Object.defineProperty(process, 'platform', { value: 'linux' });
+      const cmd = mockExeca.mock.calls[0]?.[0];
+      expect(cmd).toContain('< ".\\folder\\in.txt"');
       vi.useRealTimers();
     });
 
-    it('should register and retrieve temp files', () => {
-      executor.registerTempFile('tmp1');
-      executor.registerTempFile('tmp2');
-      expect(executor.getTempFiles()).toEqual(['tmp1', 'tmp2']);
-    });
-
-    it('should cleanup temp files and processes', async () => {
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
-
-      // Start a process
-      void executor.execute('run', { timeout: 10000 });
-      executor.registerTempFile('somefile');
-
-      // Cleanup
-      await executor.cleanup();
-
-      expect(mockChild.kill).toHaveBeenCalledWith('SIGKILL');
-      expect(executor.getTempFiles()).toEqual([]);
-    });
-  });
-
-  describe('Coverage Improvements', () => {
-    it('should ignore close event if already resolved (e.g. after timeout)', async () => {
+    it('handles Windows redirection with parent-dir paths', async () => {
       vi.useFakeTimers();
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
-      const onTimeout: MockedFunction<
-        NonNullable<ExecutionOptions['onTimeout']>
-      > = vi.fn();
-
-      const promise = executor.execute('slow', { timeout: 100, onTimeout });
-
-      // Trigger timeout
-      await vi.advanceTimersByTimeAsync(1000);
-
-      // Now trigger close - should be ignored
-      const handleCloseSpy = vi.spyOn(
-        executor as unknown as ExecutorPrivate,
-        'handleProcessClose'
-      );
-      mockChild.emit('close', 0, null);
-
-      await promise;
-
-      expect(onTimeout).toHaveBeenCalled();
-      expect(handleCloseSpy).not.toHaveBeenCalled();
-
-      vi.useRealTimers();
-    });
-
-    it('should ignore error event if already resolved', async () => {
-      vi.useFakeTimers();
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
-
-      const promise = executor.execute('slow', {
-        timeout: 100,
-        onTimeout: vi.fn(),
-      });
-
-      await vi.advanceTimersByTimeAsync(1000);
-
-      // Trigger error - should be ignored
-      const handleErrorSpy = vi.spyOn(
-        executor as unknown as ExecutorPrivate,
-        'handleProcessError'
-      );
-      mockChild.emit('error', new Error('Late Error'));
-
-      await promise;
-
-      expect(handleErrorSpy).not.toHaveBeenCalled();
-      vi.useRealTimers();
-    });
-
-    it('should handle silent mode for memory errors', async () => {
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
-      const onMemoryExceeded: MockedFunction<
-        NonNullable<ExecutionOptions['onMemoryExceeded']>
-      > = vi.fn();
-
-      const warningMock = vi.spyOn(fmt, 'warning');
-
-      const promise = executor.execute('oom', {
-        timeout: 1000,
-        silent: true,
-        onMemoryExceeded,
-      });
-
-      mockChild.emit('close', 137, null);
-      await promise;
-
-      expect(onMemoryExceeded).toHaveBeenCalled();
-      expect(warningMock).not.toHaveBeenCalled();
-    });
-
-    it('should handle silent mode for process errors', async () => {
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
-
-      const errorMock = vi.spyOn(fmt, 'error');
-
-      const promise = executor.execute('fail', {
-        timeout: 1000,
-        silent: true,
-      });
-
-      mockChild.emit('error', new Error('Spawn fail'));
-      await expect(promise).rejects.toThrow();
-
-      expect(errorMock).not.toHaveBeenCalled();
-    });
-
-    it('should handle Windows redirection with parent directory (../)', async () => {
       Object.defineProperty(process, 'platform', { value: 'win32' });
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
+      const sub = createMockSubprocess();
+      primeExeca(sub);
 
       const promise = executor.executeWithRedirect(
         'cmd',
@@ -854,219 +743,237 @@ describe('CommandExecutor', () => {
         '../input.txt',
         '../output.txt'
       );
-      mockChild.emit('close', 0);
+      sub.__resolveWith({ exitCode: 0 });
+      await vi.advanceTimersByTimeAsync(200);
       await promise;
 
-      const cmd = mockSpawn.mock.calls[0]?.[0];
+      const cmd = mockExeca.mock.calls[0]?.[0];
       expect(cmd).toContain('..\\input.txt');
       expect(cmd).toContain('..\\output.txt');
-
-      Object.defineProperty(process, 'platform', { value: 'linux' });
-    });
-
-    it('should handle killing process that is already dead in cleanup', async () => {
-      const mockChild = createMockChild();
-      mockChild.kill.mockImplementation(() => {
-        throw new Error('Process dead');
-      });
-      setSpawnReturn(mockChild);
-
-      void executor.execute('run', { timeout: 1000 });
-
-      // Should not throw
-      await executor.cleanup();
-      expect(mockChild.kill).toHaveBeenCalledWith('SIGKILL');
-    });
-
-    it('should handle handleProcessClose without silence and with success', async () => {
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
-      const dimMock = vi.spyOn(fmt, 'dim');
-
-      const promise = executor.execute('ok', { timeout: 1000, silent: false });
-
-      // Emit data after listener attached
-      mockChild.stdout?.emit('data', 'Output');
-      mockChild.emit('close', 0);
-
-      await promise;
-      expect(dimMock).toHaveBeenCalledWith('Output');
-    });
-
-    it('should handle memory error message explicitly', async () => {
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
-      const onMemoryExceeded: MockedFunction<
-        NonNullable<ExecutionOptions['onMemoryExceeded']>
-      > = vi.fn();
-
-      const promise = executor.execute('oom', {
-        timeout: 1000,
-        onMemoryExceeded,
-      });
-
-      mockChild.stderr?.emit('data', 'MemoryError: Out of memory');
-      mockChild.emit('close', 1);
-
-      await promise;
-      expect(onMemoryExceeded).toHaveBeenCalled();
-    });
-
-    it('should normalize executable path starting with ./ on Windows', async () => {
-      Object.defineProperty(process, 'platform', { value: 'win32' });
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
-
-      const promise = executor.execute('./solution', { timeout: 1000 });
-      mockChild.emit('close', 0);
-      await promise;
-
-      const cmd = mockSpawn.mock.calls[0]?.[0];
-      expect(cmd).toEqual('.\\solution');
-
-      Object.defineProperty(process, 'platform', { value: 'linux' });
-    });
-
-    it('should normalize executable path containing / on Windows', async () => {
-      Object.defineProperty(process, 'platform', { value: 'win32' });
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
-
-      const promise = executor.execute('bin/solution', { timeout: 1000 });
-      mockChild.emit('close', 0);
-      await promise;
-
-      const cmd = mockSpawn.mock.calls[0]?.[0];
-      expect(cmd).toEqual('bin\\solution');
-
-      Object.defineProperty(process, 'platform', { value: 'linux' });
-    });
-
-    it('should handle timeout without onTimeout callback (fallback path)', async () => {
-      vi.useFakeTimers();
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
-
-      const promise = executor.execute('sleep', { timeout: 100 });
-
-      const testPromise = expect(promise).rejects.toThrow(
-        'Process killed after 100ms timeout'
-      );
-      await vi.advanceTimersByTimeAsync(1000);
-
-      await testPromise;
       vi.useRealTimers();
     });
-    it('should handle partial redirection (input only)', async () => {
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
+
+    it('builds a partial redirection (input only)', async () => {
+      const sub = createMockSubprocess();
+      primeExeca(sub);
+
       const promise = executor.executeWithRedirect(
         'cmd',
         { timeout: 1000 },
         'in.txt'
       );
-      mockChild.emit('close', 0);
+      sub.__resolveWith({ exitCode: 0 });
       await promise;
-      const cmd = mockSpawn.mock.calls[0]?.[0];
+
+      const cmd = mockExeca.mock.calls[0]?.[0];
       expect(cmd).toContain('< "in.txt"');
       expect(cmd).not.toContain('>');
     });
 
-    it('should handle partial redirection (output only)', async () => {
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
+    it('builds a partial redirection (output only)', async () => {
+      const sub = createMockSubprocess();
+      primeExeca(sub);
+
       const promise = executor.executeWithRedirect(
         'cmd',
         { timeout: 1000 },
         undefined,
         'out.txt'
       );
-      mockChild.emit('close', 0);
+      sub.__resolveWith({ exitCode: 0 });
       await promise;
-      const cmd = mockSpawn.mock.calls[0]?.[0];
+
+      const cmd = mockExeca.mock.calls[0]?.[0];
       expect(cmd).toContain('> "out.txt"');
       expect(cmd).not.toContain('<');
     });
 
-    it('should default exit code to 1 if null (signal termination)', async () => {
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
-      // Expect rejection because exit code 1 means failure
-      const promise = executor.execute('run', { timeout: 1000 });
-      mockChild.emit('close', null, 'SIGTERM');
-
-      await expect(promise).rejects.toThrow();
+    it('registers and retrieves temp files', () => {
+      executor.registerTempFile('tmp1');
+      executor.registerTempFile('tmp2');
+      expect(executor.getTempFiles()).toEqual(['tmp1', 'tmp2']);
     });
 
-    it('should handle non-Error rejection in timeout cleanup', async () => {
-      vi.useFakeTimers();
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
+    it('cleans up temp files and kills active processes', async () => {
+      const sub = createMockSubprocess();
+      primeExeca(sub);
 
-      vi.spyOn(executor, 'cleanup').mockRejectedValue('String Error');
-
-      const promise = executor.execute('run', {
-        timeout: 100,
-        onTimeout: vi.fn(),
-      });
-      const testPromise = expect(promise).rejects.toThrow('String Error');
-
-      await vi.advanceTimersByTimeAsync(1000);
-      await testPromise;
-      vi.useRealTimers();
-    });
-
-    it('should handle active process with no pid in cleanup', async () => {
-      const mockChild = createMockChild();
-      mockChild.pid = undefined;
-      // Manually add to set
-      (executor as unknown as ExecutorPrivate).activeProcesses.add(
-        asChildProcess(mockChild)
-      );
-
+      void executor.execute('run', { timeout: 10000 }).catch(() => {});
+      executor.registerTempFile('somefile');
       await executor.cleanup();
-      // Should not throw and not call kill
-      expect(mockChild.kill).not.toHaveBeenCalled();
+
+      expect(sub.kill).toHaveBeenCalledWith('SIGKILL');
+      expect(executor.getTempFiles()).toEqual([]);
     });
 
-    it('should ignore timeout if child is already killed', async () => {
-      vi.useFakeTimers();
-      const mockChild = createMockChild();
-      mockChild.killed = true;
-      setSpawnReturn(mockChild);
-      const onTimeout: MockedFunction<
-        NonNullable<ExecutionOptions['onTimeout']>
+    it('tolerates kill() throwing during cleanup', async () => {
+      const sub = createMockSubprocess();
+      sub.kill = vi.fn(() => {
+        throw new Error('Process dead');
+      });
+      primeExeca(sub);
+
+      void executor.execute('run', { timeout: 10000 }).catch(() => {});
+      await expect(executor.cleanup()).resolves.toBeUndefined();
+      expect(sub.kill).toHaveBeenCalledWith('SIGKILL');
+    });
+
+    it('skips kill() during cleanup when pid is undefined', async () => {
+      const sub = createMockSubprocess();
+      sub.pid = undefined;
+      primeExeca(sub);
+
+      void executor.execute('run', { timeout: 10000 }).catch(() => {});
+      await executor.cleanup();
+      expect(sub.kill).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Output / silent / misc
+  // -------------------------------------------------------------------------
+
+  describe('Output & misc', () => {
+    it('prints stdout via fmt.dim on success when not silent', async () => {
+      const sub = createMockSubprocess();
+      primeExeca(sub);
+      const dimMock = vi.spyOn(fmt, 'dim');
+
+      const promise = executor.execute('ok', { timeout: 1000 });
+      sub.__resolveWith({ stdout: 'Output' });
+      await promise;
+
+      expect(dimMock).toHaveBeenCalledWith('Output');
+    });
+
+    it('does not print warnings on MLE in silent mode', async () => {
+      const sub = createMockSubprocess();
+      primeExeca(sub);
+      const warningMock = vi.spyOn(fmt, 'warning');
+      const onMemoryExceeded: MockedFunction<
+        NonNullable<ExecutionOptions['onMemoryExceeded']>
       > = vi.fn();
 
-      const promise = executor.execute('run', { timeout: 100, onTimeout });
-      await vi.advanceTimersByTimeAsync(1000);
-
-      expect(onTimeout).not.toHaveBeenCalled();
-      // Manually resolve promise to finish test
-      mockChild.emit('close', 0);
+      const promise = executor.execute('oom', {
+        timeout: 1000,
+        silent: true,
+        onMemoryExceeded,
+      });
+      sub.__resolveWith({ exitCode: 137, failed: true });
       await promise;
+
+      expect(onMemoryExceeded).toHaveBeenCalled();
+      expect(warningMock).not.toHaveBeenCalled();
+    });
+
+    it('does not print errors on spawn failure in silent mode', async () => {
+      const sub = createMockSubprocess();
+      primeExeca(sub);
+      const errorMock = vi.spyOn(fmt, 'error');
+
+      const promise = executor.execute('fail', {
+        timeout: 1000,
+        silent: true,
+      });
+      sub.__resolveWith({
+        failed: true,
+        exitCode: undefined,
+        shortMessage: 'spawn failed',
+      });
+      await expect(promise).rejects.toThrow();
+
+      expect(errorMock).not.toHaveBeenCalled();
+    });
+
+    it('normalizes ./solution to .\\solution on Windows (single token)', async () => {
+      vi.useFakeTimers();
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+      const sub = createMockSubprocess();
+      primeExeca(sub);
+
+      const promise = executor.execute('./solution', { timeout: 1000 });
+      sub.__resolveWith({ exitCode: 0 });
+      await vi.advanceTimersByTimeAsync(200);
+      await promise;
+
+      expect(mockExeca.mock.calls[0]?.[0]).toBe('.\\solution');
       vi.useRealTimers();
     });
 
-    it('should handle spawn with missing stdout/stderr', async () => {
-      const mockChild = createMockChild();
-      mockChild.stdout = undefined;
-      mockChild.stderr = undefined;
-      setSpawnReturn(mockChild);
+    it('normalizes bin/solution to bin\\solution on Windows', async () => {
+      vi.useFakeTimers();
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+      const sub = createMockSubprocess();
+      primeExeca(sub);
 
-      const promise = executor.execute('run', { timeout: 1000 });
-      mockChild.emit('close', 0);
-      const result: ExecutionResult = await promise;
-      expect(result.stdout).toBe('');
+      const promise = executor.execute('bin/solution', { timeout: 1000 });
+      sub.__resolveWith({ exitCode: 0 });
+      await vi.advanceTimersByTimeAsync(200);
+      await promise;
+
+      expect(mockExeca.mock.calls[0]?.[0]).toBe('bin\\solution');
+      vi.useRealTimers();
     });
 
-    it('should handle empty command string', async () => {
-      const mockChild = createMockChild();
-      setSpawnReturn(mockChild);
+    it('treats undefined exitCode without failed-flag as a generic error', async () => {
+      const sub = createMockSubprocess();
+      primeExeca(sub);
+
+      const promise = executor.execute('run', { timeout: 1000 });
+      // failed: false + exitCode: undefined → defaults to exitCode 1, error path.
+      sub.__resolveWith({ exitCode: undefined, failed: false });
+
+      await expect(promise).rejects.toThrow('Command failed with exit code 1');
+    });
+
+    it('handles execa rejecting (defensive spawn-error path)', async () => {
+      const sub = createMockSubprocess();
+      primeExeca(sub);
+
+      const promise = executor.execute('run', { timeout: 1000 });
+      sub.__rejectWith(new Error('Unexpected execa rejection'));
+
+      await expect(promise).rejects.toThrow('Unexpected execa rejection');
+    });
+
+    it('runs an empty command string', async () => {
+      const sub = createMockSubprocess();
+      primeExeca(sub);
+
       const promise = executor.execute('', { timeout: 1000 });
-      mockChild.emit('close', 0);
+      sub.__resolveWith({ exitCode: 0 });
       await promise;
-      expect(mockSpawn).toHaveBeenCalledWith('', expect.anything());
+
+      expect(mockExeca).toHaveBeenCalledWith('', expect.anything());
+    });
+
+    it('passes cwd through to execa when provided', async () => {
+      const sub = createMockSubprocess();
+      primeExeca(sub);
+
+      const promise = executor.execute('run', {
+        timeout: 1000,
+        cwd: '/tmp/run',
+      });
+      sub.__resolveWith({ exitCode: 0 });
+      await promise;
+
+      expect(mockExeca).toHaveBeenCalledWith(
+        'run',
+        expect.objectContaining({ cwd: '/tmp/run' })
+      );
+    });
+
+    it('omits cwd from execa options when not provided', async () => {
+      const sub = createMockSubprocess();
+      primeExeca(sub);
+
+      const promise = executor.execute('run', { timeout: 1000 });
+      sub.__resolveWith({ exitCode: 0 });
+      await promise;
+
+      const opts = mockExeca.mock.calls[0]?.[1] as Record<string, unknown>;
+      expect(opts.cwd).toBeUndefined();
     });
   });
 });
