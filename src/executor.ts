@@ -953,7 +953,6 @@ export class CommandExecutor {
  */
 export const executor = new CommandExecutor();
 
-
 /**
  * Register signal handlers to ensure child processes are cleaned up
  * when the parent process is terminated (e.g., via Ctrl+C).
