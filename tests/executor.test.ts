@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { Mock, MockedFunction, MockInstance } from 'vitest';
 import { CommandExecutor } from '../src/executor';
+import type { ExecutionOptions, ExecutionResult } from '../src/executor';
 import { spawn } from 'child_process';
+import type { ChildProcess } from 'child_process';
 import EventEmitter from 'events';
+import { fmt } from '../src/formatter';
 
 // Mock child_process
 vi.mock('child_process', () => ({
@@ -21,9 +25,33 @@ vi.mock('../src/formatter', () => ({
   },
 }));
 
+/**
+ * Minimal typed mock of a {@link ChildProcess} suitable for the assertions in
+ * this suite. Only the surface area touched by `CommandExecutor` is modelled.
+ */
+interface MockChild extends EventEmitter {
+  pid: number | undefined;
+  stdout: EventEmitter | undefined;
+  stderr: EventEmitter | undefined;
+  kill: Mock;
+  killed: boolean;
+}
+
+/**
+ * Shape exposing the private members of {@link CommandExecutor} that the tests
+ * need to spy on. Casting through this interface keeps the type system honest
+ * without resorting to `any`.
+ */
+interface ExecutorPrivate {
+  handleProcessClose: (...args: unknown[]) => unknown;
+  handleProcessError: (...args: unknown[]) => unknown;
+  cancellableDelay: (ms: number) => [Promise<void>, () => void];
+  activeProcesses: Set<ChildProcess>;
+}
+
 describe('CommandExecutor', () => {
   let executor: CommandExecutor;
-  let mockSpawn: any;
+  let mockSpawn: MockedFunction<typeof spawn>;
 
   const originalPlatform = process.platform;
 
@@ -45,8 +73,8 @@ describe('CommandExecutor', () => {
   });
 
   // Helper to create a mock child process
-  const createMockChild = (pid = 12345): any => {
-    const child: any = new EventEmitter();
+  const createMockChild = (pid: number | undefined = 12345): MockChild => {
+    const child = new EventEmitter() as MockChild;
     child.pid = pid;
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
@@ -55,16 +83,28 @@ describe('CommandExecutor', () => {
     return child;
   };
 
+  /**
+   * Convenience cast: the spawn mock returns a `ChildProcess`, but in tests we
+   * feed it our `MockChild`. This helper performs the unavoidable widening in
+   * one place so callers stay readable.
+   */
+  const asChildProcess = (child: MockChild): ChildProcess =>
+    child as unknown as ChildProcess;
+
+  const setSpawnReturn = (child: MockChild) => {
+    mockSpawn.mockReturnValue(asChildProcess(child));
+  };
+
   describe('execute', () => {
     it('should execute command successfully (exit code 0)', async () => {
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
+      setSpawnReturn(mockChild);
 
       const promise = executor.execute('echo success', { timeout: 1000 });
 
       // Emit some output
-      mockChild.stdout.emit('data', Buffer.from('output line 1\n'));
-      mockChild.stdout.emit('data', Buffer.from('output line 2'));
+      mockChild.stdout?.emit('data', Buffer.from('output line 1\n'));
+      mockChild.stdout?.emit('data', Buffer.from('output line 2'));
 
       // Emit close
       mockChild.emit('close', 0, null);
@@ -79,11 +119,11 @@ describe('CommandExecutor', () => {
 
     it('should handle command failure (non-zero exit code)', async () => {
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
+      setSpawnReturn(mockChild);
 
       const promise = executor.execute('badcommand', { timeout: 1000 });
 
-      mockChild.stderr.emit('data', Buffer.from('command not found'));
+      mockChild.stderr?.emit('data', Buffer.from('command not found'));
       mockChild.emit('close', 1, null);
 
       await expect(promise).rejects.toThrow('Command failed with exit code 1');
@@ -91,15 +131,16 @@ describe('CommandExecutor', () => {
 
     it('should call onError callback on failure if provided', async () => {
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
-      const onError = vi.fn();
+      setSpawnReturn(mockChild);
+      const onError: MockedFunction<NonNullable<ExecutionOptions['onError']>> =
+        vi.fn();
 
       const promise = executor.execute('badcommand', {
         timeout: 1000,
         onError,
       });
 
-      mockChild.stderr.emit('data', Buffer.from('error details'));
+      mockChild.stderr?.emit('data', Buffer.from('error details'));
       mockChild.emit('close', 127, null);
 
       const result = await promise;
@@ -112,7 +153,7 @@ describe('CommandExecutor', () => {
     it('should handle process error event (spawn failure)', async () => {
       const mockChild = createMockChild();
       // Ensure we don't resolve from close before error
-      mockSpawn.mockReturnValue(mockChild);
+      setSpawnReturn(mockChild);
 
       const promise = executor.execute('fail_spawn', { timeout: 1000 });
 
@@ -124,8 +165,9 @@ describe('CommandExecutor', () => {
 
     it('should use onError for spawn failure if provided', async () => {
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
-      const onError = vi.fn();
+      setSpawnReturn(mockChild);
+      const onError: MockedFunction<NonNullable<ExecutionOptions['onError']>> =
+        vi.fn();
 
       const promise = executor.execute('fail_spawn', {
         timeout: 1000,
@@ -141,7 +183,7 @@ describe('CommandExecutor', () => {
 
     it('should handle silent mode', async () => {
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
+      setSpawnReturn(mockChild);
 
       const promise = executor.execute('quiet', {
         timeout: 1000,
@@ -157,8 +199,10 @@ describe('CommandExecutor', () => {
 
     it('should call onSuccess callback', async () => {
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
-      const onSuccess = vi.fn();
+      setSpawnReturn(mockChild);
+      const onSuccess: MockedFunction<
+        NonNullable<ExecutionOptions['onSuccess']>
+      > = vi.fn();
 
       const promise = executor.execute('success', {
         timeout: 1000,
@@ -177,7 +221,7 @@ describe('CommandExecutor', () => {
     it('should reject with error when timeout occurs and no callback provided', async () => {
       vi.useFakeTimers();
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
+      setSpawnReturn(mockChild);
 
       const promise = executor.execute('sleep 10', { timeout: 100 });
 
@@ -197,8 +241,10 @@ describe('CommandExecutor', () => {
     it('should call onTimeout callback and cleanup', async () => {
       vi.useFakeTimers();
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
-      const onTimeout = vi.fn();
+      setSpawnReturn(mockChild);
+      const onTimeout: MockedFunction<
+        NonNullable<ExecutionOptions['onTimeout']>
+      > = vi.fn();
 
       const promise = executor.execute('sleep 10', {
         timeout: 100,
@@ -220,7 +266,7 @@ describe('CommandExecutor', () => {
     it('should resolve normally if process finishes before timeout', async () => {
       vi.useFakeTimers();
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
+      setSpawnReturn(mockChild);
 
       const promise = executor.execute('quick', { timeout: 5000 });
 
@@ -239,8 +285,10 @@ describe('CommandExecutor', () => {
   describe('Memory Limit Handling', () => {
     it('should detect memory limit exceeded via exit code 137', async () => {
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
-      const onMemoryExceeded = vi.fn();
+      setSpawnReturn(mockChild);
+      const onMemoryExceeded: MockedFunction<
+        NonNullable<ExecutionOptions['onMemoryExceeded']>
+      > = vi.fn();
 
       const promise = executor.execute('oom_prog', {
         timeout: 1000,
@@ -257,15 +305,17 @@ describe('CommandExecutor', () => {
 
     it('should detect memory limit exceeded via stderr message', async () => {
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
-      const onMemoryExceeded = vi.fn();
+      setSpawnReturn(mockChild);
+      const onMemoryExceeded: MockedFunction<
+        NonNullable<ExecutionOptions['onMemoryExceeded']>
+      > = vi.fn();
 
       const promise = executor.execute('cpp_oom', {
         timeout: 1000,
         onMemoryExceeded,
       });
 
-      mockChild.stderr.emit(
+      mockChild.stderr?.emit(
         'data',
         Buffer.from('terminate called after throwing bad_alloc')
       );
@@ -278,7 +328,7 @@ describe('CommandExecutor', () => {
 
     it('should throw error if memory exceeded and no callback provided', async () => {
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
+      setSpawnReturn(mockChild);
 
       const promise = executor.execute('oom_no_cb', { timeout: 1000 });
 
@@ -297,7 +347,7 @@ describe('CommandExecutor', () => {
       it('should normalize paths in command', async () => {
         vi.useFakeTimers();
         const mockChild = createMockChild();
-        mockSpawn.mockReturnValue(mockChild);
+        setSpawnReturn(mockChild);
 
         const promise = executor.execute('./my-prog/bin', { timeout: 1000 });
         mockChild.emit('close', 0);
@@ -315,7 +365,7 @@ describe('CommandExecutor', () => {
       it('should quote executables with spaces if needed', async () => {
         vi.useFakeTimers();
         const mockChild = createMockChild();
-        mockSpawn.mockReturnValue(mockChild);
+        setSpawnReturn(mockChild);
 
         const promise = executor.execute('bin/executable arg1', {
           timeout: 1000,
@@ -334,7 +384,7 @@ describe('CommandExecutor', () => {
       it('should set detached: false for spawned process', async () => {
         vi.useFakeTimers();
         const mockChild = createMockChild();
-        mockSpawn.mockReturnValue(mockChild);
+        setSpawnReturn(mockChild);
 
         const promise = executor.execute('cmd', { timeout: 1000 });
         mockChild.emit('close', 0);
@@ -351,7 +401,7 @@ describe('CommandExecutor', () => {
       it('should use taskkill for killing process tree', async () => {
         vi.useFakeTimers();
         const mockChild = createMockChild(9999);
-        mockSpawn.mockReturnValue(mockChild);
+        setSpawnReturn(mockChild);
 
         const promise = executor.execute('long_run', {
           timeout: 100,
@@ -373,7 +423,7 @@ describe('CommandExecutor', () => {
         vi.useFakeTimers();
 
         const mockChild = createMockChild();
-        mockSpawn.mockReturnValue(mockChild);
+        setSpawnReturn(mockChild);
         void executor.execute('cmd', { timeout: 50 });
 
         const cleanupPromise = executor.cleanup();
@@ -386,7 +436,7 @@ describe('CommandExecutor', () => {
 
       it('should ignore memory limit on Windows (line 193)', async () => {
         const mockChild = createMockChild();
-        mockSpawn.mockReturnValue(mockChild);
+        setSpawnReturn(mockChild);
 
         // Pass memory limit, expecting it to be ignored in the command
         const promise = executor.execute('cmd', {
@@ -416,7 +466,7 @@ describe('CommandExecutor', () => {
 
       it('should use ulimit for memory limits', () => {
         const mockChild = createMockChild();
-        mockSpawn.mockReturnValue(mockChild);
+        setSpawnReturn(mockChild);
 
         void executor.execute('./prog', { timeout: 1000, memoryLimitMB: 128 });
         mockChild.emit('close', 0);
@@ -429,7 +479,7 @@ describe('CommandExecutor', () => {
 
       it('should use -Xmx for Java memory limits', () => {
         const mockChild = createMockChild();
-        mockSpawn.mockReturnValue(mockChild);
+        setSpawnReturn(mockChild);
 
         void executor.execute('java Main', {
           timeout: 1000,
@@ -446,7 +496,11 @@ describe('CommandExecutor', () => {
       it('should kill process group (negative pid)', async () => {
         vi.useFakeTimers();
         const mockChild = createMockChild(5555);
-        mockSpawn.mockReturnValue(mockChild);
+        setSpawnReturn(mockChild);
+
+        const killSpy: MockInstance<typeof process.kill> = vi
+          .spyOn(process, 'kill')
+          .mockImplementation(() => true);
 
         const promise = executor.execute('run', {
           timeout: 100,
@@ -456,17 +510,17 @@ describe('CommandExecutor', () => {
         await vi.advanceTimersByTimeAsync(1000);
         await promise;
 
-        expect(process.kill).toHaveBeenCalledWith(-5555, 'SIGSEGV');
+        expect(killSpy).toHaveBeenCalledWith(-5555, 'SIGSEGV');
         vi.useRealTimers();
       });
 
       it('should handle errors during process killing (ESRCH)', async () => {
         vi.useFakeTimers();
         const mockChild = createMockChild(5555);
-        mockSpawn.mockReturnValue(mockChild);
+        setSpawnReturn(mockChild);
 
         const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
-          const err: any = new Error('ESRCH');
+          const err = new Error('ESRCH') as Error & { code?: string };
           err.code = 'ESRCH';
           throw err;
         });
@@ -490,7 +544,7 @@ describe('CommandExecutor', () => {
       it('should log non-ESRCH errors during process killing', async () => {
         vi.useFakeTimers();
         const mockChild = createMockChild(5555);
-        mockSpawn.mockReturnValue(mockChild);
+        setSpawnReturn(mockChild);
 
         const error = new Error('Unexpected Error');
         const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
@@ -520,7 +574,7 @@ describe('CommandExecutor', () => {
     it('should reject if onTimeout callback throws', async () => {
       vi.useFakeTimers();
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
+      setSpawnReturn(mockChild);
 
       const error = new Error('Callback Error');
       const promise = executor.execute('run', {
@@ -538,7 +592,7 @@ describe('CommandExecutor', () => {
 
     it('should reject if onMemoryExceeded callback throws', async () => {
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
+      setSpawnReturn(mockChild);
 
       const error = new Error('MLE Callback Error');
       const promise = executor.execute('run', {
@@ -555,11 +609,14 @@ describe('CommandExecutor', () => {
 
     it('should handle error inside handleProcessClose (line 474)', async () => {
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
+      setSpawnReturn(mockChild);
 
-      // Spy on private method by casting to any
+      // Spy on private method via the typed ExecutorPrivate cast
       const error = new Error('Internal Close Error');
-      vi.spyOn(executor as any, 'handleProcessClose').mockImplementation(() => {
+      vi.spyOn(
+        executor as unknown as ExecutorPrivate,
+        'handleProcessClose'
+      ).mockImplementation(() => {
         throw error;
       });
 
@@ -572,10 +629,13 @@ describe('CommandExecutor', () => {
     it('should handle error inside handleProcessError (line 494)', async () => {
       const mockChild = createMockChild();
       // Ensure expect matches return value before emitting error
-      mockSpawn.mockReturnValue(mockChild);
+      setSpawnReturn(mockChild);
 
       const error = new Error('Internal Error Error');
-      vi.spyOn(executor as any, 'handleProcessError').mockImplementation(() => {
+      vi.spyOn(
+        executor as unknown as ExecutorPrivate,
+        'handleProcessError'
+      ).mockImplementation(() => {
         throw error;
       });
 
@@ -588,7 +648,7 @@ describe('CommandExecutor', () => {
     it('should reject if cleanup fails during timeout (line 414)', async () => {
       vi.useFakeTimers();
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
+      setSpawnReturn(mockChild);
 
       const error = new Error('Cleanup Error');
       vi.spyOn(executor, 'cleanup').mockRejectedValue(error);
@@ -608,14 +668,14 @@ describe('CommandExecutor', () => {
     it('should handle error inside timeout handling (line 151)', async () => {
       vi.useFakeTimers();
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
+      setSpawnReturn(mockChild);
 
       const error = new Error('Timeout Handling Error');
       // Spy on cancellableDelay to return a promise that rejects
-      vi.spyOn(executor as any, 'cancellableDelay').mockReturnValue([
-        Promise.reject(error),
-        () => {},
-      ]);
+      vi.spyOn(
+        executor as unknown as ExecutorPrivate,
+        'cancellableDelay'
+      ).mockReturnValue([Promise.reject(error), () => {}]);
 
       const promise = executor.execute('run', { timeout: 100 });
 
@@ -627,7 +687,7 @@ describe('CommandExecutor', () => {
   describe('Redirection & Utils', () => {
     it('should build redirected command correctly', async () => {
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
+      setSpawnReturn(mockChild);
 
       const promise = executor.executeWithRedirect(
         './prog',
@@ -639,7 +699,7 @@ describe('CommandExecutor', () => {
       mockChild.emit('close', 0);
       await promise;
 
-      const calledCommand = mockSpawn.mock.calls[0][0];
+      const calledCommand = mockSpawn.mock.calls[0]?.[0];
       expect(calledCommand).toContain('< "in.txt"');
       expect(calledCommand).toContain('> "out.txt"');
     });
@@ -648,7 +708,7 @@ describe('CommandExecutor', () => {
       vi.useFakeTimers();
       Object.defineProperty(process, 'platform', { value: 'win32' });
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
+      setSpawnReturn(mockChild);
 
       const promise = executor.executeWithRedirect(
         './prog',
@@ -662,7 +722,7 @@ describe('CommandExecutor', () => {
       await vi.advanceTimersByTimeAsync(100);
       await promise;
 
-      const calledCommand = mockSpawn.mock.calls[0][0];
+      const calledCommand = mockSpawn.mock.calls[0]?.[0];
       expect(calledCommand).toContain('< ".\\folder\\in.txt"');
       Object.defineProperty(process, 'platform', { value: 'linux' });
       vi.useRealTimers();
@@ -676,7 +736,7 @@ describe('CommandExecutor', () => {
 
     it('should cleanup temp files and processes', async () => {
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
+      setSpawnReturn(mockChild);
 
       // Start a process
       void executor.execute('run', { timeout: 10000 });
@@ -694,8 +754,10 @@ describe('CommandExecutor', () => {
     it('should ignore close event if already resolved (e.g. after timeout)', async () => {
       vi.useFakeTimers();
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
-      const onTimeout = vi.fn();
+      setSpawnReturn(mockChild);
+      const onTimeout: MockedFunction<
+        NonNullable<ExecutionOptions['onTimeout']>
+      > = vi.fn();
 
       const promise = executor.execute('slow', { timeout: 100, onTimeout });
 
@@ -703,7 +765,10 @@ describe('CommandExecutor', () => {
       await vi.advanceTimersByTimeAsync(1000);
 
       // Now trigger close - should be ignored
-      const handleCloseSpy = vi.spyOn(executor as any, 'handleProcessClose');
+      const handleCloseSpy = vi.spyOn(
+        executor as unknown as ExecutorPrivate,
+        'handleProcessClose'
+      );
       mockChild.emit('close', 0, null);
 
       await promise;
@@ -717,7 +782,7 @@ describe('CommandExecutor', () => {
     it('should ignore error event if already resolved', async () => {
       vi.useFakeTimers();
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
+      setSpawnReturn(mockChild);
 
       const promise = executor.execute('slow', {
         timeout: 100,
@@ -727,7 +792,10 @@ describe('CommandExecutor', () => {
       await vi.advanceTimersByTimeAsync(1000);
 
       // Trigger error - should be ignored
-      const handleErrorSpy = vi.spyOn(executor as any, 'handleProcessError');
+      const handleErrorSpy = vi.spyOn(
+        executor as unknown as ExecutorPrivate,
+        'handleProcessError'
+      );
       mockChild.emit('error', new Error('Late Error'));
 
       await promise;
@@ -738,10 +806,12 @@ describe('CommandExecutor', () => {
 
     it('should handle silent mode for memory errors', async () => {
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
-      const onMemoryExceeded = vi.fn();
+      setSpawnReturn(mockChild);
+      const onMemoryExceeded: MockedFunction<
+        NonNullable<ExecutionOptions['onMemoryExceeded']>
+      > = vi.fn();
 
-      const { fmt } = await import('../src/formatter');
+      const warningMock = vi.spyOn(fmt, 'warning');
 
       const promise = executor.execute('oom', {
         timeout: 1000,
@@ -753,14 +823,14 @@ describe('CommandExecutor', () => {
       await promise;
 
       expect(onMemoryExceeded).toHaveBeenCalled();
-      expect(fmt.warning).not.toHaveBeenCalled();
+      expect(warningMock).not.toHaveBeenCalled();
     });
 
     it('should handle silent mode for process errors', async () => {
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
+      setSpawnReturn(mockChild);
 
-      const { fmt } = await import('../src/formatter');
+      const errorMock = vi.spyOn(fmt, 'error');
 
       const promise = executor.execute('fail', {
         timeout: 1000,
@@ -770,13 +840,13 @@ describe('CommandExecutor', () => {
       mockChild.emit('error', new Error('Spawn fail'));
       await expect(promise).rejects.toThrow();
 
-      expect(fmt.error).not.toHaveBeenCalled();
+      expect(errorMock).not.toHaveBeenCalled();
     });
 
     it('should handle Windows redirection with parent directory (../)', async () => {
       Object.defineProperty(process, 'platform', { value: 'win32' });
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
+      setSpawnReturn(mockChild);
 
       const promise = executor.executeWithRedirect(
         'cmd',
@@ -787,7 +857,7 @@ describe('CommandExecutor', () => {
       mockChild.emit('close', 0);
       await promise;
 
-      const cmd = mockSpawn.mock.calls[0][0];
+      const cmd = mockSpawn.mock.calls[0]?.[0];
       expect(cmd).toContain('..\\input.txt');
       expect(cmd).toContain('..\\output.txt');
 
@@ -799,7 +869,7 @@ describe('CommandExecutor', () => {
       mockChild.kill.mockImplementation(() => {
         throw new Error('Process dead');
       });
-      mockSpawn.mockReturnValue(mockChild);
+      setSpawnReturn(mockChild);
 
       void executor.execute('run', { timeout: 1000 });
 
@@ -810,30 +880,32 @@ describe('CommandExecutor', () => {
 
     it('should handle handleProcessClose without silence and with success', async () => {
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
-      const { fmt } = await import('../src/formatter');
+      setSpawnReturn(mockChild);
+      const dimMock = vi.spyOn(fmt, 'dim');
 
       const promise = executor.execute('ok', { timeout: 1000, silent: false });
 
       // Emit data after listener attached
-      mockChild.stdout.emit('data', 'Output');
+      mockChild.stdout?.emit('data', 'Output');
       mockChild.emit('close', 0);
 
       await promise;
-      expect(fmt.dim).toHaveBeenCalledWith('Output');
+      expect(dimMock).toHaveBeenCalledWith('Output');
     });
 
     it('should handle memory error message explicitly', async () => {
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
-      const onMemoryExceeded = vi.fn();
+      setSpawnReturn(mockChild);
+      const onMemoryExceeded: MockedFunction<
+        NonNullable<ExecutionOptions['onMemoryExceeded']>
+      > = vi.fn();
 
       const promise = executor.execute('oom', {
         timeout: 1000,
         onMemoryExceeded,
       });
 
-      mockChild.stderr.emit('data', 'MemoryError: Out of memory');
+      mockChild.stderr?.emit('data', 'MemoryError: Out of memory');
       mockChild.emit('close', 1);
 
       await promise;
@@ -843,13 +915,13 @@ describe('CommandExecutor', () => {
     it('should normalize executable path starting with ./ on Windows', async () => {
       Object.defineProperty(process, 'platform', { value: 'win32' });
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
+      setSpawnReturn(mockChild);
 
       const promise = executor.execute('./solution', { timeout: 1000 });
       mockChild.emit('close', 0);
       await promise;
 
-      const cmd = mockSpawn.mock.calls[0][0];
+      const cmd = mockSpawn.mock.calls[0]?.[0];
       expect(cmd).toEqual('.\\solution');
 
       Object.defineProperty(process, 'platform', { value: 'linux' });
@@ -858,13 +930,13 @@ describe('CommandExecutor', () => {
     it('should normalize executable path containing / on Windows', async () => {
       Object.defineProperty(process, 'platform', { value: 'win32' });
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
+      setSpawnReturn(mockChild);
 
       const promise = executor.execute('bin/solution', { timeout: 1000 });
       mockChild.emit('close', 0);
       await promise;
 
-      const cmd = mockSpawn.mock.calls[0][0];
+      const cmd = mockSpawn.mock.calls[0]?.[0];
       expect(cmd).toEqual('bin\\solution');
 
       Object.defineProperty(process, 'platform', { value: 'linux' });
@@ -873,7 +945,7 @@ describe('CommandExecutor', () => {
     it('should handle timeout without onTimeout callback (fallback path)', async () => {
       vi.useFakeTimers();
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
+      setSpawnReturn(mockChild);
 
       const promise = executor.execute('sleep', { timeout: 100 });
 
@@ -887,7 +959,7 @@ describe('CommandExecutor', () => {
     });
     it('should handle partial redirection (input only)', async () => {
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
+      setSpawnReturn(mockChild);
       const promise = executor.executeWithRedirect(
         'cmd',
         { timeout: 1000 },
@@ -895,14 +967,14 @@ describe('CommandExecutor', () => {
       );
       mockChild.emit('close', 0);
       await promise;
-      const cmd = mockSpawn.mock.calls[0][0];
+      const cmd = mockSpawn.mock.calls[0]?.[0];
       expect(cmd).toContain('< "in.txt"');
       expect(cmd).not.toContain('>');
     });
 
     it('should handle partial redirection (output only)', async () => {
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
+      setSpawnReturn(mockChild);
       const promise = executor.executeWithRedirect(
         'cmd',
         { timeout: 1000 },
@@ -911,14 +983,14 @@ describe('CommandExecutor', () => {
       );
       mockChild.emit('close', 0);
       await promise;
-      const cmd = mockSpawn.mock.calls[0][0];
+      const cmd = mockSpawn.mock.calls[0]?.[0];
       expect(cmd).toContain('> "out.txt"');
       expect(cmd).not.toContain('<');
     });
 
     it('should default exit code to 1 if null (signal termination)', async () => {
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
+      setSpawnReturn(mockChild);
       // Expect rejection because exit code 1 means failure
       const promise = executor.execute('run', { timeout: 1000 });
       mockChild.emit('close', null, 'SIGTERM');
@@ -929,7 +1001,7 @@ describe('CommandExecutor', () => {
     it('should handle non-Error rejection in timeout cleanup', async () => {
       vi.useFakeTimers();
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
+      setSpawnReturn(mockChild);
 
       vi.spyOn(executor, 'cleanup').mockRejectedValue('String Error');
 
@@ -948,7 +1020,9 @@ describe('CommandExecutor', () => {
       const mockChild = createMockChild();
       mockChild.pid = undefined;
       // Manually add to set
-      (executor as any).activeProcesses.add(mockChild);
+      (executor as unknown as ExecutorPrivate).activeProcesses.add(
+        asChildProcess(mockChild)
+      );
 
       await executor.cleanup();
       // Should not throw and not call kill
@@ -959,8 +1033,10 @@ describe('CommandExecutor', () => {
       vi.useFakeTimers();
       const mockChild = createMockChild();
       mockChild.killed = true;
-      mockSpawn.mockReturnValue(mockChild);
-      const onTimeout = vi.fn();
+      setSpawnReturn(mockChild);
+      const onTimeout: MockedFunction<
+        NonNullable<ExecutionOptions['onTimeout']>
+      > = vi.fn();
 
       const promise = executor.execute('run', { timeout: 100, onTimeout });
       await vi.advanceTimersByTimeAsync(1000);
@@ -976,17 +1052,17 @@ describe('CommandExecutor', () => {
       const mockChild = createMockChild();
       mockChild.stdout = undefined;
       mockChild.stderr = undefined;
-      mockSpawn.mockReturnValue(mockChild);
+      setSpawnReturn(mockChild);
 
       const promise = executor.execute('run', { timeout: 1000 });
       mockChild.emit('close', 0);
-      const result = await promise;
+      const result: ExecutionResult = await promise;
       expect(result.stdout).toBe('');
     });
 
     it('should handle empty command string', async () => {
       const mockChild = createMockChild();
-      mockSpawn.mockReturnValue(mockChild);
+      setSpawnReturn(mockChild);
       const promise = executor.execute('', { timeout: 1000 });
       mockChild.emit('close', 0);
       await promise;
