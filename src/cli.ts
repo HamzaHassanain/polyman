@@ -28,6 +28,7 @@ import {
   remoteCommitProblemAction,
   remotePackageProblemAction,
 } from './actions';
+import { printComprehensiveHelp } from './help';
 
 const program = new Command();
 
@@ -40,7 +41,11 @@ program
   .description(
     'CLI tool for Codeforces problem setters to manage problems via terminal'
   )
-  .version('2.2.2');
+  .version('2.2.2')
+  .helpOption(false)
+  .option('-h, --help', 'display help for command', () => {
+    printComprehensiveHelp(program);
+  });
 
 // ============================================================================
 // LOCAL COMMANDS

@@ -135,21 +135,17 @@ For full details, see [GUIDE.md - Solution Types](GUIDE.md#solution-tags).
 
 ## Standard Checkers
 
-Polyman includes testlib checkers for common output formats:
+Run `polyman list checkers` to see the full set with descriptions. The most useful:
 
-```bash
-polyman list checkers
-```
+| Checker            | Use For                          |
+| ------------------ | -------------------------------- |
+| `ncmp`             | Sequence of numbers (most problems) |
+| `wcmp`             | Sequence of tokens/words         |
+| `dcmp` / `rcmp*`   | Floating-point numbers           |
+| `yesno`            | Yes/No answers                   |
+| `lcmp`             | Exact line comparison            |
 
-**Common checkers:**
-
-- `ncmp` - Sequence of numbers (most problems)
-- `wcmp` - Sequence of tokens/words
-- `dcmp` / `rcmp*` - Floating-point numbers
-- `yesno` - Yes/No answers
-- `lcmp` - Exact line comparison
-
-For details, see [GUIDE.md - Standard Checkers](GUIDE.md#available-standard-checkers).
+Full reference: [GUIDE.md - Standard Checkers](GUIDE.md#available-standard-checkers).
 
 ## Project Structure
 

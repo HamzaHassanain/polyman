@@ -41,16 +41,17 @@ This is a simple problem, but it will teach you all the fundamental concepts of 
 
 Before starting, make sure you have:
 
-1. **Polyman installed** - Run `polyman --version` to check
-2. **A C++ compiler** - We'll use g++ (comes with most systems)
-3. **A text editor** - Any editor works (VS Code, Sublime, even Notepad)
-4. **Basic C++ knowledge** - You should know how to read input and write output
+1. **A C++ compiler** - We'll use g++ (comes with most systems)
+2. **A text editor** - Any editor works (VS Code, Sublime, even Notepad)
+3. **Basic C++ knowledge** - You should know how to read input and write output
 
-If you don't have Polyman installed, run:
+To install Polyman, run:
 
 ```bash
 npm install -g polyman-cli
 ```
+
+For full system requirements see [README.md - Installation](README.md#installation).
 
 ---
 
@@ -622,8 +623,6 @@ Run:
 polyman generate -a
 ```
 
-**Note:** We use `-a` (short for `--all`) instead of `--all`.
-
 This will:
 
 1. Compile `Generator.cpp`
@@ -665,10 +664,8 @@ You should see green "VALID" for all tests. If any test is invalid, the validato
 Run:
 
 ```bash
-polyman solve main -a
+polyman run main -a
 ```
-
-**Note:** The command is `solve` not `run`.
 
 This will:
 
@@ -708,119 +705,39 @@ If everything is correct, you'll see a beautiful success message!
 
 ## Step 11: Upload to Polygon (Optional)
 
-Now that your problem is fully tested and working locally, you might want to upload it to Codeforces Polygon. Polyman makes this process seamless with its Polygon integration!
+Now that your problem is tested and working locally, you can upload it to Codeforces Polygon.
 
 ### First Time Setup
 
-Before you can work with Polygon, you need to register your API credentials once:
-
-#### Get Your API Credentials
-
-1. Visit [https://polygon.codeforces.com](https://polygon.codeforces.com/)
-2. Log in to your account.
-3. On the top right, go to settings.
-4. Go down to the bottom, and select API Keys.
-5. Generate an API key and secret
-6. You'll see:
-   - **API Key** (a long string like `abc123def456...`)
-   - **API Secret** (another long string)
-5. Copy both of these
-
-#### Register Your Credentials with Polyman
-
-Run:
+Get your API credentials from [https://polygon.codeforces.com](https://polygon.codeforces.com/) (top-right settings → API Keys → generate key + secret), then register them with Polyman:
 
 ```bash
 polyman remote register <api-key> <api-secret>
 ```
 
-These credentials are securely stored in your local machine for future use.
+These credentials are stored locally for future use.
 
-#### Push Your Prblem to Polygon
+### Push Your Problem
 
 ```bash
 polyman remote push . . -a
 ```
 
-The first `.` refers to your local problem directory that has a Config.json that has a problem id. If it does not have a problem id, it will create a new problem on polygon and set the problem ID in the Config.json file. The first `.` can also be replaced with your problem's ID.
+If your `Config.json` has no problem ID, this creates a new problem on Polygon and writes the ID back to `Config.json`.
 
-The second `.` refers to the directory of your problem to be pushed to polygon.
-
-#### Commit Your Changes
-
-To save your changes permanently to Polygon's repository:
+### Commit Your Changes
 
 ```bash
 polyman remote commit . "Updated solutions and added new test cases"
 ```
 
-### Building Packages
-
-After pushing and committing, you might want to build a package:
+### Build a Package
 
 ```bash
-# Build standard package
 polyman remote package . standard
 ```
 
-Polyman will:
-
-1. Request package build from Polygon
-2. Poll every 30 seconds to check if it's ready
-3. Wait up to 30 minutes
-
-You'll see status updates like:
-
-- `WAITING` - Package is in queue
-- `RUNNING` - Package is being built
-- `READY` - Package is ready to download
-- `FAILED` - Package build failed
-
-### Viewing Your Problems
-
-Want to see all your problems on Polygon?
-
-```bash
-# List all problems with details
-polyman remote list
-
-# List problems by specific owner
-polyman remote list --owner tourist
-```
-
-Want detailed info about a specific problem?
-
-```bash
-polyman remote view 123456
-```
-
-### Troubleshooting
-
-**Q: "API authentication failed"**
-
-- Make sure you registered credentials: `polyman remote register`
-- Check your API key and secret are correct
-- Try regenerating them on Polygon
-- Make sure your system clock is accurate
-
-**Q: "Problem not found"**
-
-- Make sure the problem ID is correct
-- Check that you have access to this problem on Polygon
-- Verify you're using the correct Polygon account
-
-**Q: "Push failed - invalid testset configuration"**
-
-- Run `polyman verify` locally first
-- Make sure all tests are valid
-- Check that your Config.json matches Polygon's requirements
-
-**Q: "Package build failed"**
-
-- Check Polygon website for error details
-- Make sure all solutions compile on Polygon's servers
-- Verify validator and checker work correctly
-
+For full options, package types, and troubleshooting, see [GUIDE.md - Remote Operations](GUIDE.md#remote-operations-polygon-integration).
 
 ---
 
@@ -849,56 +766,7 @@ Congratulations! You've created your first competitive programming problem and l
 
 ## Quick Reference
 
-### Essential Commands
-
-```bash
-# Create new problem
-polyman new <problem-name>
-
-# Download testlib
-polyman download-testlib
-
-# Generate tests
-polyman generate -a              # All testsets
-polyman generate -t tests        # Specific testset
-polyman generate -t tests -g samples  # Specific group
-polyman generate -t tests -i 5   # Specific test
-
-# Validate tests
-polyman validate -a              # All tests
-polyman validate -t tests        # Specific testset
-polyman validate -t tests -i 5   # Specific test
-
-# Run solution
-polyman run <solution-name> -a    # All tests
-polyman run main -t tests         # Specific testset
-polyman run main -t tests -i 5    # Specific test
-
-# Full verification
-polyman verify
-
-# List available checkers
-polyman list checkers
-
-# Test components
-polyman test validator           # Test validator
-polyman test checker            # Test checker
-polyman test <solution-name>    # Test solution against main
-
-# Remote operations
-polyman remote register <api-key> <secret>
-polyman remote pull <problem-id> <local-dir>
-polyman remote push <problem-id> <local-dir> [-a]
-polyman remote commit <problem-id> "commit message"
-polyman remote package <problem-id> standard
-```
-
-### Command Options Summary
-
-- `-a` or `--all` - All testsets
-- `-t <name>` or `--testset <name>` - Specific testset
-- `-g <name>` or `--group <name>` - Specific group
-- `-i <number>` or `--index <number>` - Specific test index
+For the full CLI reference with per-command walkthroughs, see [GUIDE.md - CLI Commands Reference](GUIDE.md#cli-commands-reference). Run `polyman --help` for an inline summary.
 
 ---
 
