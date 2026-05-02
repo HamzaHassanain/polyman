@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { CheckerVerdict } from '../../src/types';
+import type ConfigFile from '../../src/types';
+import type { CheckerVerdict, LocalChecker } from '../../src/types';
+import type { ExecutionOptions, ExecutionResult } from '../../src/executor';
 import * as checker from '../../src/helpers/checker';
 import { executor } from '../../src/executor';
 import * as utils from '../../src/helpers/utils';
@@ -22,7 +24,7 @@ vi.mock('../../src/helpers/utils', async importOriginal => {
     ...actual,
     compileCPP: vi.fn(),
     readConfigFile: vi.fn(),
-    throwError: vi.fn((err, msg) => {
+    throwError: vi.fn((err: unknown, msg: string) => {
       throw new Error(`${msg}: ${(err as Error).message}`);
     }),
     ensureDirectoryExists: vi.fn(),
@@ -37,9 +39,9 @@ vi.mock('../../src/formatter', () => ({
     info: vi.fn(),
     error: vi.fn(),
     newLine: vi.fn(),
-    cross: vi.fn().mockReturnValue('❌'),
-    bold: vi.fn().mockImplementation(s => `BOLD(${s})`),
-    highlight: vi.fn().mockImplementation(s => `HIGHLIGHT(${s})`),
+    cross: vi.fn().mockReturnValue('CROSS'),
+    bold: vi.fn().mockImplementation((s: string) => `BOLD(${s})`),
+    highlight: vi.fn().mockImplementation((s: string) => `HIGHLIGHT(${s})`),
   },
 }));
 
@@ -61,15 +63,97 @@ vi.mock('path', async importOriginal => {
   };
 });
 
+// Typed handles for mocked modules / functions. `vi.mocked()` returns the
+// same value with mock-typing layered on top, so calls like
+// `mockedExecute.mockResolvedValue(...)` are typed and bound. We pull out
+// individual methods via bracket notation to avoid `unbound-method` warnings
+// from typescript-eslint while preserving the original signatures.
+const mockedExecutor = vi.mocked(executor, { partial: true });
+const mockedExecute = mockedExecutor['execute'];
+const mockedCleanup = mockedExecutor['cleanup'];
+
+const mockedUtils = vi.mocked(utils, { partial: true });
+const mockedCompileCPP = mockedUtils['compileCPP'];
+const mockedReadConfigFile = mockedUtils['readConfigFile'];
+const mockedEnsureDirectoryExists = mockedUtils['ensureDirectoryExists'];
+const mockedRemoveDirectoryRecursively =
+  mockedUtils['removeDirectoryRecursively'];
+const mockedGetCompiledCommandToRun = mockedUtils['getCompiledCommandToRun'];
+
+const mockedFmt = vi.mocked(fmt, { partial: true });
+const mockedFmtWarning = mockedFmt['warning'];
+const mockedFmtError = mockedFmt['error'];
+
+const mockedFs = vi.mocked(fs, { partial: true });
+const mockedFsReadFile = mockedFs['readFile'];
+const mockedFsWriteFileSync = mockedFs['writeFileSync'];
+
+const mockedPath = vi.mocked(path, { partial: true });
+const mockedPathResolve = mockedPath['resolve'];
+const mockedPathJoin = mockedPath['join'];
+
+// Helper: build a ConfigFile with sensible defaults so tests can supply only
+// the bits they care about (typically `checker`).
+function makeConfig(overrides: Partial<ConfigFile> = {}): ConfigFile {
+  return {
+    name: 'test-problem',
+    timeLimit: 1000,
+    memoryLimit: 256,
+    inputFile: 'stdin',
+    outputFile: 'stdout',
+    interactive: false,
+    statements: {},
+    solutions: [],
+    checker: { name: 'check', source: 'check.cpp' },
+    validator: { name: 'val', source: 'val.cpp' },
+    ...overrides,
+  };
+}
+
+// Helper: build an ExecutionResult with optional overrides.
+function makeExecResult(
+  overrides: Partial<ExecutionResult> = {}
+): ExecutionResult {
+  return {
+    stdout: '',
+    stderr: '',
+    exitCode: 0,
+    success: true,
+    ...overrides,
+  };
+}
+
+// Type-safe simulator for fs.readFile mocks. fs.readFile has multiple
+// overloads; we hand-roll a callback-style implementation.
+type ReadFileSimulator = (filePath: string) => {
+  err: NodeJS.ErrnoException | null;
+  data: string;
+};
+
+function installReadFileMock(simulator: ReadFileSimulator): void {
+  mockedFsReadFile.mockImplementation(((
+    filePath: fs.PathOrFileDescriptor,
+    optionsOrCb: unknown,
+    maybeCb?: unknown
+  ) => {
+    const callback = (
+      typeof optionsOrCb === 'function' ? optionsOrCb : maybeCb
+    ) as (err: NodeJS.ErrnoException | null, data: string) => void;
+    const result = simulator(String(filePath));
+    callback(result.err, result.data);
+  }) as unknown as typeof fs.readFile);
+}
+
 describe('checker.ts', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Default mock implementation for path.resolve to behave somewhat sanely
-    (path.resolve as unknown as ReturnType<typeof vi.fn>).mockImplementation(
-      (...args: string[]) => args.join('/').replace(/\/+/g, '/')
+    // Default mock implementation for path.resolve / path.join to behave
+    // somewhat sanely.
+    mockedPathResolve.mockImplementation((...args: string[]) =>
+      args.join('/').replace(/\/+/g, '/')
     );
-    (path.join as unknown as ReturnType<typeof vi.fn>).mockImplementation(
-      (...args: string[]) => args.join('/').replace(/\/+/g, '/')
+    mockedPathJoin.mockImplementation((...args: string[]) =>
+      args.join('/').replace(/\/+/g, '/')
     );
   });
 
@@ -131,12 +215,7 @@ describe('checker.ts', () => {
 
     it('should pass if executor succeeds and expected verdict is OK', async () => {
       // Setup executor to succeed
-      vi.mocked(executor.execute).mockResolvedValue({
-        stdout: '',
-        stderr: '',
-        exitCode: 0,
-        success: true,
-      });
+      mockedExecute.mockResolvedValue(makeExecResult());
 
       await expect(
         checker.runChecker(
@@ -148,7 +227,7 @@ describe('checker.ts', () => {
         )
       ).resolves.not.toThrow();
 
-      expect(executor.execute).toHaveBeenCalledWith(
+      expect(mockedExecute).toHaveBeenCalledWith(
         expect.stringContaining(
           `${mockExecCommand} ${mockInput} ${mockOutput} ${mockAnswer}`
         ),
@@ -158,22 +237,19 @@ describe('checker.ts', () => {
 
     it('should throw error if expected OK but executor returns fail (stderr)', async () => {
       // Mock onError behavior inside execute
-      vi.mocked(executor.execute).mockImplementation((cmd, options) => {
-        if (options?.onError) {
-          options.onError({
-            stdout: '',
+      mockedExecute.mockImplementation(
+        (_cmd: string, options: ExecutionOptions) => {
+          const failResult = makeExecResult({
             stderr: 'Wrong answer expected...',
             exitCode: 1,
             success: false,
           });
+          if (options.onError) {
+            options.onError(failResult);
+          }
+          return Promise.resolve(failResult);
         }
-        return Promise.resolve({
-          stdout: '',
-          stderr: 'Wrong answer expected...',
-          exitCode: 1,
-          success: false,
-        });
-      });
+      );
 
       await expect(
         checker.runChecker(
@@ -187,22 +263,18 @@ describe('checker.ts', () => {
     });
 
     it('should throw "Expected OK but got WA" if stderr is empty on failure', async () => {
-      vi.mocked(executor.execute).mockImplementation((cmd, options) => {
-        if (options?.onError) {
-          options.onError({
-            stdout: '',
-            stderr: '',
+      mockedExecute.mockImplementation(
+        (_cmd: string, options: ExecutionOptions) => {
+          const failResult = makeExecResult({
             exitCode: 1,
             success: false,
           });
+          if (options.onError) {
+            options.onError(failResult);
+          }
+          return Promise.resolve(failResult);
         }
-        return Promise.resolve({
-          stdout: '',
-          stderr: '',
-          exitCode: 1,
-          success: false,
-        });
-      });
+      );
 
       await expect(
         checker.runChecker(
@@ -217,23 +289,23 @@ describe('checker.ts', () => {
 
     it('should pass if expected verdict is WA and executor fails (catches invalid)', async () => {
       // If we expect WA, the checker MUST fail.
-      vi.mocked(executor.execute).mockImplementation((cmd, options) => {
-        // Simulate checker finding WA
-        if (options?.onError) {
-          options.onError({
-            stdout: '',
-            stderr: 'wrong answer 1st tokens differ',
-            exitCode: 1,
-            success: false,
-          });
+      mockedExecute.mockImplementation(
+        (_cmd: string, options: ExecutionOptions) => {
+          // Simulate checker finding WA
+          if (options.onError) {
+            options.onError(
+              makeExecResult({
+                stderr: 'wrong answer 1st tokens differ',
+                exitCode: 1,
+                success: false,
+              })
+            );
+          }
+          return Promise.resolve(
+            makeExecResult({ exitCode: 1, success: false })
+          );
         }
-        return Promise.resolve({
-          stdout: '',
-          stderr: '',
-          exitCode: 1,
-          success: false,
-        });
-      });
+      );
 
       await expect(
         checker.runChecker(
@@ -248,12 +320,7 @@ describe('checker.ts', () => {
 
     it('should throw if expected WA but executor succeeds (OK)', async () => {
       // If we expect WA but checker says OK (exit code 0), we should throw
-      vi.mocked(executor.execute).mockResolvedValue({
-        stdout: '',
-        stderr: '',
-        exitCode: 0,
-        success: true,
-      });
+      mockedExecute.mockResolvedValue(makeExecResult());
 
       await expect(
         checker.runChecker(
@@ -269,24 +336,20 @@ describe('checker.ts', () => {
     it('should handle timeout callback correctly', async () => {
       const exitSpy = vi
         .spyOn(process, 'exit')
-        .mockImplementation((() => {}) as any);
+        .mockImplementation((() => undefined) as (code?: number) => never);
 
-      vi.mocked(executor.execute).mockImplementation((cmd, options) => {
-        if (options?.onTimeout) {
-          options.onTimeout({
-            stdout: '',
-            stderr: '',
-            exitCode: 124,
-            success: false,
-          });
+      mockedExecute.mockImplementation(
+        (_cmd: string, options: ExecutionOptions) => {
+          if (options.onTimeout) {
+            options.onTimeout(
+              makeExecResult({ exitCode: 124, success: false })
+            );
+          }
+          return Promise.resolve(
+            makeExecResult({ exitCode: 124, success: false })
+          );
         }
-        return Promise.resolve({
-          stdout: '',
-          stderr: '',
-          exitCode: 124,
-          success: false,
-        });
-      });
+      );
 
       await checker.runChecker(
         mockExecCommand,
@@ -300,34 +363,30 @@ describe('checker.ts', () => {
       // If expectedVerdict is OK, runChecker might not throw, but in reality process.exit kills it.
       // We just verify callbacks here.
 
-      expect(fmt.error).toHaveBeenCalledWith(
+      expect(mockedFmtError).toHaveBeenCalledWith(
         expect.stringContaining('Checker Unexpectedly Exceeded Time Limit')
       );
-      expect(executor.cleanup).toHaveBeenCalled();
+      expect(mockedCleanup).toHaveBeenCalled();
       expect(exitSpy).toHaveBeenCalledWith(1);
     });
 
     it('should handle memory limit callback correctly', async () => {
       const exitSpy = vi
         .spyOn(process, 'exit')
-        .mockImplementation((() => {}) as any);
+        .mockImplementation((() => undefined) as (code?: number) => never);
 
-      vi.mocked(executor.execute).mockImplementation((cmd, options) => {
-        if (options?.onMemoryExceeded) {
-          options.onMemoryExceeded({
-            stdout: '',
-            stderr: '',
-            exitCode: 137,
-            success: false,
-          });
+      mockedExecute.mockImplementation(
+        (_cmd: string, options: ExecutionOptions) => {
+          if (options.onMemoryExceeded) {
+            options.onMemoryExceeded(
+              makeExecResult({ exitCode: 137, success: false })
+            );
+          }
+          return Promise.resolve(
+            makeExecResult({ exitCode: 137, success: false })
+          );
         }
-        return Promise.resolve({
-          stdout: '',
-          stderr: '',
-          exitCode: 137,
-          success: false,
-        });
-      });
+      );
 
       await checker.runChecker(
         mockExecCommand,
@@ -337,52 +396,48 @@ describe('checker.ts', () => {
         'OK'
       );
 
-      expect(fmt.error).toHaveBeenCalledWith(
+      expect(mockedFmtError).toHaveBeenCalledWith(
         expect.stringContaining('Checker Unexpectedly Exceeded Memory Limit')
       );
-      expect(executor.cleanup).toHaveBeenCalled();
+      expect(mockedCleanup).toHaveBeenCalled();
       expect(exitSpy).toHaveBeenCalledWith(1);
     });
   });
 
   describe('compileChecker', () => {
     it('should compile standard checker using assets path', async () => {
-      const checkerConfig = {
+      const checkerConfig: LocalChecker = {
         name: 'wcmp',
         source: 'wcmp.cpp',
         isStandard: true,
       };
       await checker.compileChecker(checkerConfig);
 
-      expect(vi.mocked(utils.compileCPP)).toHaveBeenCalledWith(
+      expect(mockedCompileCPP).toHaveBeenCalledWith(
         expect.stringContaining('assets/checkers/wcmp.cpp')
       );
     });
 
     it('should compile custom checker using provided source', async () => {
-      const checkerConfig = {
+      const checkerConfig: LocalChecker = {
         name: 'my_checker',
         source: '/path/to/my_checker.cpp',
         isStandard: false,
       };
       await checker.compileChecker(checkerConfig);
 
-      expect(vi.mocked(utils.compileCPP)).toHaveBeenCalledWith(
-        '/path/to/my_checker.cpp'
-      );
+      expect(mockedCompileCPP).toHaveBeenCalledWith('/path/to/my_checker.cpp');
     });
 
     it('should throw wrapped error on compilation failure', async () => {
-      vi.mocked(utils.compileCPP).mockRejectedValue(
-        new Error('Compilation failed')
-      );
+      mockedCompileCPP.mockRejectedValue(new Error('Compilation failed'));
       await expect(
         checker.compileChecker({ name: 'fail', source: 'fail.cpp' })
       ).rejects.toThrow('Compilation failed');
     });
 
     it('should wrap non-Error objects', async () => {
-      vi.mocked(utils.compileCPP).mockRejectedValue('String error');
+      mockedCompileCPP.mockRejectedValue('String error');
       await expect(
         checker.compileChecker({ name: 'fail', source: 'fail.cpp' })
       ).rejects.toThrow('Failed to compile checker');
@@ -391,91 +446,81 @@ describe('checker.ts', () => {
 
   describe('testCheckerItself', () => {
     it('should return early for standard checkers', async () => {
-      vi.mocked(utils.readConfigFile).mockReturnValue({
-        checker: { isStandard: true, source: 'wcmp.cpp', name: 'wcmp' },
-        solutions: [],
-      } as unknown as any);
+      mockedReadConfigFile.mockReturnValue(
+        makeConfig({
+          checker: { isStandard: true, source: 'wcmp.cpp', name: 'wcmp' },
+        })
+      );
 
       await checker.testCheckerItself();
 
-      expect(fmt.warning).toHaveBeenCalledWith(
+      expect(mockedFmtWarning).toHaveBeenCalledWith(
         expect.stringContaining('Using standard checker')
       );
-      expect(utils.compileCPP).not.toHaveBeenCalled();
+      expect(mockedCompileCPP).not.toHaveBeenCalled();
     });
 
     it('should return early if no testsFilePath provided', async () => {
-      vi.mocked(utils.readConfigFile).mockReturnValue({
-        checker: { isStandard: false, source: 'check.cpp', name: 'check' },
-        solutions: [],
-      } as unknown as any);
+      mockedReadConfigFile.mockReturnValue(
+        makeConfig({
+          checker: { isStandard: false, source: 'check.cpp', name: 'check' },
+        })
+      );
 
       await checker.testCheckerItself();
 
-      expect(fmt.warning).toHaveBeenCalledWith(
+      expect(mockedFmtWarning).toHaveBeenCalledWith(
         expect.stringContaining('No checker tests file path')
       );
-      expect(fs.writeFileSync).not.toHaveBeenCalled();
+      expect(mockedFsWriteFileSync).not.toHaveBeenCalled();
     });
 
     it('should run tests for valid custom checker', async () => {
-      vi.mocked(utils.readConfigFile).mockReturnValue({
-        checker: {
-          isStandard: false,
-          source: 'check.cpp',
-          name: 'check',
-          testsFilePath: 'tests.json',
-        },
-        solutions: [],
-      } as unknown as any);
+      mockedReadConfigFile.mockReturnValue(
+        makeConfig({
+          checker: {
+            isStandard: false,
+            source: 'check.cpp',
+            name: 'check',
+            testsFilePath: 'tests.json',
+          },
+        })
+      );
 
       // Mock reading tests file
-      vi.mocked(fs.readFile).mockImplementation(((
-        path: any,
-        enc: any,
-        cb: any
-      ) => {
-        // Handle overload where enc is callback or enc is string
-        const callback = typeof enc === 'function' ? enc : cb;
-        callback(
-          null,
-          JSON.stringify({
-            tests: [
-              { input: '1', output: '1', answer: '1', expectedVerdict: 'OK' },
-            ],
-          })
-        );
-      }) as any);
+      installReadFileMock(() => ({
+        err: null,
+        data: JSON.stringify({
+          tests: [
+            { input: '1', output: '1', answer: '1', expectedVerdict: 'OK' },
+          ],
+        }),
+      }));
 
-      vi.mocked(utils.getCompiledCommandToRun).mockReturnValue('./check.exe');
+      mockedGetCompiledCommandToRun.mockReturnValue('./check.exe');
 
       // Ensure runChecker succeeds
-      vi.mocked(executor.execute).mockResolvedValue({
-        stdout: '',
-        stderr: '',
-        exitCode: 0,
-        success: true,
-      });
+      mockedExecute.mockResolvedValue(makeExecResult());
 
       await checker.testCheckerItself();
 
       // Verify makeCheckerTests logic (files written)
-      expect(utils.ensureDirectoryExists).toHaveBeenCalledWith('checker_tests');
+      expect(mockedEnsureDirectoryExists).toHaveBeenCalledWith('checker_tests');
       // StartLine should be adjusted or logic checked
-      expect(fs.writeFileSync).toHaveBeenCalledTimes(3); // Input, output, answer
+      expect(mockedFsWriteFileSync).toHaveBeenCalledTimes(3); // Input, output, answer
 
       // Verify runCheckerTests logic
-      expect(utils.getCompiledCommandToRun).toHaveBeenCalled();
+      expect(mockedGetCompiledCommandToRun).toHaveBeenCalled();
 
       // Verify cleanup
-      expect(executor.cleanup).toHaveBeenCalled();
-      expect(utils.removeDirectoryRecursively).toHaveBeenCalledWith(
+      expect(mockedCleanup).toHaveBeenCalled();
+      expect(mockedRemoveDirectoryRecursively).toHaveBeenCalledWith(
         'checker_tests'
       );
     });
 
     it('should catch and rethrow errors from test process', async () => {
-      vi.mocked(utils.readConfigFile).mockImplementation(() => {
+      mockedReadConfigFile.mockImplementation(() => {
         throw new Error('Config Error');
       });
 
@@ -484,8 +529,8 @@ describe('checker.ts', () => {
       );
 
       // Ensure cleanup still happens
-      expect(executor.cleanup).toHaveBeenCalled();
-      expect(utils.removeDirectoryRecursively).toHaveBeenCalledWith(
+      expect(mockedCleanup).toHaveBeenCalled();
+      expect(mockedRemoveDirectoryRecursively).toHaveBeenCalledWith(
         'checker_tests'
       );
     });
@@ -494,20 +539,18 @@ describe('checker.ts', () => {
   describe('makeCheckerTests (private, tested via testCheckerItself logic)', () => {
     // We covered logic in previous block basically, but let's test specifically the failing json parse
     it('should fail if tests json is invalid', async () => {
-      vi.mocked(utils.readConfigFile).mockReturnValue({
-        checker: {
-          isStandard: false,
-          source: 'c.cpp',
-          name: 'c',
-          testsFilePath: 'bad.json',
-        },
-        solutions: [],
-      } as unknown as any);
+      mockedReadConfigFile.mockReturnValue(
+        makeConfig({
+          checker: {
+            isStandard: false,
+            source: 'c.cpp',
+            name: 'c',
+            testsFilePath: 'bad.json',
+          },
+        })
+      );
 
-      vi.mocked(fs.readFile).mockImplementation(((p: any, e: any, cb: any) => {
-        const callback = typeof e === 'function' ? e : cb;
-        callback(null, 'INVALID JSON');
-      }) as any);
+      installReadFileMock(() => ({ err: null, data: 'INVALID JSON' }));
 
       await expect(checker.testCheckerItself()).rejects.toThrow(
         'Failed to parse checker tests JSON'
@@ -515,20 +558,21 @@ describe('checker.ts', () => {
     });
 
     it('should fail if file read error', async () => {
-      vi.mocked(utils.readConfigFile).mockReturnValue({
-        checker: {
-          isStandard: false,
-          source: 'c.cpp',
-          name: 'c',
-          testsFilePath: 'missing.json',
-        },
-        solutions: [],
-      } as unknown as any);
+      mockedReadConfigFile.mockReturnValue(
+        makeConfig({
+          checker: {
+            isStandard: false,
+            source: 'c.cpp',
+            name: 'c',
+            testsFilePath: 'missing.json',
+          },
+        })
+      );
 
-      vi.mocked(fs.readFile).mockImplementation(((p: any, e: any, cb: any) => {
-        const callback = typeof e === 'function' ? e : cb;
-        callback(new Error('ENOENT'), null);
-      }) as any);
+      installReadFileMock(() => ({
+        err: new Error('ENOENT') as NodeJS.ErrnoException,
+        data: '',
+      }));
 
       await expect(checker.testCheckerItself()).rejects.toThrow(
         'Failed to read checker tests file'
@@ -536,20 +580,21 @@ describe('checker.ts', () => {
     });
 
     it('should fail if json structure is invalid (no "tests" array)', async () => {
-      vi.mocked(utils.readConfigFile).mockReturnValue({
-        checker: {
-          isStandard: false,
-          source: 'c.cpp',
-          name: 'c',
-          testsFilePath: 'bad_struct.json',
-        },
-        solutions: [],
-      } as unknown as any);
+      mockedReadConfigFile.mockReturnValue(
+        makeConfig({
+          checker: {
+            isStandard: false,
+            source: 'c.cpp',
+            name: 'c',
+            testsFilePath: 'bad_struct.json',
+          },
+        })
+      );
 
-      vi.mocked(fs.readFile).mockImplementation(((p: any, e: any, cb: any) => {
-        const callback = typeof e === 'function' ? e : cb;
-        callback(null, JSON.stringify({ notTests: [] }));
-      }) as any);
+      installReadFileMock(() => ({
+        err: null,
+        data: JSON.stringify({ notTests: [] }),
+      }));
 
       await expect(checker.testCheckerItself()).rejects.toThrow(
         'Invalid checker tests JSON structure'
@@ -559,74 +604,76 @@ describe('checker.ts', () => {
 
   describe('runCheckerTests', () => {
     it('should throw if individual checker test fails', async () => {
-      const mockChecker = {
+      const mockChecker: LocalChecker = {
         name: 'c',
         source: 'c.cpp',
         testsFilePath: 't.json',
       };
 
-      vi.mocked(fs.readFile).mockImplementation(((p: any, e: any, cb: any) => {
-        const callback = typeof e === 'function' ? e : cb;
-        callback(
-          null,
-          JSON.stringify({
-            tests: [
-              {
-                index: 1,
-                input: '',
-                output: '',
-                answer: '',
-                expectedVerdict: 'OK',
-              },
-            ],
-          })
-        );
-      }) as any);
-      vi.mocked(utils.getCompiledCommandToRun).mockReturnValue('./c.exe');
+      installReadFileMock(() => ({
+        err: null,
+        data: JSON.stringify({
+          tests: [
+            {
+              index: 1,
+              input: '',
+              output: '',
+              answer: '',
+              expectedVerdict: 'OK',
+            },
+          ],
+        }),
+      }));
+      mockedGetCompiledCommandToRun.mockReturnValue('./c.exe');
 
       // Check fails
-      vi.mocked(executor.execute).mockImplementation((cmd, opts) => {
-        if (opts?.onError)
-          opts.onError({
-            stdout: '',
-            stderr: 'WA',
-            exitCode: 1,
-            success: false,
-          });
-        return Promise.resolve({
-          stdout: '',
-          stderr: 'WA',
-          exitCode: 1,
-          success: false,
-        });
-      });
+      mockedExecute.mockImplementation(
+        (_cmd: string, options: ExecutionOptions) => {
+          if (options.onError) {
+            options.onError(
+              makeExecResult({
+                stderr: 'WA',
+                exitCode: 1,
+                success: false,
+              })
+            );
+          }
+          return Promise.resolve(
+            makeExecResult({
+              stderr: 'WA',
+              exitCode: 1,
+              success: false,
+            })
+          );
+        }
+      );
 
-      await expect(checker.runCheckerTests(mockChecker as any)).rejects.toThrow(
+      await expect(checker.runCheckerTests(mockChecker)).rejects.toThrow(
         'Some checker tests failed'
       );
 
-      expect(fmt.error).toHaveBeenCalledWith(
+      expect(mockedFmtError).toHaveBeenCalledWith(
         expect.stringContaining('Checker Test 1 failed')
       );
     });
 
     it('should rethrow if generic error occurs (e.g. fs error)', async () => {
-      const mockChecker = {
+      const mockChecker: LocalChecker = {
         name: 'c',
         source: 'c.cpp',
         testsFilePath: 't.json',
       };
       // Parsing succeeds
-      vi.mocked(fs.readFile).mockImplementation(((p: any, e: any, cb: any) => {
-        const callback = typeof e === 'function' ? e : cb;
-        callback(null, JSON.stringify({ tests: [] }));
-      }) as any);
+      installReadFileMock(() => ({
+        err: null,
+        data: JSON.stringify({ tests: [] }),
+      }));
 
-      vi.mocked(utils.getCompiledCommandToRun).mockImplementation(() => {
+      mockedGetCompiledCommandToRun.mockImplementation(() => {
         throw new Error('Get command failed');
       });
 
-      await expect(checker.runCheckerTests(mockChecker as any)).rejects.toThrow(
+      await expect(checker.runCheckerTests(mockChecker)).rejects.toThrow(
         'Failed to run checker tests'
       );
     });

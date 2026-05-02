@@ -1,11 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as validator from '../../src/helpers/validator';
 import { executor } from '../../src/executor';
+import type { ExecutionOptions, ExecutionResult } from '../../src/executor';
 import * as utils from '../../src/helpers/utils';
 import * as testsetHelper from '../../src/helpers/testset';
 import { fmt } from '../../src/formatter';
 import fs from 'fs';
 import path from 'path';
+import type ConfigFile from '../../src/types';
+import type {
+  LocalValidator,
+  LocalTestset,
+  GeneratorScriptCommand,
+} from '../../src/types';
 
 vi.mock('fs');
 vi.mock('path');
@@ -26,15 +33,161 @@ vi.mock('../../src/formatter', () => ({
   },
 }));
 
+// Typed mock references obtained via `vi.mocked(module)` so we never access an
+// unbound method directly (which would trip @typescript-eslint/unbound-method).
+const mockedPath = vi.mocked(path);
+const mockedFs = vi.mocked(fs);
+const mockedExecutor = vi.mocked(executor);
+const mockedUtils = vi.mocked(utils);
+const mockedTestsetHelper = vi.mocked(testsetHelper);
+const mockedFmt = vi.mocked(fmt);
+
+// Bracket-form member access avoids the unbound-method rule for methods whose
+// declared types lack `this: void`. The aliased values are still proper
+// vitest mock functions because vi.mocked is a typed identity.
+const mockedPathResolve = mockedPath['resolve'];
+const mockedPathJoin = mockedPath['join'];
+const mockedExistsSync = mockedFs['existsSync'];
+const mockedReadFile = mockedFs['readFile'];
+const mockedWriteFileSync = mockedFs['writeFileSync'];
+const mockedExecuteWithRedirect = mockedExecutor['executeWithRedirect'];
+const mockedCleanup = mockedExecutor['cleanup'];
+const mockedCompileCPP = mockedUtils['compileCPP'];
+const mockedGetCompiledCommandToRun = mockedUtils['getCompiledCommandToRun'];
+const mockedGetTestFiles = mockedUtils['getTestFiles'];
+const mockedThrowError = mockedUtils['throwError'];
+const mockedLogError = mockedUtils['logError'];
+const mockedReadConfigFile = mockedUtils['readConfigFile'];
+const mockedEnsureDirectoryExists = mockedUtils['ensureDirectoryExists'];
+const mockedRemoveDirectoryRecursively =
+  mockedUtils['removeDirectoryRecursively'];
+const mockedGetGeneratorCommands = mockedTestsetHelper['getGeneratorCommands'];
+const mockedFmtError = mockedFmt['error'];
+const mockedFmtWarning = mockedFmt['warning'];
+
+const SUCCESS_RESULT: ExecutionResult = {
+  stdout: '',
+  stderr: '',
+  exitCode: 0,
+  success: true,
+};
+
+const FAILURE_RESULT: ExecutionResult = {
+  stdout: '',
+  stderr: '',
+  exitCode: 1,
+  success: false,
+};
+
+/**
+ * Make `throwError` actually throw — its real signature returns `never` so the
+ * mock impl must as well.
+ */
+function rethrowImpl(error: unknown): never {
+  throw error instanceof Error ? error : new Error(String(error));
+}
+
+/**
+ * Build a typed `executeWithRedirect` mock implementation that invokes
+ * `onError` and then throws the given error. Avoids `any`/unsafe access.
+ */
+function executeOnErrorThrow(
+  stderr: string,
+  message: string
+): (
+  command: string,
+  options: ExecutionOptions,
+  inputFile?: string,
+  outputFile?: string
+) => Promise<ExecutionResult> {
+  return (_command, options) => {
+    options.onError?.({ ...FAILURE_RESULT, stderr });
+    throw new Error(message);
+  };
+}
+
+/**
+ * Build a typed `executeWithRedirect` mock implementation that invokes
+ * `onError` and resolves with a failure result (does not throw).
+ */
+function executeOnErrorResolve(
+  stderr: string
+): (
+  command: string,
+  options: ExecutionOptions,
+  inputFile?: string,
+  outputFile?: string
+) => Promise<ExecutionResult> {
+  return (_command, options) => {
+    options.onError?.({ ...FAILURE_RESULT, stderr });
+    return Promise.resolve({ ...FAILURE_RESULT, stderr });
+  };
+}
+
+/**
+ * Common required-but-irrelevant fields needed to satisfy the ConfigFile
+ * structural type. The validator self-test code only inspects
+ * `config.validator`, so these placeholders never affect behaviour.
+ */
+const CONFIG_BASE: Omit<ConfigFile, 'validator'> = {
+  name: 'problem',
+  timeLimit: 1000,
+  memoryLimit: 256,
+  inputFile: 'stdin',
+  outputFile: 'stdout',
+  interactive: false,
+  statements: {},
+  solutions: [],
+  checker: { name: 'chk', source: 'chk.cpp' },
+};
+
+/**
+ * Build a typed ConfigFile carrying the supplied validator (or a default one
+ * if none is given).
+ */
+function buildConfig(validatorOverride?: LocalValidator): ConfigFile {
+  const config: ConfigFile = {
+    ...CONFIG_BASE,
+    validator: validatorOverride ?? { name: 'val', source: 'val.cpp' },
+  };
+  return config;
+}
+
+/**
+ * Build a ConfigFile-shaped object whose `validator` field is missing at
+ * runtime. We model this by widening to `ConfigFile`-without-validator and
+ * narrowing back, which is structurally truthful without using `any`.
+ */
+function buildConfigMissingValidator(): ConfigFile {
+  const partial: Omit<ConfigFile, 'validator'> = CONFIG_BASE;
+  return partial as unknown as ConfigFile;
+}
+
+/**
+ * Type-safe stand-in for the (path, encoding, callback) overload of
+ * fs.readFile that the validator uses. Always resolves with the supplied
+ * result, ignoring the call's actual arguments.
+ */
+type ReadFileWithEncoding = (
+  path: fs.PathOrFileDescriptor,
+  encoding: BufferEncoding,
+  callback: (err: NodeJS.ErrnoException | null, data: string) => void
+) => void;
+
+function readFileImpl(
+  err: NodeJS.ErrnoException | null,
+  data: string
+): ReadFileWithEncoding {
+  return (_path, _encoding, callback) => {
+    callback(err, data);
+  };
+}
+
 describe('validator.ts', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(path.resolve).mockImplementation((...args: string[]) =>
-      args.join('/')
-    );
-    vi.mocked(path.join).mockImplementation((...args: string[]) =>
-      args.join('/')
-    );
+    mockedPathResolve.mockImplementation((...args: string[]) => args.join('/'));
+    mockedPathJoin.mockImplementation((...args: string[]) => args.join('/'));
   });
 
   afterEach(() => {
@@ -57,30 +210,37 @@ describe('validator.ts', () => {
 
   describe('compileValidator', () => {
     it('should compile validator successfully', async () => {
-      const mockValidator = { name: 'val', source: 'validator/val.cpp' };
-      vi.mocked(utils.compileCPP).mockResolvedValue();
+      const mockValidator: LocalValidator = {
+        name: 'val',
+        source: 'validator/val.cpp',
+      };
+      mockedCompileCPP.mockResolvedValue();
 
       await expect(
         validator.compileValidator(mockValidator)
       ).resolves.not.toThrow();
 
-      expect(utils.compileCPP).toHaveBeenCalledWith('validator/val.cpp');
+      expect(mockedCompileCPP).toHaveBeenCalledWith('validator/val.cpp');
     });
 
     it('should throw if validator has no source file', async () => {
-      const mockValidator = { name: 'val' } as any;
+      // Empty `source` lets us exercise the missing-source branch without `any`.
+      const mockValidator: LocalValidator = { name: 'val', source: '' };
 
       await expect(validator.compileValidator(mockValidator)).rejects.toThrow(
         'Validator has no source file specified'
       );
 
-      expect(utils.compileCPP).not.toHaveBeenCalled();
+      expect(mockedCompileCPP).not.toHaveBeenCalled();
     });
 
     it('should propagate compilation errors', async () => {
-      const mockValidator = { name: 'val', source: 'validator/val.cpp' };
+      const mockValidator: LocalValidator = {
+        name: 'val',
+        source: 'validator/val.cpp',
+      };
       const compileError = new Error('Compilation failed');
-      vi.mocked(utils.compileCPP).mockRejectedValue(compileError);
+      mockedCompileCPP.mockRejectedValue(compileError);
 
       await expect(validator.compileValidator(mockValidator)).rejects.toThrow(
         'Compilation failed'
@@ -88,8 +248,11 @@ describe('validator.ts', () => {
     });
 
     it('should handle non-Error compilation failures', async () => {
-      const mockValidator = { name: 'val', source: 'validator/val.cpp' };
-      vi.mocked(utils.compileCPP).mockRejectedValue('string error');
+      const mockValidator: LocalValidator = {
+        name: 'val',
+        source: 'validator/val.cpp',
+      };
+      mockedCompileCPP.mockRejectedValue('string error');
 
       await expect(validator.compileValidator(mockValidator)).rejects.toThrow(
         'Failed to compile validator'
@@ -99,32 +262,25 @@ describe('validator.ts', () => {
 
   describe('validateSingleTest', () => {
     it('should execute validator successfully on valid test', async () => {
-      const mockValidator = { name: 'val', source: 'val.cpp' };
-      vi.mocked(utils.getCompiledCommandToRun).mockReturnValue('./val');
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(executor.executeWithRedirect).mockResolvedValue({
-        stdout: '',
-        stderr: '',
-        exitCode: 0,
-        success: true,
-      });
+      const mockValidator: LocalValidator = { name: 'val', source: 'val.cpp' };
+      mockedGetCompiledCommandToRun.mockReturnValue('./val');
+      mockedExistsSync.mockReturnValue(true);
+      mockedExecuteWithRedirect.mockResolvedValue(SUCCESS_RESULT);
 
       await expect(
         validator.validateSingleTest(mockValidator, 'testsets', 1)
       ).resolves.not.toThrow();
 
-      expect(utils.getCompiledCommandToRun).toHaveBeenCalledWith(mockValidator);
-      expect(fs.existsSync).toHaveBeenCalled();
-      expect(executor.executeWithRedirect).toHaveBeenCalled();
+      expect(mockedGetCompiledCommandToRun).toHaveBeenCalledWith(mockValidator);
+      expect(mockedExistsSync).toHaveBeenCalled();
+      expect(mockedExecuteWithRedirect).toHaveBeenCalled();
     });
 
     it('should throw if test file does not exist', async () => {
-      const mockValidator = { name: 'val', source: 'val.cpp' };
-      vi.mocked(utils.getCompiledCommandToRun).mockReturnValue('./val');
-      vi.mocked(fs.existsSync).mockReturnValue(false);
-      vi.mocked(utils.throwError).mockImplementation(e => {
-        throw e instanceof Error ? e : new Error(String(e));
-      });
+      const mockValidator: LocalValidator = { name: 'val', source: 'val.cpp' };
+      mockedGetCompiledCommandToRun.mockReturnValue('./val');
+      mockedExistsSync.mockReturnValue(false);
+      mockedThrowError.mockImplementation(rethrowImpl);
 
       await expect(
         validator.validateSingleTest(mockValidator, 'testsets', 1)
@@ -132,20 +288,13 @@ describe('validator.ts', () => {
     });
 
     it('should throw with detailed error message when validator fails', async () => {
-      const mockValidator = { name: 'val', source: 'val.cpp' };
-      vi.mocked(utils.getCompiledCommandToRun).mockReturnValue('./val');
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(executor.executeWithRedirect).mockImplementation(
-        (_cmd, opts: any) => {
-          if (opts.onError) {
-            opts.onError({ stderr: 'Invalid input', exitCode: 1 });
-          }
-          throw new Error('Invalid input');
-        }
+      const mockValidator: LocalValidator = { name: 'val', source: 'val.cpp' };
+      mockedGetCompiledCommandToRun.mockReturnValue('./val');
+      mockedExistsSync.mockReturnValue(true);
+      mockedExecuteWithRedirect.mockImplementation(
+        executeOnErrorThrow('Invalid input', 'Invalid input')
       );
-      vi.mocked(utils.throwError).mockImplementation(e => {
-        throw e instanceof Error ? e : new Error(String(e));
-      });
+      mockedThrowError.mockImplementation(rethrowImpl);
 
       await expect(
         validator.validateSingleTest(mockValidator, 'testsets', 5)
@@ -155,224 +304,190 @@ describe('validator.ts', () => {
 
   describe('validateTestset', () => {
     it('should validate all tests in testset successfully', async () => {
-      const mockValidator = { name: 'val', source: 'val.cpp' };
-      vi.mocked(utils.getCompiledCommandToRun).mockReturnValue('./val');
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(utils.getTestFiles).mockReturnValue(['test1.txt', 'test2.txt']);
-      vi.mocked(executor.executeWithRedirect).mockResolvedValue({
-        stdout: '',
-        stderr: '',
-        exitCode: 0,
-        success: true,
-      });
-      vi.mocked(executor.cleanup).mockResolvedValue();
+      const mockValidator: LocalValidator = { name: 'val', source: 'val.cpp' };
+      mockedGetCompiledCommandToRun.mockReturnValue('./val');
+      mockedExistsSync.mockReturnValue(true);
+      mockedGetTestFiles.mockReturnValue(['test1.txt', 'test2.txt']);
+      mockedExecuteWithRedirect.mockResolvedValue(SUCCESS_RESULT);
+      mockedCleanup.mockResolvedValue();
 
       await expect(
         validator.validateTestset(mockValidator, 'samples')
       ).resolves.not.toThrow();
 
-      expect(executor.cleanup).toHaveBeenCalled();
+      expect(mockedCleanup).toHaveBeenCalled();
     });
 
     it('should throw if testset directory does not exist', async () => {
-      const mockValidator = { name: 'val', source: 'val.cpp' };
-      vi.mocked(utils.getCompiledCommandToRun).mockReturnValue('./val');
-      vi.mocked(fs.existsSync).mockReturnValue(false);
-      vi.mocked(utils.throwError).mockImplementation(e => {
-        throw e instanceof Error ? e : new Error(String(e));
-      });
-      vi.mocked(executor.cleanup).mockResolvedValue();
+      const mockValidator: LocalValidator = { name: 'val', source: 'val.cpp' };
+      mockedGetCompiledCommandToRun.mockReturnValue('./val');
+      mockedExistsSync.mockReturnValue(false);
+      mockedThrowError.mockImplementation(rethrowImpl);
+      mockedCleanup.mockResolvedValue();
 
       await expect(
         validator.validateTestset(mockValidator, 'nonexistent')
       ).rejects.toThrow('Testset directory not found');
 
-      expect(executor.cleanup).toHaveBeenCalled();
+      expect(mockedCleanup).toHaveBeenCalled();
     });
 
     it('should throw if no test files found in testset', async () => {
-      const mockValidator = { name: 'val', source: 'val.cpp' };
-      vi.mocked(utils.getCompiledCommandToRun).mockReturnValue('./val');
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(utils.getTestFiles).mockReturnValue([]);
-      vi.mocked(utils.throwError).mockImplementation(e => {
-        throw e instanceof Error ? e : new Error(String(e));
-      });
-      vi.mocked(executor.cleanup).mockResolvedValue();
+      const mockValidator: LocalValidator = { name: 'val', source: 'val.cpp' };
+      mockedGetCompiledCommandToRun.mockReturnValue('./val');
+      mockedExistsSync.mockReturnValue(true);
+      mockedGetTestFiles.mockReturnValue([]);
+      mockedThrowError.mockImplementation(rethrowImpl);
+      mockedCleanup.mockResolvedValue();
 
       await expect(
         validator.validateTestset(mockValidator, 'empty')
       ).rejects.toThrow('No test files found in testset');
 
-      expect(executor.cleanup).toHaveBeenCalled();
+      expect(mockedCleanup).toHaveBeenCalled();
     });
 
     it('should log errors for failed tests and throw at end', async () => {
-      const mockValidator = { name: 'val', source: 'val.cpp' };
-      vi.mocked(utils.getCompiledCommandToRun).mockReturnValue('./val');
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(utils.getTestFiles).mockReturnValue(['test1.txt', 'test2.txt']);
-      vi.mocked(executor.executeWithRedirect)
-        .mockResolvedValueOnce({
-          stdout: '',
-          stderr: '',
-          exitCode: 0,
-          success: true,
-        })
-        .mockImplementation((_cmd, opts: any) => {
-          if (opts.onError) {
-            opts.onError({ stderr: 'Validation error', exitCode: 1 });
-          }
-          throw new Error('Validation error');
-        });
-      vi.mocked(utils.logError).mockImplementation(() => {});
-      vi.mocked(executor.cleanup).mockResolvedValue();
+      const mockValidator: LocalValidator = { name: 'val', source: 'val.cpp' };
+      mockedGetCompiledCommandToRun.mockReturnValue('./val');
+      mockedExistsSync.mockReturnValue(true);
+      mockedGetTestFiles.mockReturnValue(['test1.txt', 'test2.txt']);
+      mockedExecuteWithRedirect
+        .mockResolvedValueOnce(SUCCESS_RESULT)
+        .mockImplementation(
+          executeOnErrorThrow('Validation error', 'Validation error')
+        );
+      mockedLogError.mockImplementation(() => {});
+      mockedCleanup.mockResolvedValue();
 
       await expect(
         validator.validateTestset(mockValidator, 'samples')
       ).rejects.toThrow('Some tests failed validation');
 
-      expect(utils.logError).toHaveBeenCalled();
-      expect(executor.cleanup).toHaveBeenCalled();
+      expect(mockedLogError).toHaveBeenCalled();
+      expect(mockedCleanup).toHaveBeenCalled();
     });
   });
 
   describe('validateGroup', () => {
     it('should validate all tests in group successfully', async () => {
-      const mockValidator = { name: 'val', source: 'val.cpp' };
-      const mockTestset = {
+      const mockValidator: LocalValidator = { name: 'val', source: 'val.cpp' };
+      const mockTestset: LocalTestset = {
         name: 'testsets',
         groups: [{ name: 'samples', commands: [] }],
       };
-      vi.mocked(utils.getCompiledCommandToRun).mockReturnValue('./val');
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(testsetHelper.getGeneratorCommands).mockReturnValue([
+      mockedGetCompiledCommandToRun.mockReturnValue('./val');
+      mockedExistsSync.mockReturnValue(true);
+      const commands: GeneratorScriptCommand[] = [
         { type: 'generator', generator: 'gen', group: 'samples' },
         { type: 'generator', generator: 'gen', group: 'other' },
-      ]);
-      vi.mocked(executor.executeWithRedirect).mockResolvedValue({
-        stdout: '',
-        stderr: '',
-        exitCode: 0,
-        success: true,
-      });
-      vi.mocked(executor.cleanup).mockResolvedValue();
+      ];
+      mockedGetGeneratorCommands.mockReturnValue(commands);
+      mockedExecuteWithRedirect.mockResolvedValue(SUCCESS_RESULT);
+      mockedCleanup.mockResolvedValue();
 
       await expect(
         validator.validateGroup(mockValidator, mockTestset, 'samples')
       ).resolves.not.toThrow();
 
-      expect(executor.cleanup).toHaveBeenCalled();
+      expect(mockedCleanup).toHaveBeenCalled();
     });
 
     it('should throw if testset directory does not exist', async () => {
-      const mockValidator = { name: 'val', source: 'val.cpp' };
-      const mockTestset = { name: 'testsets', groups: [] };
-      vi.mocked(utils.getCompiledCommandToRun).mockReturnValue('./val');
-      vi.mocked(fs.existsSync).mockReturnValue(false);
-      vi.mocked(utils.throwError).mockImplementation(e => {
-        throw e instanceof Error ? e : new Error(String(e));
-      });
-      vi.mocked(executor.cleanup).mockResolvedValue();
+      const mockValidator: LocalValidator = { name: 'val', source: 'val.cpp' };
+      const mockTestset: LocalTestset = { name: 'testsets', groups: [] };
+      mockedGetCompiledCommandToRun.mockReturnValue('./val');
+      mockedExistsSync.mockReturnValue(false);
+      mockedThrowError.mockImplementation(rethrowImpl);
+      mockedCleanup.mockResolvedValue();
 
       await expect(
         validator.validateGroup(mockValidator, mockTestset, 'samples')
       ).rejects.toThrow('Testset directory not found');
 
-      expect(executor.cleanup).toHaveBeenCalled();
+      expect(mockedCleanup).toHaveBeenCalled();
     });
 
     it('should throw if no tests found in group', async () => {
-      const mockValidator = { name: 'val', source: 'val.cpp' };
-      const mockTestset = { name: 'testsets', groups: [] };
-      vi.mocked(utils.getCompiledCommandToRun).mockReturnValue('./val');
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(testsetHelper.getGeneratorCommands).mockReturnValue([
+      const mockValidator: LocalValidator = { name: 'val', source: 'val.cpp' };
+      const mockTestset: LocalTestset = { name: 'testsets', groups: [] };
+      mockedGetCompiledCommandToRun.mockReturnValue('./val');
+      mockedExistsSync.mockReturnValue(true);
+      const commands: GeneratorScriptCommand[] = [
         { type: 'generator', generator: 'gen', group: 'other' },
-      ]);
-      vi.mocked(utils.throwError).mockImplementation(e => {
-        throw e instanceof Error ? e : new Error(String(e));
-      });
-      vi.mocked(executor.cleanup).mockResolvedValue();
+      ];
+      mockedGetGeneratorCommands.mockReturnValue(commands);
+      mockedThrowError.mockImplementation(rethrowImpl);
+      mockedCleanup.mockResolvedValue();
 
       await expect(
         validator.validateGroup(mockValidator, mockTestset, 'samples')
       ).rejects.toThrow('No tests found in group');
 
-      expect(executor.cleanup).toHaveBeenCalled();
+      expect(mockedCleanup).toHaveBeenCalled();
     });
 
     it('should handle commands with ranges', async () => {
-      const mockValidator = { name: 'val', source: 'val.cpp' };
-      const mockTestset = { name: 'testsets', groups: [] };
-      vi.mocked(utils.getCompiledCommandToRun).mockReturnValue('./val');
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(testsetHelper.getGeneratorCommands).mockReturnValue([
+      const mockValidator: LocalValidator = { name: 'val', source: 'val.cpp' };
+      const mockTestset: LocalTestset = { name: 'testsets', groups: [] };
+      mockedGetCompiledCommandToRun.mockReturnValue('./val');
+      mockedExistsSync.mockReturnValue(true);
+      const commands: GeneratorScriptCommand[] = [
         {
           type: 'generator',
           generator: 'gen',
           group: 'samples',
           range: [1, 3],
         },
-      ]);
-      vi.mocked(executor.executeWithRedirect).mockResolvedValue({
-        stdout: '',
-        stderr: '',
-        exitCode: 0,
-        success: true,
-      });
-      vi.mocked(executor.cleanup).mockResolvedValue();
+      ];
+      mockedGetGeneratorCommands.mockReturnValue(commands);
+      mockedExecuteWithRedirect.mockResolvedValue(SUCCESS_RESULT);
+      mockedCleanup.mockResolvedValue();
 
       await expect(
         validator.validateGroup(mockValidator, mockTestset, 'samples')
       ).resolves.not.toThrow();
 
-      expect(executor.executeWithRedirect).toHaveBeenCalledTimes(3);
-      expect(executor.cleanup).toHaveBeenCalled();
+      expect(mockedExecuteWithRedirect).toHaveBeenCalledTimes(3);
+      expect(mockedCleanup).toHaveBeenCalled();
     });
 
     it('should log errors for failed tests in group', async () => {
-      const mockValidator = { name: 'val', source: 'val.cpp' };
-      const mockTestset = { name: 'testsets', groups: [] };
-      vi.mocked(utils.getCompiledCommandToRun).mockReturnValue('./val');
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(testsetHelper.getGeneratorCommands).mockReturnValue([
+      const mockValidator: LocalValidator = { name: 'val', source: 'val.cpp' };
+      const mockTestset: LocalTestset = { name: 'testsets', groups: [] };
+      mockedGetCompiledCommandToRun.mockReturnValue('./val');
+      mockedExistsSync.mockReturnValue(true);
+      const commands: GeneratorScriptCommand[] = [
         { type: 'generator', generator: 'gen', group: 'samples' },
-      ]);
-      vi.mocked(executor.executeWithRedirect).mockImplementation(
-        (_cmd, opts: any) => {
-          if (opts.onError) {
-            opts.onError({ stderr: 'Group validation error', exitCode: 1 });
-          }
-          throw new Error('Group validation error');
-        }
+      ];
+      mockedGetGeneratorCommands.mockReturnValue(commands);
+      mockedExecuteWithRedirect.mockImplementation(
+        executeOnErrorThrow('Group validation error', 'Group validation error')
       );
-      vi.mocked(utils.logError).mockImplementation(() => {});
-      vi.mocked(executor.cleanup).mockResolvedValue();
+      mockedLogError.mockImplementation(() => {});
+      mockedCleanup.mockResolvedValue();
 
       await expect(
         validator.validateGroup(mockValidator, mockTestset, 'samples')
       ).rejects.toThrow('Some tests in group samples failed validation');
 
-      expect(utils.logError).toHaveBeenCalled();
-      expect(executor.cleanup).toHaveBeenCalled();
+      expect(mockedLogError).toHaveBeenCalled();
+      expect(mockedCleanup).toHaveBeenCalled();
     });
   });
 
   describe('validateAllTestsets', () => {
     it('should validate all testsets successfully', async () => {
-      const mockValidator = { name: 'val', source: 'val.cpp' };
-      const mockTestsets = [{ name: 'samples' }, { name: 'tests' }];
-      vi.mocked(utils.getCompiledCommandToRun).mockReturnValue('./val');
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(utils.getTestFiles).mockReturnValue(['test1.txt']);
-      vi.mocked(executor.executeWithRedirect).mockResolvedValue({
-        stdout: '',
-        stderr: '',
-        exitCode: 0,
-        success: true,
-      });
-      vi.mocked(executor.cleanup).mockResolvedValue();
+      const mockValidator: LocalValidator = { name: 'val', source: 'val.cpp' };
+      const mockTestsets: LocalTestset[] = [
+        { name: 'samples' },
+        { name: 'tests' },
+      ];
+      mockedGetCompiledCommandToRun.mockReturnValue('./val');
+      mockedExistsSync.mockReturnValue(true);
+      mockedGetTestFiles.mockReturnValue(['test1.txt']);
+      mockedExecuteWithRedirect.mockResolvedValue(SUCCESS_RESULT);
+      mockedCleanup.mockResolvedValue();
 
       await expect(
         validator.validateAllTestsets(mockValidator, mockTestsets)
@@ -380,128 +495,104 @@ describe('validator.ts', () => {
     });
 
     it('should log errors and throw if any testset fails', async () => {
-      const mockValidator = { name: 'val', source: 'val.cpp' };
-      const mockTestsets = [{ name: 'samples' }, { name: 'tests' }];
-      vi.mocked(utils.getCompiledCommandToRun).mockReturnValue('./val');
-      vi.mocked(fs.existsSync)
-        .mockReturnValueOnce(true)
-        .mockReturnValueOnce(false);
-      vi.mocked(utils.getTestFiles).mockReturnValue(['test1.txt']);
-      vi.mocked(executor.executeWithRedirect).mockResolvedValue({
-        stdout: '',
-        stderr: '',
-        exitCode: 0,
-        success: true,
-      });
-      vi.mocked(utils.throwError).mockImplementation(e => {
-        throw e instanceof Error ? e : new Error(String(e));
-      });
-      vi.mocked(utils.logError).mockImplementation(() => {});
-      vi.mocked(executor.cleanup).mockResolvedValue();
+      const mockValidator: LocalValidator = { name: 'val', source: 'val.cpp' };
+      const mockTestsets: LocalTestset[] = [
+        { name: 'samples' },
+        { name: 'tests' },
+      ];
+      mockedGetCompiledCommandToRun.mockReturnValue('./val');
+      mockedExistsSync.mockReturnValueOnce(true).mockReturnValueOnce(false);
+      mockedGetTestFiles.mockReturnValue(['test1.txt']);
+      mockedExecuteWithRedirect.mockResolvedValue(SUCCESS_RESULT);
+      mockedThrowError.mockImplementation(rethrowImpl);
+      mockedLogError.mockImplementation(() => {});
+      mockedCleanup.mockResolvedValue();
 
       await expect(
         validator.validateAllTestsets(mockValidator, mockTestsets)
       ).rejects.toThrow('Some testsets failed validation');
 
-      expect(utils.logError).toHaveBeenCalled();
+      expect(mockedLogError).toHaveBeenCalled();
     });
   });
 
   describe('testValidatorItself', () => {
     it('should skip tests if no testsFilePath specified', async () => {
-      vi.mocked(utils.readConfigFile).mockReturnValue({
-        validator: { name: 'val', source: 'val.cpp' },
-      } as any);
-      vi.mocked(executor.cleanup).mockResolvedValue();
-      vi.mocked(utils.removeDirectoryRecursively).mockImplementation(() => {});
+      const config = buildConfig({ name: 'val', source: 'val.cpp' });
+      mockedReadConfigFile.mockReturnValue(config);
+      mockedCleanup.mockResolvedValue();
+      mockedRemoveDirectoryRecursively.mockImplementation(() => {});
 
       await expect(validator.testValidatorItself()).resolves.not.toThrow();
 
-      expect(fmt.warning).toHaveBeenCalledWith(
+      expect(mockedFmtWarning).toHaveBeenCalledWith(
         expect.stringContaining('No validator tests file path')
       );
-      expect(executor.cleanup).toHaveBeenCalled();
-      expect(utils.removeDirectoryRecursively).toHaveBeenCalledWith(
+      expect(mockedCleanup).toHaveBeenCalled();
+      expect(mockedRemoveDirectoryRecursively).toHaveBeenCalledWith(
         'validator_tests'
       );
     });
 
     it('should run validator tests successfully', async () => {
-      vi.mocked(utils.readConfigFile).mockReturnValue({
-        validator: {
-          name: 'val',
-          source: 'val.cpp',
-          testsFilePath: 'validator_tests.json',
-        },
-      } as any);
-      (vi.mocked(fs.readFile) as any).mockImplementation(
-        (path: unknown, encoding: unknown, callback: unknown) => {
-          const cb = callback as (err: Error | null, data: string) => void;
-          cb(null, JSON.stringify({ tests: [] }));
-        }
-      );
-      vi.mocked(utils.ensureDirectoryExists).mockImplementation(() => {});
-      vi.mocked(fs.writeFileSync).mockImplementation(() => {});
-      vi.mocked(utils.getCompiledCommandToRun).mockReturnValue('./val');
-      vi.mocked(executor.executeWithRedirect).mockResolvedValue({
-        stdout: '',
-        stderr: '',
-        exitCode: 0,
-        success: true,
+      const config = buildConfig({
+        name: 'val',
+        source: 'val.cpp',
+        testsFilePath: 'validator_tests.json',
       });
-      vi.mocked(executor.cleanup).mockResolvedValue();
-      vi.mocked(utils.removeDirectoryRecursively).mockImplementation(() => {});
+      mockedReadConfigFile.mockReturnValue(config);
+      mockedReadFile.mockImplementation(
+        readFileImpl(null, JSON.stringify({ tests: [] })) as typeof fs.readFile
+      );
+      mockedEnsureDirectoryExists.mockImplementation(() => {});
+      mockedWriteFileSync.mockImplementation(() => {});
+      mockedGetCompiledCommandToRun.mockReturnValue('./val');
+      mockedExecuteWithRedirect.mockResolvedValue(SUCCESS_RESULT);
+      mockedCleanup.mockResolvedValue();
+      mockedRemoveDirectoryRecursively.mockImplementation(() => {});
 
       await expect(validator.testValidatorItself()).resolves.not.toThrow();
 
-      expect(executor.cleanup).toHaveBeenCalled();
-      expect(utils.removeDirectoryRecursively).toHaveBeenCalledWith(
+      expect(mockedCleanup).toHaveBeenCalled();
+      expect(mockedRemoveDirectoryRecursively).toHaveBeenCalledWith(
         'validator_tests'
       );
     });
 
     it('should throw if validator is not defined', async () => {
-      vi.mocked(utils.readConfigFile).mockReturnValue({} as any);
-      vi.mocked(utils.throwError).mockImplementation(e => {
-        throw e instanceof Error ? e : new Error(String(e));
-      });
-      vi.mocked(executor.cleanup).mockResolvedValue();
-      vi.mocked(utils.removeDirectoryRecursively).mockImplementation(() => {});
+      mockedReadConfigFile.mockReturnValue(buildConfigMissingValidator());
+      mockedThrowError.mockImplementation(rethrowImpl);
+      mockedCleanup.mockResolvedValue();
+      mockedRemoveDirectoryRecursively.mockImplementation(() => {});
 
       await expect(validator.testValidatorItself()).rejects.toThrow(
         'No validator defined'
       );
 
-      expect(executor.cleanup).toHaveBeenCalled();
-      expect(utils.removeDirectoryRecursively).toHaveBeenCalledWith(
+      expect(mockedCleanup).toHaveBeenCalled();
+      expect(mockedRemoveDirectoryRecursively).toHaveBeenCalledWith(
         'validator_tests'
       );
     });
 
     it('should cleanup even if tests fail', async () => {
-      vi.mocked(utils.readConfigFile).mockReturnValue({
-        validator: {
-          name: 'val',
-          source: 'val.cpp',
-          testsFilePath: 'validator_tests.json',
-        },
-      } as any);
-      (vi.mocked(fs.readFile) as any).mockImplementation(
-        (path: unknown, encoding: unknown, callback: unknown) => {
-          const cb = callback as (err: Error | null, data: string) => void;
-          cb(new Error('File read error'), '');
-        }
-      );
-      vi.mocked(utils.throwError).mockImplementation(e => {
-        throw e instanceof Error ? e : new Error(String(e));
+      const config = buildConfig({
+        name: 'val',
+        source: 'val.cpp',
+        testsFilePath: 'validator_tests.json',
       });
-      vi.mocked(executor.cleanup).mockResolvedValue();
-      vi.mocked(utils.removeDirectoryRecursively).mockImplementation(() => {});
+      mockedReadConfigFile.mockReturnValue(config);
+      mockedReadFile.mockImplementation(
+        readFileImpl(new Error('File read error'), '') as typeof fs.readFile
+      );
+      mockedThrowError.mockImplementation(rethrowImpl);
+      mockedCleanup.mockResolvedValue();
+      mockedRemoveDirectoryRecursively.mockImplementation(() => {});
 
       await expect(validator.testValidatorItself()).rejects.toThrow();
 
-      expect(executor.cleanup).toHaveBeenCalled();
-      expect(utils.removeDirectoryRecursively).toHaveBeenCalledWith(
+      expect(mockedCleanup).toHaveBeenCalled();
+      expect(mockedRemoveDirectoryRecursively).toHaveBeenCalledWith(
         'validator_tests'
       );
     });
@@ -509,232 +600,178 @@ describe('validator.ts', () => {
 
   describe('runValidatorTests', () => {
     it('should run all validator tests successfully', async () => {
-      const mockValidator = {
+      const mockValidator: LocalValidator = {
         name: 'val',
         source: 'val.cpp',
         testsFilePath: 'validator_tests.json',
       };
-      (vi.mocked(fs.readFile) as any).mockImplementation(
-        (path: unknown, encoding: unknown, callback: unknown) => {
-          const cb = callback as (err: Error | null, data: string) => void;
-          cb(
-            null,
-            JSON.stringify({
-              tests: [
-                { index: 1, input: '1 2', expectedVerdict: 'VALID' },
-                { index: 2, input: '-1', expectedVerdict: 'INVALID' },
-              ],
-            })
-          );
-        }
+      const testsJson = {
+        tests: [
+          { index: 1, input: '1 2', expectedVerdict: 'VALID' },
+          { index: 2, input: '-1', expectedVerdict: 'INVALID' },
+        ],
+      };
+      mockedReadFile.mockImplementation(
+        readFileImpl(null, JSON.stringify(testsJson)) as typeof fs.readFile
       );
-      vi.mocked(utils.getCompiledCommandToRun).mockReturnValue('./val');
-      vi.mocked(executor.executeWithRedirect)
-        .mockResolvedValueOnce({
-          stdout: '',
-          stderr: '',
-          exitCode: 0,
-          success: true,
-        })
-        .mockImplementation((_cmd, opts: any) => {
-          if (opts.onError) {
-            opts.onError({ stderr: 'Invalid', exitCode: 1 });
-          }
-          return Promise.resolve({
-            stdout: '',
-            stderr: '',
-            exitCode: 1,
-            success: false,
-          });
-        });
-      vi.mocked(executor.cleanup).mockResolvedValue();
+      mockedGetCompiledCommandToRun.mockReturnValue('./val');
+      mockedExecuteWithRedirect
+        .mockResolvedValueOnce(SUCCESS_RESULT)
+        .mockImplementation(executeOnErrorResolve('Invalid'));
+      mockedCleanup.mockResolvedValue();
 
       await expect(
         validator.runValidatorTests(mockValidator)
       ).resolves.not.toThrow();
 
-      expect(executor.cleanup).toHaveBeenCalled();
+      expect(mockedCleanup).toHaveBeenCalled();
     });
 
     it('should throw if some validator tests fail', async () => {
-      const mockValidator = {
+      const mockValidator: LocalValidator = {
         name: 'val',
         source: 'val.cpp',
         testsFilePath: 'validator_tests.json',
       };
-      (vi.mocked(fs.readFile) as any).mockImplementation(
-        (path: unknown, encoding: unknown, callback: unknown) => {
-          const cb = callback as (err: Error | null, data: string) => void;
-          cb(
-            null,
-            JSON.stringify({
-              tests: [{ index: 1, input: '1 2', expectedVerdict: 'VALID' }],
-            })
-          );
-        }
+      const testsJson = {
+        tests: [{ index: 1, input: '1 2', expectedVerdict: 'VALID' }],
+      };
+      mockedReadFile.mockImplementation(
+        readFileImpl(null, JSON.stringify(testsJson)) as typeof fs.readFile
       );
-      vi.mocked(utils.getCompiledCommandToRun).mockReturnValue('./val');
-      vi.mocked(executor.executeWithRedirect).mockImplementation(
-        (_cmd, opts: any) => {
-          if (opts.onError) {
-            opts.onError({ stderr: 'Unexpected error', exitCode: 1 });
-          }
-          throw new Error('Unexpected error');
-        }
+      mockedGetCompiledCommandToRun.mockReturnValue('./val');
+      mockedExecuteWithRedirect.mockImplementation(
+        executeOnErrorThrow('Unexpected error', 'Unexpected error')
       );
-      vi.mocked(executor.cleanup).mockResolvedValue();
+      mockedCleanup.mockResolvedValue();
 
       await expect(validator.runValidatorTests(mockValidator)).rejects.toThrow(
         'Some validator tests failed'
       );
 
-      expect(fmt.error).toHaveBeenCalled();
-      expect(executor.cleanup).toHaveBeenCalled();
+      expect(mockedFmtError).toHaveBeenCalled();
+      expect(mockedCleanup).toHaveBeenCalled();
     });
 
     it('should propagate parse errors', async () => {
-      const mockValidator = {
+      const mockValidator: LocalValidator = {
         name: 'val',
         source: 'val.cpp',
         testsFilePath: 'validator_tests.json',
       };
-      (vi.mocked(fs.readFile) as any).mockImplementation(
-        (path: unknown, encoding: unknown, callback: unknown) => {
-          const cb = callback as (err: Error | null, data: string) => void;
-          cb(new Error('Parse error'), '');
-        }
+      mockedReadFile.mockImplementation(
+        readFileImpl(new Error('Parse error'), '') as typeof fs.readFile
       );
-      vi.mocked(utils.throwError).mockImplementation(e => {
-        throw e instanceof Error ? e : new Error(String(e));
-      });
-      vi.mocked(executor.cleanup).mockResolvedValue();
+      mockedThrowError.mockImplementation(rethrowImpl);
+      mockedCleanup.mockResolvedValue();
 
       await expect(validator.runValidatorTests(mockValidator)).rejects.toThrow(
         'Failed to read validator tests file'
       );
 
-      expect(executor.cleanup).toHaveBeenCalled();
+      expect(mockedCleanup).toHaveBeenCalled();
     });
 
     it('should cleanup even if tests fail', async () => {
-      const mockValidator = {
+      const mockValidator: LocalValidator = {
         name: 'val',
         source: 'val.cpp',
         testsFilePath: 'validator_tests.json',
       };
-      (vi.mocked(fs.readFile) as any).mockImplementation(
-        (path: unknown, encoding: unknown, callback: unknown) => {
-          const cb = callback as (err: Error | null, data: string) => void;
-          cb(
-            null,
-            JSON.stringify({
-              tests: [{ index: 1, input: '1 2', expectedVerdict: 'VALID' }],
-            })
-          );
-        }
+      const testsJson = {
+        tests: [{ index: 1, input: '1 2', expectedVerdict: 'VALID' }],
+      };
+      mockedReadFile.mockImplementation(
+        readFileImpl(null, JSON.stringify(testsJson)) as typeof fs.readFile
       );
-      vi.mocked(utils.getCompiledCommandToRun).mockReturnValue('./val');
-      vi.mocked(executor.executeWithRedirect).mockRejectedValue(
+      mockedGetCompiledCommandToRun.mockReturnValue('./val');
+      mockedExecuteWithRedirect.mockRejectedValue(
         new Error('Execution failed')
       );
-      vi.mocked(executor.cleanup).mockResolvedValue();
+      mockedCleanup.mockResolvedValue();
 
       await expect(
         validator.runValidatorTests(mockValidator)
       ).rejects.toThrow();
 
-      expect(executor.cleanup).toHaveBeenCalled();
+      expect(mockedCleanup).toHaveBeenCalled();
     });
   });
 
   describe('edge cases and error handling', () => {
     it('should handle timeout in validator execution', async () => {
-      const mockValidator = { name: 'val', source: 'val.cpp' };
-      vi.mocked(utils.getCompiledCommandToRun).mockReturnValue('./val');
-      vi.mocked(fs.existsSync).mockReturnValue(true);
+      const mockValidator: LocalValidator = { name: 'val', source: 'val.cpp' };
+      mockedGetCompiledCommandToRun.mockReturnValue('./val');
+      mockedExistsSync.mockReturnValue(true);
 
       const mockExit = vi
         .spyOn(process, 'exit')
         .mockImplementation(() => undefined as never);
-      vi.mocked(executor.cleanup).mockResolvedValue();
+      mockedCleanup.mockResolvedValue();
 
-      vi.mocked(executor.executeWithRedirect).mockImplementation(
-        async (_cmd, opts: any) => {
-          if (opts.onTimeout) {
-            await opts.onTimeout();
-          }
-          return { stdout: '', stderr: '', exitCode: 0, success: true };
+      mockedExecuteWithRedirect.mockImplementation(async (_cmd, options) => {
+        if (options.onTimeout) {
+          await Promise.resolve(options.onTimeout(SUCCESS_RESULT));
         }
-      );
+        return SUCCESS_RESULT;
+      });
 
       await validator.validateSingleTest(mockValidator, 'testsets', 1);
 
-      expect(fmt.error).toHaveBeenCalledWith(
+      expect(mockedFmtError).toHaveBeenCalledWith(
         expect.stringContaining('Exceeded Time Limit')
       );
-      expect(executor.cleanup).toHaveBeenCalled();
+      expect(mockedCleanup).toHaveBeenCalled();
       expect(mockExit).toHaveBeenCalledWith(1);
 
       mockExit.mockRestore();
     });
 
     it('should handle memory exceeded in validator execution', async () => {
-      const mockValidator = { name: 'val', source: 'val.cpp' };
-      vi.mocked(utils.getCompiledCommandToRun).mockReturnValue('./val');
-      vi.mocked(fs.existsSync).mockReturnValue(true);
+      const mockValidator: LocalValidator = { name: 'val', source: 'val.cpp' };
+      mockedGetCompiledCommandToRun.mockReturnValue('./val');
+      mockedExistsSync.mockReturnValue(true);
 
       const mockExit = vi
         .spyOn(process, 'exit')
         .mockImplementation(() => undefined as never);
-      vi.mocked(executor.cleanup).mockResolvedValue();
+      mockedCleanup.mockResolvedValue();
 
-      vi.mocked(executor.executeWithRedirect).mockImplementation(
-        async (_cmd, opts: any) => {
-          if (opts.onMemoryExceeded) {
-            await opts.onMemoryExceeded();
-          }
-          return { stdout: '', stderr: '', exitCode: 0, success: true };
+      mockedExecuteWithRedirect.mockImplementation(async (_cmd, options) => {
+        if (options.onMemoryExceeded) {
+          await Promise.resolve(options.onMemoryExceeded(SUCCESS_RESULT));
         }
-      );
+        return SUCCESS_RESULT;
+      });
 
       await validator.validateSingleTest(mockValidator, 'testsets', 1);
 
-      expect(fmt.error).toHaveBeenCalledWith(
+      expect(mockedFmtError).toHaveBeenCalledWith(
         expect.stringContaining('Exceeded Memory Limit')
       );
-      expect(executor.cleanup).toHaveBeenCalled();
+      expect(mockedCleanup).toHaveBeenCalled();
       expect(mockExit).toHaveBeenCalledWith(1);
 
       mockExit.mockRestore();
     });
 
     it('should handle validator expecting INVALID but getting VALID', async () => {
-      vi.mocked(utils.getCompiledCommandToRun).mockReturnValue('./val');
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(executor.executeWithRedirect).mockResolvedValue({
-        stdout: '',
-        stderr: '',
-        exitCode: 0,
-        success: true,
-      });
+      mockedGetCompiledCommandToRun.mockReturnValue('./val');
+      mockedExistsSync.mockReturnValue(true);
+      mockedExecuteWithRedirect.mockResolvedValue(SUCCESS_RESULT);
 
-      const mockValidator2 = {
+      const mockValidator2: LocalValidator = {
         name: 'val',
         source: 'val.cpp',
         testsFilePath: 'validator_tests.json',
       };
-      (vi.mocked(fs.readFile) as any).mockImplementation(
-        (path: unknown, encoding: unknown, callback: unknown) => {
-          const cb = callback as (err: Error | null, data: string) => void;
-          cb(
-            null,
-            JSON.stringify({
-              tests: [{ index: 1, input: '1 2', expectedVerdict: 'INVALID' }],
-            })
-          );
-        }
+      const testsJson = {
+        tests: [{ index: 1, input: '1 2', expectedVerdict: 'INVALID' }],
+      };
+      mockedReadFile.mockImplementation(
+        readFileImpl(null, JSON.stringify(testsJson)) as typeof fs.readFile
       );
-      vi.mocked(executor.cleanup).mockResolvedValue();
+      mockedCleanup.mockResolvedValue();
 
       await expect(validator.runValidatorTests(mockValidator2)).rejects.toThrow(
         'Some validator tests failed'
@@ -742,21 +779,16 @@ describe('validator.ts', () => {
     });
 
     it('should handle invalid JSON in validator tests file', async () => {
-      const mockValidator = {
+      const mockValidator: LocalValidator = {
         name: 'val',
         source: 'val.cpp',
         testsFilePath: 'validator_tests.json',
       };
-      (vi.mocked(fs.readFile) as any).mockImplementation(
-        (path: unknown, encoding: unknown, callback: unknown) => {
-          const cb = callback as (err: Error | null, data: string) => void;
-          cb(null, 'invalid json');
-        }
+      mockedReadFile.mockImplementation(
+        readFileImpl(null, 'invalid json') as typeof fs.readFile
       );
-      vi.mocked(utils.throwError).mockImplementation(e => {
-        throw e instanceof Error ? e : new Error(String(e));
-      });
-      vi.mocked(executor.cleanup).mockResolvedValue();
+      mockedThrowError.mockImplementation(rethrowImpl);
+      mockedCleanup.mockResolvedValue();
 
       await expect(validator.runValidatorTests(mockValidator)).rejects.toThrow(
         'Failed to parse validator tests JSON'
@@ -764,21 +796,19 @@ describe('validator.ts', () => {
     });
 
     it('should handle missing tests property in JSON', async () => {
-      const mockValidator = {
+      const mockValidator: LocalValidator = {
         name: 'val',
         source: 'val.cpp',
         testsFilePath: 'validator_tests.json',
       };
-      (vi.mocked(fs.readFile) as any).mockImplementation(
-        (path: unknown, encoding: unknown, callback: unknown) => {
-          const cb = callback as (err: Error | null, data: string) => void;
-          cb(null, JSON.stringify({ other: 'data' }));
-        }
+      mockedReadFile.mockImplementation(
+        readFileImpl(
+          null,
+          JSON.stringify({ other: 'data' })
+        ) as typeof fs.readFile
       );
-      vi.mocked(utils.throwError).mockImplementation(e => {
-        throw e instanceof Error ? e : new Error(String(e));
-      });
-      vi.mocked(executor.cleanup).mockResolvedValue();
+      mockedThrowError.mockImplementation(rethrowImpl);
+      mockedCleanup.mockResolvedValue();
 
       await expect(validator.runValidatorTests(mockValidator)).rejects.toThrow(
         'Invalid validator tests JSON structure'
@@ -788,11 +818,11 @@ describe('validator.ts', () => {
 
   describe('additional coverage tests', () => {
     it('should handle ranges in non-target groups correctly', async () => {
-      const mockValidator = { name: 'val', source: 'val.cpp' };
-      const mockTestset = { name: 'testsets', groups: [] };
-      vi.mocked(utils.getCompiledCommandToRun).mockReturnValue('./val');
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(testsetHelper.getGeneratorCommands).mockReturnValue([
+      const mockValidator: LocalValidator = { name: 'val', source: 'val.cpp' };
+      const mockTestset: LocalTestset = { name: 'testsets', groups: [] };
+      mockedGetCompiledCommandToRun.mockReturnValue('./val');
+      mockedExistsSync.mockReturnValue(true);
+      const commands: GeneratorScriptCommand[] = [
         {
           type: 'generator',
           generator: 'gen',
@@ -804,79 +834,54 @@ describe('validator.ts', () => {
           generator: 'gen',
           group: 'samples',
         },
-      ]);
-      vi.mocked(executor.executeWithRedirect).mockResolvedValue({
-        stdout: '',
-        stderr: '',
-        exitCode: 0,
-        success: true,
-      });
-      vi.mocked(executor.cleanup).mockResolvedValue();
+      ];
+      mockedGetGeneratorCommands.mockReturnValue(commands);
+      mockedExecuteWithRedirect.mockResolvedValue(SUCCESS_RESULT);
+      mockedCleanup.mockResolvedValue();
 
       await expect(
         validator.validateGroup(mockValidator, mockTestset, 'samples')
       ).resolves.not.toThrow();
 
       // Should only execute once for the single test in 'samples' group
-      expect(executor.executeWithRedirect).toHaveBeenCalledTimes(1);
-      expect(executor.cleanup).toHaveBeenCalled();
+      expect(mockedExecuteWithRedirect).toHaveBeenCalledTimes(1);
+      expect(mockedCleanup).toHaveBeenCalled();
     });
 
     it('should create validator test files when running testValidatorItself', async () => {
-      vi.mocked(utils.readConfigFile).mockReturnValue({
-        validator: {
-          name: 'val',
-          source: 'val.cpp',
-          testsFilePath: 'validator_tests.json',
-        },
-      } as any);
-      (vi.mocked(fs.readFile) as any).mockImplementation(
-        (path: unknown, encoding: unknown, callback: unknown) => {
-          const cb = callback as (err: Error | null, data: string) => void;
-          cb(
-            null,
-            JSON.stringify({
-              tests: [
-                { index: 1, input: '5 10', expectedVerdict: 'VALID' },
-                { index: 2, input: '-1 5', expectedVerdict: 'INVALID' },
-              ],
-            })
-          );
-        }
+      const config = buildConfig({
+        name: 'val',
+        source: 'val.cpp',
+        testsFilePath: 'validator_tests.json',
+      });
+      mockedReadConfigFile.mockReturnValue(config);
+      const testsJson = {
+        tests: [
+          { index: 1, input: '5 10', expectedVerdict: 'VALID' },
+          { index: 2, input: '-1 5', expectedVerdict: 'INVALID' },
+        ],
+      };
+      mockedReadFile.mockImplementation(
+        readFileImpl(null, JSON.stringify(testsJson)) as typeof fs.readFile
       );
-      vi.mocked(utils.ensureDirectoryExists).mockImplementation(() => {});
-      vi.mocked(fs.writeFileSync).mockImplementation(() => {});
-      vi.mocked(utils.getCompiledCommandToRun).mockReturnValue('./val');
-      vi.mocked(executor.executeWithRedirect)
-        .mockResolvedValueOnce({
-          stdout: '',
-          stderr: '',
-          exitCode: 0,
-          success: true,
-        })
-        .mockImplementation((_cmd, opts: any) => {
-          if (opts.onError) {
-            opts.onError({ stderr: 'Invalid input', exitCode: 1 });
-          }
-          return Promise.resolve({
-            stdout: '',
-            stderr: '',
-            exitCode: 1,
-            success: false,
-          });
-        });
-      vi.mocked(executor.cleanup).mockResolvedValue();
-      vi.mocked(utils.removeDirectoryRecursively).mockImplementation(() => {});
+      mockedEnsureDirectoryExists.mockImplementation(() => {});
+      mockedWriteFileSync.mockImplementation(() => {});
+      mockedGetCompiledCommandToRun.mockReturnValue('./val');
+      mockedExecuteWithRedirect
+        .mockResolvedValueOnce(SUCCESS_RESULT)
+        .mockImplementation(executeOnErrorResolve('Invalid input'));
+      mockedCleanup.mockResolvedValue();
+      mockedRemoveDirectoryRecursively.mockImplementation(() => {});
 
       await expect(validator.testValidatorItself()).resolves.not.toThrow();
 
       // Verify file writing operations were called
-      expect(utils.ensureDirectoryExists).toHaveBeenCalledWith(
+      expect(mockedEnsureDirectoryExists).toHaveBeenCalledWith(
         'validator_tests'
       );
-      expect(fs.writeFileSync).toHaveBeenCalledTimes(2);
-      expect(executor.cleanup).toHaveBeenCalled();
-      expect(utils.removeDirectoryRecursively).toHaveBeenCalledWith(
+      expect(mockedWriteFileSync).toHaveBeenCalledTimes(2);
+      expect(mockedCleanup).toHaveBeenCalled();
+      expect(mockedRemoveDirectoryRecursively).toHaveBeenCalledWith(
         'validator_tests'
       );
     });

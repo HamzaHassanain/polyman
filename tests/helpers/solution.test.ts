@@ -1,12 +1,40 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as solution from '../../src/helpers/solution';
-import { executor } from '../../src/executor';
+import * as executorModule from '../../src/executor';
+import type { ExecutionOptions, ExecutionResult } from '../../src/executor';
+
+// Re-export `executor` through a typed indirection so that calls go through a
+// plain function reference (avoids @typescript-eslint/unbound-method false
+// positives when handing methods to `vi.mocked`).
+type ExecuteWithRedirect = (
+  command: string,
+  options: ExecutionOptions,
+  inputFile?: string,
+  outputFile?: string
+) => Promise<ExecutionResult>;
+type CleanupFn = () => Promise<void>;
+type ExecuteFn = (
+  command: string,
+  options: ExecutionOptions
+) => Promise<ExecutionResult>;
+const executor: {
+  execute: ExecuteFn;
+  executeWithRedirect: ExecuteWithRedirect;
+  cleanup: CleanupFn;
+} = executorModule.executor;
 import * as utils from '../../src/helpers/utils';
 import * as checker from '../../src/helpers/checker';
 import * as testsetHelper from '../../src/helpers/testset';
 import fs from 'fs';
 import path from 'path';
-import ConfigFile, { LocalSolution, LocalTestset } from '../../src/types';
+import type ConfigFile from '../../src/types';
+import type {
+  LocalSolution,
+  LocalTestset,
+  LocalChecker,
+  GeneratorScriptCommand,
+  CheckerVerdict,
+} from '../../src/types';
 
 vi.mock('../../src/executor', () => ({
   executor: {
@@ -17,12 +45,14 @@ vi.mock('../../src/executor', () => ({
 }));
 
 vi.mock('../../src/helpers/utils', async () => {
-  const actual = await vi.importActual('../../src/helpers/utils');
+  const actual = await vi.importActual<
+    typeof import('../../src/helpers/utils')
+  >('../../src/helpers/utils');
   return {
     ...actual,
 
-    throwError: vi.fn((err, msg) => {
-      if (msg) {
+    throwError: vi.fn((err: unknown, msg?: string) => {
+      if (err instanceof Error && msg) {
         err.message = `${msg}: ${err.message}`;
       }
       throw err;
@@ -40,10 +70,10 @@ vi.mock('../../src/helpers/checker');
 vi.mock('../../src/helpers/testset');
 vi.mock('fs');
 vi.mock('path', async () => {
-  const actual = await vi.importActual('path');
+  const actual = await vi.importActual<typeof import('path')>('path');
   return {
     ...actual,
-    resolve: vi.fn((...args) => args.join('/')),
+    resolve: vi.fn((...args: string[]) => args.join('/')),
   };
 });
 vi.mock('../../src/formatter', () => ({
@@ -54,35 +84,74 @@ vi.mock('../../src/formatter', () => ({
     warn: vi.fn(),
     success: vi.fn(),
     newLine: vi.fn(),
-    infoIcon: () => 'ℹ',
+    infoIcon: () => 'i',
     highlight: (s: string) => s,
     dim: (s: string) => s,
     primary: (s: string) => s,
     bold: (s: string) => s,
-    cross: () => '✗',
+    cross: () => 'x',
   },
 }));
 
+// Typed handles for mocked functions used throughout the suite.
+// The executor proxy types its members as plain function-typed properties (not
+// class methods), so `vi.mocked` returns a real Vitest mock with the full mock
+// API while staying lint-clean for `unbound-method`.
+const mockedExecuteWithRedirect = vi.mocked(executor.executeWithRedirect);
+const mockedReadConfigFile = vi.mocked(utils.readConfigFile);
+const mockedGetCompiledCommandToRun = vi.mocked(utils.getCompiledCommandToRun);
+const mockedReadFirstLine = vi.mocked(utils.readFirstLine);
+const mockedGetTestFiles = vi.mocked(utils.getTestFiles);
+const mockedCompileCPP = vi.mocked(utils.compileCPP);
+const mockedCompileJava = vi.mocked(utils.compileJava);
+const mockedRunChecker = vi.mocked(checker.runChecker);
+const mockedGetGeneratorCommands = vi.mocked(
+  testsetHelper.getGeneratorCommands
+);
+const mockedFsExistsSync = vi.mocked(fs.existsSync);
+const mockedFsMkdirSync = vi.mocked(fs.mkdirSync);
+const mockedFsUnlinkSync = vi.mocked(fs.unlinkSync);
+const mockedFsWriteFileSync = vi.mocked(fs.writeFileSync);
+
+const okResult: ExecutionResult = {
+  stdout: '',
+  stderr: '',
+  exitCode: 0,
+  success: true,
+};
+
+function makeConfig(overrides: Partial<ConfigFile> = {}): ConfigFile {
+  const base: ConfigFile = {
+    name: 'problem',
+    timeLimit: 1000,
+    memoryLimit: 256,
+    inputFile: 'stdin',
+    outputFile: 'stdout',
+    interactive: false,
+    statements: {},
+    solutions: [],
+    checker: { name: 'chk', source: 'checker.cpp' },
+    validator: { name: 'val', source: 'validator.cpp' },
+    testsets: [],
+  };
+  return { ...base, ...overrides };
+}
+
 describe('solution.ts', () => {
-  vi.spyOn(process, 'exit').mockImplementation(() => {
+  const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {
     throw new Error('process.exit called');
-  });
+  }) as (code?: number | string | null) => never);
+  void exitSpy;
 
   beforeEach(() => {
     vi.clearAllMocks();
 
-    vi.mocked(fs.existsSync).mockReturnValue(true);
-    vi.mocked(fs.mkdirSync).mockReturnValue(undefined as any);
-    vi.mocked(fs.unlinkSync).mockReturnValue(undefined as any);
-    vi.mocked(utils.readConfigFile).mockReturnValue({
-      solutions: [],
-      checker: { source: 'checker.cpp' },
-      testsets: [],
-      timeLimit: 1000,
-      memoryLimit: 256,
-    } as any);
-    vi.mocked(utils.getCompiledCommandToRun).mockReturnValue('./solution');
-    vi.mocked(utils.readFirstLine).mockResolvedValue('');
+    mockedFsExistsSync.mockReturnValue(true);
+    mockedFsMkdirSync.mockReturnValue(undefined);
+    mockedFsUnlinkSync.mockReturnValue(undefined);
+    mockedReadConfigFile.mockReturnValue(makeConfig());
+    mockedGetCompiledCommandToRun.mockReturnValue('./solution');
+    mockedReadFirstLine.mockResolvedValue('');
   });
 
   afterEach(() => {
@@ -113,7 +182,7 @@ describe('solution.ts', () => {
   describe('findMatchingSolutions', () => {
     const solutions: LocalSolution[] = [
       { name: 'main', source: 'main.cpp', tag: 'MA' },
-      { name: 'wa', source: 'wa.cpp', tag: 'WA', type: 'wrong-answer' } as any,
+      { name: 'wa', source: 'wa.cpp', tag: 'WA' },
     ];
 
     it('should return all solutions if name is all', () => {
@@ -139,20 +208,20 @@ describe('solution.ts', () => {
     it('should compile cpp solution', async () => {
       vi.spyOn(path, 'extname').mockReturnValue('.cpp');
       await solution.compileSolution('sol.cpp');
-      expect(utils.compileCPP).toHaveBeenCalledWith('sol.cpp');
+      expect(mockedCompileCPP).toHaveBeenCalledWith('sol.cpp');
     });
 
     it('should compile java solution', async () => {
       vi.spyOn(path, 'extname').mockReturnValue('.java');
       await solution.compileSolution('sol.java');
-      expect(utils.compileJava).toHaveBeenCalledWith('sol.java');
+      expect(mockedCompileJava).toHaveBeenCalledWith('sol.java');
     });
 
     it('should not compile python solution', async () => {
       vi.spyOn(path, 'extname').mockReturnValue('.py');
       await solution.compileSolution('sol.py');
-      expect(utils.compileCPP).not.toHaveBeenCalled();
-      expect(utils.compileJava).not.toHaveBeenCalled();
+      expect(mockedCompileCPP).not.toHaveBeenCalled();
+      expect(mockedCompileJava).not.toHaveBeenCalled();
     });
 
     it('should throw on unsupported extension', async () => {
@@ -174,8 +243,8 @@ describe('solution.ts', () => {
       );
 
       await solution.compileAllSolutions(solutions);
-      expect(utils.compileCPP).toHaveBeenCalledWith('s1.cpp');
-      expect(utils.compileJava).toHaveBeenCalledWith('s2.java');
+      expect(mockedCompileCPP).toHaveBeenCalledWith('s1.cpp');
+      expect(mockedCompileJava).toHaveBeenCalledWith('s2.java');
     });
   });
 
@@ -185,18 +254,10 @@ describe('solution.ts', () => {
       source: 'main.cpp',
       tag: 'MA',
     };
-    const mockConfig: ConfigFile = {
-      timeLimit: 1000,
-      memoryLimit: 256,
-    } as any;
+    const mockConfig: ConfigFile = makeConfig();
 
     it('should execute solution successfully', async () => {
-      vi.mocked(executor.executeWithRedirect).mockResolvedValue({
-        stdout: '',
-        stderr: '',
-        exitCode: 0,
-        success: true,
-      });
+      mockedExecuteWithRedirect.mockResolvedValue(okResult);
 
       await solution.runSolutionOnSingleTest(
         mockSolution,
@@ -205,14 +266,15 @@ describe('solution.ts', () => {
         1
       );
 
-      expect(executor.executeWithRedirect).toHaveBeenCalled();
-      const calls = vi.mocked(executor.executeWithRedirect).mock.calls[0];
-
-      expect(calls[1]).toMatchObject({ timeout: 1000, memoryLimitMB: 256 });
+      expect(mockedExecuteWithRedirect).toHaveBeenCalled();
+      const call = mockedExecuteWithRedirect.mock.calls[0];
+      expect(call).toBeDefined();
+      const options = call[1];
+      expect(options).toMatchObject({ timeout: 1000, memoryLimitMB: 256 });
     });
 
     it('should throw if execution fails', async () => {
-      vi.mocked(executor.executeWithRedirect).mockRejectedValue(
+      mockedExecuteWithRedirect.mockRejectedValue(
         new Error('Execution failed')
       );
       await expect(
@@ -226,13 +288,18 @@ describe('solution.ts', () => {
     });
 
     it('should handle runtime error (onError callback)', async () => {
-      vi.mocked(executor.executeWithRedirect).mockImplementation(
-        (_cmd, options: any) => {
-          options.onError({ stderr: 'Segfault' });
-          return {} as any; // eslint-disable-line @typescript-eslint/no-unsafe-return
+      mockedExecuteWithRedirect.mockImplementation(
+        (_cmd: string, options: ExecutionOptions) => {
+          options.onError?.({
+            stdout: '',
+            stderr: 'Segfault',
+            exitCode: 1,
+            success: false,
+          });
+          return Promise.resolve(okResult);
         }
       );
-      vi.mocked(fs.writeFileSync).mockImplementation(() => {});
+      mockedFsWriteFileSync.mockImplementation(() => {});
 
       await expect(
         solution.runSolutionOnSingleTest(
@@ -243,17 +310,23 @@ describe('solution.ts', () => {
         )
       ).rejects.toThrow('Runtime Error: Segfault');
 
-      expect(fs.writeFileSync).toHaveBeenCalledWith(
+      expect(mockedFsWriteFileSync).toHaveBeenCalledWith(
         expect.stringContaining('output_test1.txt'),
         'Runtime Error: Segfault'
       );
     });
 
     it('should handle timeout (onTimeout callback)', async () => {
-      vi.mocked(executor.executeWithRedirect).mockImplementation(
-        (_cmd, options: any) => {
-          options.onTimeout();
-          return {} as any; // eslint-disable-line @typescript-eslint/no-unsafe-return
+      mockedExecuteWithRedirect.mockImplementation(
+        (_cmd: string, options: ExecutionOptions) => {
+          options.onTimeout?.({
+            stdout: '',
+            stderr: '',
+            exitCode: 124,
+            success: false,
+            timedOut: true,
+          });
+          return Promise.resolve(okResult);
         }
       );
 
@@ -266,17 +339,23 @@ describe('solution.ts', () => {
         )
       ).rejects.toThrow('Time Limit Exceeded');
 
-      expect(fs.writeFileSync).toHaveBeenCalledWith(
+      expect(mockedFsWriteFileSync).toHaveBeenCalledWith(
         expect.stringContaining('output_test1.txt'),
         expect.stringContaining('Time Limit Exceeded')
       );
     });
 
     it('should handle memory exceeded (onMemoryExceeded callback)', async () => {
-      vi.mocked(executor.executeWithRedirect).mockImplementation(
-        (_cmd, options: any) => {
-          options.onMemoryExceeded();
-          return {} as any; // eslint-disable-line @typescript-eslint/no-unsafe-return
+      mockedExecuteWithRedirect.mockImplementation(
+        (_cmd: string, options: ExecutionOptions) => {
+          options.onMemoryExceeded?.({
+            stdout: '',
+            stderr: '',
+            exitCode: 137,
+            success: false,
+            memoryExceeded: true,
+          });
+          return Promise.resolve(okResult);
         }
       );
 
@@ -289,7 +368,7 @@ describe('solution.ts', () => {
         )
       ).rejects.toThrow('Memory Limit Exceeded');
 
-      expect(fs.writeFileSync).toHaveBeenCalledWith(
+      expect(mockedFsWriteFileSync).toHaveBeenCalledWith(
         expect.stringContaining('output_test1.txt'),
         expect.stringContaining('Memory Limit Exceeded')
       );
@@ -302,22 +381,20 @@ describe('solution.ts', () => {
       source: 'main.cpp',
       tag: 'MA',
     };
-    const mockConfig: ConfigFile = { timeLimit: 1000, memoryLimit: 256 } as any;
+    const mockConfig: ConfigFile = makeConfig();
 
     it('should run on all test files', async () => {
-      vi.mocked(utils.getTestFiles).mockReturnValue(['test1.txt', 'test2.txt']);
-      vi.mocked(executor.executeWithRedirect).mockResolvedValue({} as any);
+      mockedGetTestFiles.mockReturnValue(['test1.txt', 'test2.txt']);
+      mockedExecuteWithRedirect.mockResolvedValue(okResult);
 
       await solution.runSolutionOnTestset(mockSolution, mockConfig, 'testset1');
 
-      expect(executor.executeWithRedirect).toHaveBeenCalledTimes(2);
+      expect(mockedExecuteWithRedirect).toHaveBeenCalledTimes(2);
     });
 
     it('should throw aggregate error if tests fail', async () => {
-      vi.mocked(utils.getTestFiles).mockReturnValue(['test1.txt']);
-      vi.mocked(executor.executeWithRedirect).mockRejectedValue(
-        new Error('Fail')
-      );
+      mockedGetTestFiles.mockReturnValue(['test1.txt']);
+      mockedExecuteWithRedirect.mockRejectedValue(new Error('Fail'));
 
       await expect(
         solution.runSolutionOnTestset(mockSolution, mockConfig, 'testset1')
@@ -332,16 +409,17 @@ describe('solution.ts', () => {
       tag: 'MA',
       sourceType: 'cpp.g++17',
     };
-    const mockConfig: ConfigFile = { timeLimit: 1000, memoryLimit: 256 } as any;
+    const mockConfig: ConfigFile = makeConfig();
     const mockTestset: LocalTestset = { name: 'ts1' };
 
     it('should run tests belonging to group', async () => {
-      vi.mocked(testsetHelper.getGeneratorCommands).mockReturnValue([
+      const cmds: GeneratorScriptCommand[] = [
         { type: 'manual', group: 'g1' },
         { type: 'manual', group: 'g2' },
         { type: 'manual', group: 'g1' },
-      ] as any);
-      vi.mocked(executor.executeWithRedirect).mockResolvedValue({} as any);
+      ];
+      mockedGetGeneratorCommands.mockReturnValue(cmds);
+      mockedExecuteWithRedirect.mockResolvedValue(okResult);
 
       await solution.runSolutionOnGroup(
         mockSolution,
@@ -350,15 +428,15 @@ describe('solution.ts', () => {
         'g1'
       );
 
-      expect(executor.executeWithRedirect).toHaveBeenCalledTimes(2);
+      expect(mockedExecuteWithRedirect).toHaveBeenCalledTimes(2);
 
-      expect(executor.executeWithRedirect).toHaveBeenCalledWith(
+      expect(mockedExecuteWithRedirect).toHaveBeenCalledWith(
         expect.anything(),
         expect.anything(),
         expect.stringContaining('test1.txt'),
         expect.anything()
       );
-      expect(executor.executeWithRedirect).toHaveBeenCalledWith(
+      expect(mockedExecuteWithRedirect).toHaveBeenCalledWith(
         expect.anything(),
         expect.anything(),
         expect.stringContaining('test3.txt'),
@@ -367,21 +445,17 @@ describe('solution.ts', () => {
     });
 
     it('should throw if no tests found for group', async () => {
-      vi.mocked(testsetHelper.getGeneratorCommands).mockReturnValue([
-        { type: 'manual', group: 'g2' },
-      ] as any);
+      const cmds: GeneratorScriptCommand[] = [{ type: 'manual', group: 'g2' }];
+      mockedGetGeneratorCommands.mockReturnValue(cmds);
       await expect(
         solution.runSolutionOnGroup(mockSolution, mockConfig, mockTestset, 'g1')
       ).rejects.toThrow('No tests found for group "g1"');
     });
 
     it('should throw if tests fail', async () => {
-      vi.mocked(testsetHelper.getGeneratorCommands).mockReturnValue([
-        { type: 'manual', group: 'g1' },
-      ] as any);
-      vi.mocked(executor.executeWithRedirect).mockRejectedValue(
-        new Error('Fail')
-      );
+      const cmds: GeneratorScriptCommand[] = [{ type: 'manual', group: 'g1' }];
+      mockedGetGeneratorCommands.mockReturnValue(cmds);
+      mockedExecuteWithRedirect.mockRejectedValue(new Error('Fail'));
 
       await expect(
         solution.runSolutionOnGroup(mockSolution, mockConfig, mockTestset, 'g1')
@@ -396,27 +470,25 @@ describe('solution.ts', () => {
       tag: 'MA',
       sourceType: 'cpp.g++17',
     };
-    const mockConfig: ConfigFile = { timeLimit: 1000, memoryLimit: 256 } as any;
+    const mockConfig: ConfigFile = makeConfig();
 
     it('should run on all testsets', async () => {
       const testsets: LocalTestset[] = [{ name: 'ts1' }, { name: 'ts2' }];
-      vi.mocked(utils.getTestFiles).mockReturnValue(['t1.txt']);
-      vi.mocked(executor.executeWithRedirect).mockResolvedValue({} as any);
+      mockedGetTestFiles.mockReturnValue(['t1.txt']);
+      mockedExecuteWithRedirect.mockResolvedValue(okResult);
 
       await solution.runSolutionOnAllTestsets(
         mockSolution,
         mockConfig,
         testsets
       );
-      expect(executor.executeWithRedirect).toHaveBeenCalledTimes(2);
+      expect(mockedExecuteWithRedirect).toHaveBeenCalledTimes(2);
     });
 
     it('should aggregate errors from multiple testsets', async () => {
       const testsets: LocalTestset[] = [{ name: 'ts1' }];
-      vi.mocked(utils.getTestFiles).mockReturnValue(['t1.txt']);
-      vi.mocked(executor.executeWithRedirect).mockRejectedValue(
-        new Error('Fail')
-      );
+      mockedGetTestFiles.mockReturnValue(['t1.txt']);
+      mockedExecuteWithRedirect.mockRejectedValue(new Error('Fail'));
 
       await expect(
         solution.runSolutionOnAllTestsets(mockSolution, mockConfig, testsets)
@@ -441,7 +513,7 @@ describe('solution.ts', () => {
     it('should throw if no MA solution', () => {
       expect(() =>
         solution.ensureMainSolutionExists([
-          { name: 'w', source: '', tag: 'WA', sourceType: 'cpp.g++17' } as any,
+          { name: 'w', source: '', tag: 'WA', sourceType: 'cpp.g++17' },
         ])
       ).toThrow(/No solution with tag "MA"/);
     });
@@ -468,12 +540,12 @@ describe('solution.ts', () => {
 
   describe('getMainSolution', () => {
     it('should return MA solution', () => {
-      const sol = {
+      const sol: LocalSolution = {
         name: 'm',
         source: '',
         tag: 'MA',
         sourceType: 'cpp.g++17',
-      } as LocalSolution;
+      };
       expect(solution.getMainSolution([sol])).toEqual(sol);
     });
     it('should throw if not found', () => {
@@ -483,48 +555,49 @@ describe('solution.ts', () => {
 
   describe('testSolutionAgainstMainCorrect', () => {
     beforeEach(() => {
-      vi.mocked(utils.readConfigFile).mockReturnValue({
-        solutions: [
-          {
-            name: 'main',
-            source: 'main.cpp',
-            tag: 'MA',
-            sourceType: 'cpp.g++17',
-          },
-          { name: 'wa', source: 'wa.cpp', tag: 'WA', sourceType: 'cpp.g++17' },
-        ],
-        checker: { name: 'chk', source: 'chk.cpp' },
-        testsets: [{ name: 'ts1' }],
-        timeLimit: 1000,
-        memoryLimit: 256,
-      } as any);
-      vi.mocked(utils.getTestFiles).mockReturnValue(['test1.txt']);
+      mockedReadConfigFile.mockReturnValue(
+        makeConfig({
+          solutions: [
+            {
+              name: 'main',
+              source: 'main.cpp',
+              tag: 'MA',
+              sourceType: 'cpp.g++17',
+            },
+            {
+              name: 'wa',
+              source: 'wa.cpp',
+              tag: 'WA',
+              sourceType: 'cpp.g++17',
+            },
+          ],
+          checker: { name: 'chk', source: 'chk.cpp' },
+          testsets: [{ name: 'ts1' }],
+        })
+      );
+      mockedGetTestFiles.mockReturnValue(['test1.txt']);
     });
 
     it('should run main then target then compare', async () => {
-      vi.mocked(executor.executeWithRedirect).mockResolvedValue({} as any);
+      mockedExecuteWithRedirect.mockResolvedValue(okResult);
 
-      vi.mocked(checker.runChecker).mockRejectedValue(
-        new Error('Wrong Answer')
-      );
+      mockedRunChecker.mockRejectedValue(new Error('Wrong Answer'));
 
       await solution.testSolutionAgainstMainCorrect('wa');
 
-      expect(executor.executeWithRedirect).toHaveBeenCalledTimes(2);
-      expect(checker.runChecker).toHaveBeenCalledTimes(1);
+      expect(mockedExecuteWithRedirect).toHaveBeenCalledTimes(2);
+      expect(mockedRunChecker).toHaveBeenCalledTimes(1);
     });
 
     it('should fail if main solution fails', async () => {
-      vi.mocked(executor.executeWithRedirect).mockRejectedValueOnce(
-        new Error('Main fail')
-      );
+      mockedExecuteWithRedirect.mockRejectedValueOnce(new Error('Main fail'));
       await expect(
         solution.testSolutionAgainstMainCorrect('wa')
       ).rejects.toThrow(/Failed to test solution "wa"/);
     });
 
     it('should fail if comparison process fails', async () => {
-      vi.mocked(utils.getCompiledCommandToRun).mockImplementation(() => {
+      mockedGetCompiledCommandToRun.mockImplementation(() => {
         throw new Error('Compilation missing');
       });
 
@@ -535,6 +608,9 @@ describe('solution.ts', () => {
   });
 
   describe('startTheComparisonProcess', () => {
+    const checkerOk: Awaited<ReturnType<typeof checker.runChecker>> =
+      undefined as unknown as Awaited<ReturnType<typeof checker.runChecker>>;
+
     it('should validate expected verdicts', async () => {
       const mainSol: LocalSolution = {
         name: 'm',
@@ -547,14 +623,12 @@ describe('solution.ts', () => {
         source: '',
         tag: 'WA',
         sourceType: 'cpp.g++17',
-      } as any;
+      };
       const testsets: LocalTestset[] = [{ name: 'ts1' }];
-      const checkerConfig = { name: 'chk', source: 'chk.cpp' };
+      const checkerConfig: LocalChecker = { name: 'chk', source: 'chk.cpp' };
 
-      vi.mocked(utils.getTestFiles).mockReturnValue(['t1.txt']);
-      vi.mocked(checker.runChecker).mockRejectedValue(
-        new Error('Wrong Answer')
-      );
+      mockedGetTestFiles.mockReturnValue(['t1.txt']);
+      mockedRunChecker.mockRejectedValue(new Error('Wrong Answer'));
 
       await expect(
         solution.startTheComparisonProcess(
@@ -578,11 +652,11 @@ describe('solution.ts', () => {
         source: '',
         tag: 'WA',
         sourceType: 'cpp.g++17',
-      } as any;
+      };
       const testsets: LocalTestset[] = [{ name: 'ts1' }];
 
-      vi.mocked(utils.getTestFiles).mockReturnValue(['t1.txt']);
-      vi.mocked(checker.runChecker).mockResolvedValue({} as any);
+      mockedGetTestFiles.mockReturnValue(['t1.txt']);
+      mockedRunChecker.mockResolvedValue(checkerOk);
 
       await expect(
         solution.startTheComparisonProcess(
@@ -594,19 +668,22 @@ describe('solution.ts', () => {
       ).rejects.toThrow('Error during solution comparison process');
     });
 
-    it('should handle skip logic via checkIfShouldSkipRest interception', async () => {
+    it('should handle skip logic via checkIfShouldSkipRest interception', () => {
       // Placeholder
     });
 
     describe('Extended Branch Coverage', () => {
       describe('Verdict Validation via startTheComparisonProcess', () => {
         const testsets: LocalTestset[] = [{ name: 'ts1' }];
-        const checkerConfig = { name: 'chk', source: 'chk.cpp' };
+        const checkerConfig: LocalChecker = {
+          name: 'chk',
+          source: 'chk.cpp',
+        };
 
         beforeEach(() => {
-          vi.mocked(utils.getTestFiles).mockReturnValue(['t1.txt']);
+          mockedGetTestFiles.mockReturnValue(['t1.txt']);
           // Default: main solution OK
-          vi.mocked(utils.readFirstLine).mockImplementation((p: string) => {
+          mockedReadFirstLine.mockImplementation((p: string) => {
             if (p.includes('sol_main')) return Promise.resolve('42'); // Main OK
             return Promise.resolve(''); // Target default
           });
@@ -624,9 +701,9 @@ describe('solution.ts', () => {
             source: '',
             tag: 'TL',
             sourceType: 'cpp.g++17',
-          } as any;
+          };
 
-          vi.mocked(utils.readFirstLine).mockImplementation((p: string) => {
+          mockedReadFirstLine.mockImplementation((p: string) => {
             if (p.includes('sol_main')) return Promise.resolve('42');
             if (p.includes('sol_target'))
               return Promise.resolve('Time Limit Exceeded');
@@ -655,9 +732,9 @@ describe('solution.ts', () => {
             source: '',
             tag: 'MA',
             sourceType: 'cpp.g++17',
-          } as any;
+          };
 
-          vi.mocked(utils.readFirstLine).mockImplementation((p: string) => {
+          mockedReadFirstLine.mockImplementation((p: string) => {
             if (p.includes('sol_main')) return Promise.resolve('42');
             if (p.includes('sol_target'))
               return Promise.resolve('Time Limit Exceeded');
@@ -686,9 +763,9 @@ describe('solution.ts', () => {
             source: '',
             tag: 'ML',
             sourceType: 'cpp.g++17',
-          } as any;
+          };
 
-          vi.mocked(utils.readFirstLine).mockImplementation((p: string) => {
+          mockedReadFirstLine.mockImplementation((p: string) => {
             if (p.includes('sol_main')) return Promise.resolve('42');
             if (p.includes('sol_target'))
               return Promise.resolve('Memory Limit Exceeded');
@@ -717,9 +794,9 @@ describe('solution.ts', () => {
             source: '',
             tag: 'MA',
             sourceType: 'cpp.g++17',
-          } as any;
+          };
 
-          vi.mocked(utils.readFirstLine).mockImplementation((p: string) => {
+          mockedReadFirstLine.mockImplementation((p: string) => {
             if (p.includes('sol_main')) return Promise.resolve('42');
             if (p.includes('sol_target'))
               return Promise.resolve('Memory Limit Exceeded');
@@ -748,9 +825,9 @@ describe('solution.ts', () => {
             source: '',
             tag: 'RE',
             sourceType: 'cpp.g++17',
-          } as any;
+          };
 
-          vi.mocked(utils.readFirstLine).mockImplementation((p: string) => {
+          mockedReadFirstLine.mockImplementation((p: string) => {
             if (p.includes('sol_main')) return Promise.resolve('42');
             if (p.includes('sol_target'))
               return Promise.resolve('Runtime Error');
@@ -779,9 +856,9 @@ describe('solution.ts', () => {
             source: '',
             tag: 'MA',
             sourceType: 'cpp.g++17',
-          } as any;
+          };
 
-          vi.mocked(utils.readFirstLine).mockImplementation((p: string) => {
+          mockedReadFirstLine.mockImplementation((p: string) => {
             if (p.includes('sol_main')) return Promise.resolve('42');
             if (p.includes('sol_target'))
               return Promise.resolve('Runtime Error');
@@ -810,11 +887,11 @@ describe('solution.ts', () => {
             source: '',
             tag: 'TL',
             sourceType: 'cpp.g++17',
-          } as any;
+          };
 
           // Normal output -> No TLE
-          vi.mocked(utils.readFirstLine).mockResolvedValue('42');
-          vi.mocked(checker.runChecker).mockResolvedValue({} as any);
+          mockedReadFirstLine.mockResolvedValue('42');
+          mockedRunChecker.mockResolvedValue(checkerOk);
 
           await expect(
             solution.startTheComparisonProcess(
@@ -840,11 +917,11 @@ describe('solution.ts', () => {
             source: '',
             tag: 'WA',
             sourceType: 'cpp.g++17',
-          } as any;
+          };
 
           // Checker passes -> No WA
-          vi.mocked(utils.readFirstLine).mockResolvedValue('42');
-          vi.mocked(checker.runChecker).mockResolvedValue({} as any);
+          mockedReadFirstLine.mockResolvedValue('42');
+          mockedRunChecker.mockResolvedValue(checkerOk);
 
           await expect(
             solution.startTheComparisonProcess(
@@ -864,27 +941,18 @@ describe('solution.ts', () => {
             source: 'main.cpp',
             tag: 'MA',
           };
-          const mockConfig: ConfigFile = {
-            timeLimit: 1000,
-            memoryLimit: 256,
-          } as any;
+          const mockConfig: ConfigFile = makeConfig();
 
-          vi.mocked(utils.getTestFiles).mockReturnValue([
-            't1.txt',
-            't2.txt',
-            't3.txt',
-          ]);
+          mockedGetTestFiles.mockReturnValue(['t1.txt', 't2.txt', 't3.txt']);
           // Fail on first
-          vi.mocked(executor.executeWithRedirect).mockRejectedValueOnce(
-            new Error('Fail')
-          );
+          mockedExecuteWithRedirect.mockRejectedValueOnce(new Error('Fail'));
 
           await expect(
             solution.runSolutionOnTestset(mockSolution, mockConfig, 'ts1')
           ).rejects.toThrow();
 
           // Should only be called once due to break
-          expect(executor.executeWithRedirect).toHaveBeenCalledTimes(1);
+          expect(mockedExecuteWithRedirect).toHaveBeenCalledTimes(1);
         });
 
         it('should stop running group after first failure', async () => {
@@ -893,20 +961,16 @@ describe('solution.ts', () => {
             source: 'main.cpp',
             tag: 'MA',
           };
-          const mockConfig: ConfigFile = {
-            timeLimit: 1000,
-            memoryLimit: 256,
-          } as any;
+          const mockConfig: ConfigFile = makeConfig();
           const mockTestset: LocalTestset = { name: 'ts1' };
 
-          vi.mocked(testsetHelper.getGeneratorCommands).mockReturnValue([
+          const cmds: GeneratorScriptCommand[] = [
             { type: 'manual', group: 'g1' },
             { type: 'manual', group: 'g1' },
-          ] as any);
+          ];
+          mockedGetGeneratorCommands.mockReturnValue(cmds);
 
-          vi.mocked(executor.executeWithRedirect).mockRejectedValueOnce(
-            new Error('Fail')
-          );
+          mockedExecuteWithRedirect.mockRejectedValueOnce(new Error('Fail'));
 
           await expect(
             solution.runSolutionOnGroup(
@@ -916,7 +980,7 @@ describe('solution.ts', () => {
               'g1'
             )
           ).rejects.toThrow();
-          expect(executor.executeWithRedirect).toHaveBeenCalledTimes(1);
+          expect(mockedExecuteWithRedirect).toHaveBeenCalledTimes(1);
         });
       });
 
@@ -927,14 +991,11 @@ describe('solution.ts', () => {
             source: 'main.cpp',
             tag: 'MA',
           };
-          const mockConfig: ConfigFile = {
-            timeLimit: 1000,
-            memoryLimit: 256,
-          } as any;
+          const mockConfig: ConfigFile = makeConfig();
 
           // Mock fs.existsSync to return false, forcing mkdirSync
-          vi.mocked(fs.existsSync).mockReturnValue(false);
-          vi.mocked(executor.executeWithRedirect).mockResolvedValue({} as any);
+          mockedFsExistsSync.mockReturnValue(false);
+          mockedExecuteWithRedirect.mockResolvedValue(okResult);
 
           await solution.runSolutionOnSingleTest(
             mockSolution,
@@ -943,7 +1004,7 @@ describe('solution.ts', () => {
             1
           );
 
-          expect(fs.mkdirSync).toHaveBeenCalledWith(
+          expect(mockedFsMkdirSync).toHaveBeenCalledWith(
             expect.stringContaining('main/ts1'),
             expect.anything()
           );
@@ -955,13 +1016,10 @@ describe('solution.ts', () => {
             source: 'main.cpp',
             tag: 'MA',
           };
-          const mockConfig: ConfigFile = {
-            timeLimit: 1000,
-            memoryLimit: 256,
-          } as any;
+          const mockConfig: ConfigFile = makeConfig();
 
-          vi.mocked(fs.existsSync).mockReturnValue(true);
-          vi.mocked(executor.executeWithRedirect).mockResolvedValue({} as any);
+          mockedFsExistsSync.mockReturnValue(true);
+          mockedExecuteWithRedirect.mockResolvedValue(okResult);
 
           await solution.runSolutionOnSingleTest(
             mockSolution,
@@ -970,9 +1028,12 @@ describe('solution.ts', () => {
             1
           );
 
-          expect(fs.unlinkSync).toHaveBeenCalled();
+          expect(mockedFsUnlinkSync).toHaveBeenCalled();
         });
       });
     });
   });
 });
+
+// Reference type-only imports to avoid unused-import errors with verbatim modes.
+export type { CheckerVerdict };

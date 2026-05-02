@@ -1,10 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as generator from '../../src/helpers/generator';
 import { executor } from '../../src/executor';
+import type { ExecutionOptions, ExecutionResult } from '../../src/executor';
 import * as utils from '../../src/helpers/utils';
 import { fmt } from '../../src/formatter';
 import fs from 'fs';
 import path from 'path';
+import type {
+  LocalGenerator,
+  LocalTestset,
+  GeneratorScriptCommand,
+} from '../../src/types';
 
 vi.mock('../../src/executor', () => ({
   executor: {
@@ -20,7 +26,7 @@ vi.mock('../../src/helpers/utils', async importOriginal => {
     ...actual,
     compileCPP: vi.fn(),
     readConfigFile: vi.fn(),
-    throwError: vi.fn((err, msg) => {
+    throwError: vi.fn((err: unknown, msg: string) => {
       throw new Error(`${msg}: ${(err as Error).message}`);
     }),
     ensureDirectoryExists: vi.fn(),
@@ -35,8 +41,8 @@ vi.mock('../../src/formatter', () => ({
     info: vi.fn(),
     error: vi.fn(),
     cross: vi.fn().mockReturnValue('❌'),
-    bold: vi.fn().mockImplementation(s => `BOLD(${s})`),
-    highlight: vi.fn().mockImplementation(s => `HIGHLIGHT(${s})`),
+    bold: vi.fn().mockImplementation((s: string) => `BOLD(${s})`),
+    highlight: vi.fn().mockImplementation((s: string) => `HIGHLIGHT(${s})`),
   },
 }));
 
@@ -58,25 +64,73 @@ vi.mock('path', async importOriginal => {
   };
 });
 
+// Typed mock references. Class methods on `executor` and `path` would trip
+// `@typescript-eslint/unbound-method` when pulled off their host, so we recast
+// each host as a plain record of standalone functions before grabbing the
+// mock — this drops the implicit `this` type without using `any`.
+type StandaloneExec = {
+  executeWithRedirect: typeof executor.executeWithRedirect;
+  cleanup: typeof executor.cleanup;
+};
+type StandaloneFmt = {
+  error: typeof fmt.error;
+};
+type StandalonePath = {
+  resolve: typeof path.resolve;
+  join: typeof path.join;
+};
+const standaloneExec = executor as unknown as StandaloneExec;
+const standaloneFmt = fmt as unknown as StandaloneFmt;
+const standalonePath = path as unknown as StandalonePath;
+
+const executeWithRedirectMock = vi.mocked(standaloneExec.executeWithRedirect);
+const cleanupMock = vi.mocked(standaloneExec.cleanup);
+const fmtErrorMock = vi.mocked(standaloneFmt.error);
+const compileCPPMock = vi.mocked(utils.compileCPP);
+const throwErrorMock = vi.mocked(utils.throwError);
+const ensureDirectoryExistsMock = vi.mocked(utils.ensureDirectoryExists);
+const getCompiledCommandToRunMock = vi.mocked(utils.getCompiledCommandToRun);
+const existsSyncMock = vi.mocked(fs.existsSync);
+const copyFileMock = vi.mocked(fs.copyFile);
+const pathResolveMock = vi.mocked(standalonePath.resolve);
+const pathJoinMock = vi.mocked(standalonePath.join);
+
+type ProcessExit = (code?: string | number | null) => never;
+const mockProcessExit = (() => undefined) as unknown as ProcessExit;
+
+type CopyFileCallback = (err: NodeJS.ErrnoException | null) => void;
+type CopyFileImpl = (
+  src: fs.PathLike,
+  dest: fs.PathLike,
+  callback: CopyFileCallback
+) => void;
+
+const successResult: ExecutionResult = {
+  stdout: '',
+  stderr: '',
+  exitCode: 0,
+  success: true,
+};
+
 describe('generator.ts', () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    vi.mocked(utils.compileCPP).mockReset();
-    vi.mocked(utils.compileCPP).mockResolvedValue(undefined);
+    compileCPPMock.mockReset();
+    compileCPPMock.mockResolvedValue(undefined);
 
-    vi.mocked(utils.throwError).mockReset();
-    vi.mocked(utils.throwError).mockImplementation((err, msg) => {
+    throwErrorMock.mockReset();
+    throwErrorMock.mockImplementation((err: unknown, msg: string) => {
       throw new Error(`${msg}: ${(err as Error).message}`);
     });
 
-    vi.mocked(utils.getCompiledCommandToRun).mockReset();
+    getCompiledCommandToRunMock.mockReset();
 
-    (path.resolve as unknown as ReturnType<typeof vi.fn>).mockImplementation(
-      (...args: string[]) => args.join('/').replace(/\/+/g, '/')
+    pathResolveMock.mockImplementation((...args: string[]) =>
+      args.join('/').replace(/\/+/g, '/')
     );
-    (path.join as unknown as ReturnType<typeof vi.fn>).mockImplementation(
-      (...args: string[]) => args.join('/').replace(/\/+/g, '/')
+    pathJoinMock.mockImplementation((...args: string[]) =>
+      args.join('/').replace(/\/+/g, '/')
     );
   });
 
@@ -110,22 +164,17 @@ describe('generator.ts', () => {
     const mockOutput = 'tests/test1.txt';
 
     it('should execute generator successfully', async () => {
-      vi.mocked(executor.executeWithRedirect).mockResolvedValue({
-        stdout: '',
-        stderr: '',
-        exitCode: 0,
-        success: true,
-      });
+      executeWithRedirectMock.mockResolvedValue(successResult);
 
       await expect(
         generator.runGenerator(mockExecCommand, mockArgs, mockOutput)
       ).resolves.not.toThrow();
 
-      expect(executor.executeWithRedirect).toHaveBeenCalledWith(
+      expect(executeWithRedirectMock).toHaveBeenCalledWith(
         `${mockExecCommand} 10 20`,
         expect.objectContaining({
-          timeout: expect.any(Number),
-          memoryLimitMB: expect.any(Number),
+          timeout: expect.any(Number) as number,
+          memoryLimitMB: expect.any(Number) as number,
           silent: true,
         }),
         undefined,
@@ -136,90 +185,94 @@ describe('generator.ts', () => {
     it('should handle timeout callback correctly', async () => {
       const exitSpy = vi
         .spyOn(process, 'exit')
-        .mockImplementation((() => {}) as any);
+        .mockImplementation(mockProcessExit);
 
-      vi.mocked(executor.executeWithRedirect).mockImplementation(
-        (cmd, options, _inputFile?, _outputFile?) => {
-          if (options?.onTimeout) {
-            options.onTimeout({
-              stdout: '',
-              stderr: '',
-              exitCode: 124,
-              success: false,
-            });
+      const timeoutResult: ExecutionResult = {
+        stdout: '',
+        stderr: '',
+        exitCode: 124,
+        success: false,
+      };
+
+      executeWithRedirectMock.mockImplementation(
+        (
+          _cmd: string,
+          options: ExecutionOptions,
+          _inputFile?: string,
+          _outputFile?: string
+        ) => {
+          if (options.onTimeout) {
+            options.onTimeout(timeoutResult);
           }
-          return Promise.resolve({
-            stdout: '',
-            stderr: '',
-            exitCode: 124,
-            success: false,
-          });
+          return Promise.resolve(timeoutResult);
         }
       );
 
       await generator.runGenerator(mockExecCommand, mockArgs, mockOutput);
 
-      expect(fmt.error).toHaveBeenCalledWith(
+      expect(fmtErrorMock).toHaveBeenCalledWith(
         expect.stringContaining('Generator Unexpectedly Exceeded Time Limit')
       );
-      expect(executor.cleanup).toHaveBeenCalled();
+      expect(cleanupMock).toHaveBeenCalled();
       expect(exitSpy).toHaveBeenCalledWith(1);
     });
 
     it('should handle memory limit callback correctly', async () => {
       const exitSpy = vi
         .spyOn(process, 'exit')
-        .mockImplementation((() => {}) as any);
+        .mockImplementation(mockProcessExit);
 
-      vi.mocked(executor.executeWithRedirect).mockImplementation(
-        (cmd, options, _inputFile?, _outputFile?) => {
-          if (options?.onMemoryExceeded) {
-            options.onMemoryExceeded({
-              stdout: '',
-              stderr: '',
-              exitCode: 137,
-              success: false,
-            });
+      const memResult: ExecutionResult = {
+        stdout: '',
+        stderr: '',
+        exitCode: 137,
+        success: false,
+      };
+
+      executeWithRedirectMock.mockImplementation(
+        (
+          _cmd: string,
+          options: ExecutionOptions,
+          _inputFile?: string,
+          _outputFile?: string
+        ) => {
+          if (options.onMemoryExceeded) {
+            options.onMemoryExceeded(memResult);
           }
-          return Promise.resolve({
-            stdout: '',
-            stderr: '',
-            exitCode: 137,
-            success: false,
-          });
+          return Promise.resolve(memResult);
         }
       );
 
       await generator.runGenerator(mockExecCommand, mockArgs, mockOutput);
 
-      expect(fmt.error).toHaveBeenCalledWith(
+      expect(fmtErrorMock).toHaveBeenCalledWith(
         expect.stringContaining('Generator Unexpectedly Exceeded Memory Limit')
       );
-      expect(executor.cleanup).toHaveBeenCalled();
+      expect(cleanupMock).toHaveBeenCalled();
       expect(exitSpy).toHaveBeenCalledWith(1);
     });
   });
 
   describe('compileGenerator', () => {
     it('should compile generator successfully', async () => {
-      const gen = { name: 'gen', source: 'gen.cpp' };
-      vi.mocked(utils.compileCPP).mockResolvedValue(undefined);
+      const gen: LocalGenerator = { name: 'gen', source: 'gen.cpp' };
+      compileCPPMock.mockResolvedValue(undefined);
 
       await expect(generator.compileGenerator(gen)).resolves.toBeUndefined();
-      expect(utils.compileCPP).toHaveBeenCalledWith('gen.cpp');
+      expect(compileCPPMock).toHaveBeenCalledWith('gen.cpp');
     });
 
     it('should throw if no source file specified', async () => {
-      const gen = { name: 'gen' } as any;
+      const gen = { name: 'gen', source: '' } as LocalGenerator;
       await expect(generator.compileGenerator(gen)).rejects.toThrow(
         'Generator gen has no source file specified'
       );
     });
 
     it('should rethrow errors from compilation', async () => {
-      const gen = { name: 'gen', source: 'gen.cpp' };
-      vi.mocked(utils.compileCPP).mockReset();
-      vi.mocked(utils.compileCPP).mockImplementation(() => {
+      const gen: LocalGenerator = { name: 'gen', source: 'gen.cpp' };
+      compileCPPMock.mockReset();
+      compileCPPMock.mockImplementation(() => {
         throw new Error('Compile Error');
       });
 
@@ -229,9 +282,9 @@ describe('generator.ts', () => {
     });
 
     it('should wrap non-Error compilation failures', async () => {
-      const gen = { name: 'gen', source: 'gen.cpp' };
-      vi.mocked(utils.compileCPP).mockReset();
-      vi.mocked(utils.compileCPP).mockRejectedValue('Bad thing');
+      const gen: LocalGenerator = { name: 'gen', source: 'gen.cpp' };
+      compileCPPMock.mockReset();
+      compileCPPMock.mockRejectedValue('Bad thing');
 
       await expect(generator.compileGenerator(gen)).rejects.toThrow(
         'Failed to compile generator gen'
@@ -241,32 +294,34 @@ describe('generator.ts', () => {
 
   describe('compileAllGenerators', () => {
     it('should compile only needed generators', async () => {
-      const generators = [
+      const generators: LocalGenerator[] = [
         { name: 'gen1', source: 'gen1.cpp' },
         { name: 'gen2', source: 'gen2.cpp' },
       ];
-      const commands = [
-        { type: 'generator', generator: 'gen1', args: [] },
-        { type: 'generator', generator: 'gen1', args: [] },
-        { type: 'generator', generator: 'gen1', args: [] },
+      const commands: GeneratorScriptCommand[] = [
+        { type: 'generator', generator: 'gen1' },
+        { type: 'generator', generator: 'gen1' },
+        { type: 'generator', generator: 'gen1' },
         { type: 'manual', manualFile: 'manual.txt' },
-      ] as any;
+      ];
 
-      vi.mocked(utils.getCompiledCommandToRun).mockReturnValue('./gen1.exe');
+      getCompiledCommandToRunMock.mockReturnValue('./gen1.exe');
 
       const map = await generator.compileAllGenerators(commands, generators);
 
-      expect(utils.compileCPP).toHaveBeenCalledTimes(1);
-      expect(utils.compileCPP).toHaveBeenCalledWith('gen1.cpp');
+      expect(compileCPPMock).toHaveBeenCalledTimes(1);
+      expect(compileCPPMock).toHaveBeenCalledWith('gen1.cpp');
       expect(map.get('gen1')).toBe('./gen1.exe');
       expect(map.has('gen2')).toBe(false);
     });
 
     it('should throw if used generator is not found', async () => {
-      const generators = [{ name: 'gen1', source: 'gen1.cpp' }];
-      const commands = [
-        { type: 'generator', generator: 'missing', args: [] },
-      ] as any;
+      const generators: LocalGenerator[] = [
+        { name: 'gen1', source: 'gen1.cpp' },
+      ];
+      const commands: GeneratorScriptCommand[] = [
+        { type: 'generator', generator: 'missing' },
+      ];
 
       await expect(
         generator.compileAllGenerators(commands, generators)
@@ -274,12 +329,14 @@ describe('generator.ts', () => {
     });
 
     it('should rethrow compilation errors with context', async () => {
-      const generators = [{ name: 'gen1', source: 'gen1.cpp' }];
-      const commands = [
-        { type: 'generator', generator: 'gen1', args: [] },
-      ] as any;
+      const generators: LocalGenerator[] = [
+        { name: 'gen1', source: 'gen1.cpp' },
+      ];
+      const commands: GeneratorScriptCommand[] = [
+        { type: 'generator', generator: 'gen1' },
+      ];
 
-      vi.mocked(utils.compileCPP).mockImplementation(() => {
+      compileCPPMock.mockImplementation(() => {
         throw new Error('Compile Fail');
       });
 
@@ -291,19 +348,21 @@ describe('generator.ts', () => {
 
   describe('compileGeneratorsForTestsets', () => {
     it('should compile unique generators from all testsets', async () => {
-      const generators = [
+      const generators: LocalGenerator[] = [
         { name: 'g1', source: 'g1.cpp' },
         { name: 'g2', source: 'g2.cpp' },
         { name: 'g2', source: 'g2.cpp' },
         { name: 'g3', source: 'g3.cpp' },
       ];
-      const testsets = [
+      const testsets: LocalTestset[] = [
         {
+          name: 'tests',
           generatorScript: {
             commands: [{ type: 'generator', generator: 'g1' }],
           },
         },
         {
+          name: 'tests2',
           generatorScript: {
             commands: [
               { type: 'generator', generator: 'g2' },
@@ -311,24 +370,25 @@ describe('generator.ts', () => {
             ],
           },
         },
-      ] as any;
+      ];
 
       await generator.compileGeneratorsForTestsets(testsets, generators);
 
-      expect(utils.compileCPP).toHaveBeenCalledTimes(2);
-      expect(utils.compileCPP).toHaveBeenCalledWith('g1.cpp');
-      expect(utils.compileCPP).toHaveBeenCalledWith('g2.cpp');
+      expect(compileCPPMock).toHaveBeenCalledTimes(2);
+      expect(compileCPPMock).toHaveBeenCalledWith('g1.cpp');
+      expect(compileCPPMock).toHaveBeenCalledWith('g2.cpp');
     });
 
     it('should throw if generator mismatch', async () => {
-      const generators = [{ name: 'g1', source: 'g1.cpp' }];
-      const testsets = [
+      const generators: LocalGenerator[] = [{ name: 'g1', source: 'g1.cpp' }];
+      const testsets: LocalTestset[] = [
         {
+          name: 'tests',
           generatorScript: {
             commands: [{ type: 'generator', generator: 'g2' }],
           },
         },
-      ] as any;
+      ];
 
       await expect(
         generator.compileGeneratorsForTestsets(testsets, generators)
@@ -336,48 +396,53 @@ describe('generator.ts', () => {
     });
 
     it('should ignore non-generator commands', async () => {
-      const generators = [{ name: 'g1', source: 'g1.cpp' }];
-      const testsets = [
+      const generators: LocalGenerator[] = [{ name: 'g1', source: 'g1.cpp' }];
+      const testsets: LocalTestset[] = [
         {
+          name: 'tests',
           generatorScript: {
             commands: [{ type: 'manual', manualFile: 'm.txt' }],
           },
         },
-      ] as any;
+      ];
 
       await generator.compileGeneratorsForTestsets(testsets, generators);
-      expect(utils.compileCPP).not.toHaveBeenCalled();
+      expect(compileCPPMock).not.toHaveBeenCalled();
     });
 
     it('should skip testsets without generator scripts', async () => {
-      const generators = [{ name: 'g1', source: 'g1.cpp' }];
-      const testsets = [{}, { generatorScript: {} }] as any;
+      const generators: LocalGenerator[] = [{ name: 'g1', source: 'g1.cpp' }];
+      const testsets: LocalTestset[] = [
+        { name: 'a' },
+        { name: 'b', generatorScript: {} },
+      ];
 
       await generator.compileGeneratorsForTestsets(testsets, generators);
-      expect(utils.compileCPP).not.toHaveBeenCalled();
+      expect(compileCPPMock).not.toHaveBeenCalled();
     });
   });
 
   describe('executeGeneratorScript', () => {
-    const generators = [{ name: 'gen1', source: 'gen1.cpp' }];
+    const generators: LocalGenerator[] = [{ name: 'gen1', source: 'gen1.cpp' }];
 
     it('should use default output directory if not provided', async () => {
-      const commands = [{ type: 'manual', manualFile: 'manual.txt' }] as any;
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(fs.copyFile).mockImplementation(((
-        s: any,
-        d: any,
-        cb: any
-      ): void => {
+      const commands: GeneratorScriptCommand[] = [
+        { type: 'manual', manualFile: 'manual.txt' },
+      ];
+      existsSyncMock.mockReturnValue(true);
+      const copyFileImpl: CopyFileImpl = (_src, _dest, cb) => {
         cb(null);
-      }) as any);
+      };
+      copyFileMock.mockImplementation(
+        copyFileImpl as unknown as typeof fs.copyFile
+      );
 
-      await generator.executeGeneratorScript(commands, generators, '' as any);
+      await generator.executeGeneratorScript(commands, generators, '');
 
-      expect(utils.ensureDirectoryExists).toHaveBeenCalledWith(
+      expect(ensureDirectoryExistsMock).toHaveBeenCalledWith(
         expect.stringContaining('testsets')
       );
-      expect(fs.copyFile).toHaveBeenCalledWith(
+      expect(copyFileMock).toHaveBeenCalledWith(
         expect.stringContaining('manual.txt'),
         expect.stringContaining('test1.txt'),
         expect.any(Function)
@@ -385,26 +450,24 @@ describe('generator.ts', () => {
     });
 
     it('should handle generator range execution', async () => {
-      const commands = [
+      const commands: GeneratorScriptCommand[] = [
         { type: 'generator', generator: 'gen1', range: [1, 2] },
-      ] as any;
+      ];
 
-      vi.mocked(utils.getCompiledCommandToRun).mockReturnValue('./gen1.exe');
-      vi.mocked(executor.executeWithRedirect).mockResolvedValue({
-        success: true,
-      } as any);
+      getCompiledCommandToRunMock.mockReturnValue('./gen1.exe');
+      executeWithRedirectMock.mockResolvedValue(successResult);
 
       await generator.executeGeneratorScript(commands, generators, 'outdir');
 
-      expect(executor.executeWithRedirect).toHaveBeenCalledTimes(2);
-      expect(executor.executeWithRedirect).toHaveBeenNthCalledWith(
+      expect(executeWithRedirectMock).toHaveBeenCalledTimes(2);
+      expect(executeWithRedirectMock).toHaveBeenNthCalledWith(
         1,
         expect.stringContaining('./gen1.exe 1'),
         expect.anything(),
         undefined,
         expect.stringContaining('test1.txt')
       );
-      expect(executor.executeWithRedirect).toHaveBeenNthCalledWith(
+      expect(executeWithRedirectMock).toHaveBeenNthCalledWith(
         2,
         expect.stringContaining('./gen1.exe 2'),
         expect.anything(),
@@ -414,66 +477,73 @@ describe('generator.ts', () => {
     });
 
     it('should throw if manual file does not exist', async () => {
-      const commands = [{ type: 'manual', manualFile: 'missing.txt' }] as any;
-      vi.mocked(fs.existsSync).mockReturnValue(false);
+      const commands: GeneratorScriptCommand[] = [
+        { type: 'manual', manualFile: 'missing.txt' },
+      ];
+      existsSyncMock.mockReturnValue(false);
 
       await expect(
         generator.executeGeneratorScript(commands, generators, 'outdir')
       ).rejects.toThrow('Some tests failed to generate');
-      expect(fmt.error).toHaveBeenCalledWith(
+      expect(fmtErrorMock).toHaveBeenCalledWith(
         expect.stringContaining('Manual test file not found')
       );
     });
 
     it('should throw if generator not compiled', async () => {
-      const commands = [
+      const commands: GeneratorScriptCommand[] = [
         { type: 'generator', generator: 'genUnknown', range: [1, 1] },
-      ] as any;
+      ];
       await expect(
         generator.executeGeneratorScript(commands, generators, 'outdir')
       ).rejects.toThrow('Some tests failed to generate');
-      expect(fmt.error).toHaveBeenCalledWith(
+      expect(fmtErrorMock).toHaveBeenCalledWith(
         expect.stringContaining('Generator "genUnknown" not compiled')
       );
     });
 
     it('should throw if range is invalid', async () => {
-      const commands = [{ type: 'generator', generator: 'gen1' }] as any;
-      vi.mocked(utils.getCompiledCommandToRun).mockReturnValue('./gen1.exe');
+      const commands: GeneratorScriptCommand[] = [
+        { type: 'generator', generator: 'gen1' },
+      ];
+      getCompiledCommandToRunMock.mockReturnValue('./gen1.exe');
 
       await expect(
         generator.executeGeneratorScript(commands, generators, 'outdir')
       ).rejects.toThrow('Some tests failed to generate');
-      expect(fmt.error).toHaveBeenCalledWith(
+      expect(fmtErrorMock).toHaveBeenCalledWith(
         expect.stringContaining('missing valid range')
       );
     });
 
     it('should throw if command type is unknown', async () => {
-      const commands = [{ type: 'unknown' }] as any;
+      const commands = [
+        { type: 'unknown' } as unknown as GeneratorScriptCommand,
+      ];
       await expect(
         generator.executeGeneratorScript(commands, generators, 'outdir')
       ).rejects.toThrow('Some tests failed to generate');
-      expect(fmt.error).toHaveBeenCalledWith(
+      expect(fmtErrorMock).toHaveBeenCalledWith(
         expect.stringContaining('Invalid command type')
       );
     });
 
     it('should fail if copyFile errors', async () => {
-      const commands = [{ type: 'manual', manualFile: 'exists.txt' }] as any;
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(fs.copyFile).mockImplementation(((
-        s: any,
-        d: any,
-        cb: any
-      ): void => {
-        cb(new Error('Copy Failed'));
-      }) as any);
+      const commands: GeneratorScriptCommand[] = [
+        { type: 'manual', manualFile: 'exists.txt' },
+      ];
+      existsSyncMock.mockReturnValue(true);
+      const copyFileImpl: CopyFileImpl = (_src, _dest, cb) => {
+        cb(new Error('Copy Failed') as NodeJS.ErrnoException);
+      };
+      copyFileMock.mockImplementation(
+        copyFileImpl as unknown as typeof fs.copyFile
+      );
 
       await expect(
         generator.executeGeneratorScript(commands, generators, 'outdir')
       ).rejects.toThrow('Some tests failed to generate');
-      expect(fmt.error).toHaveBeenCalledWith(
+      expect(fmtErrorMock).toHaveBeenCalledWith(
         expect.stringContaining('Failed to copy manual test: Copy Failed')
       );
     });
