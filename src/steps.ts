@@ -673,14 +673,14 @@ export async function stepListProblems(
 export function stepDisplayProblems(stepNum: number, problems: Problem[]) {
   fmt.step(stepNum, 'Displaying Problems');
 
-  console.log();
+  fmt.newLine();
   for (const [index, problem] of problems.entries()) {
     const info = formatProblemInfo(problem);
     fmt.log(
       `  ${fmt.primary((index + 1).toString().padStart(3, ' ') + '.')} ${info}`
     );
   }
-  console.log();
+  fmt.newLine();
   fmt.stepComplete('Problems displayed');
 }
 
@@ -1400,7 +1400,7 @@ export async function stepPromptCreateProblem(
   fmt.warning(
     '  No problem ID found in Config.json. This appears to be a new problem.'
   );
-  console.log();
+  fmt.newLine();
   fmt.info(
     `  ${fmt.infoIcon()} A new problem will be created on Polygon if you continue.`
   );

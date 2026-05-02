@@ -122,7 +122,7 @@ export const createTemplateAction = (directory: string) => {
     const message = error instanceof Error ? error.message : String(error);
     fmt.errorBox('TEMPLATE CREATION FAILED!');
     fmt.error(`${message}`);
-    console.log();
+    fmt.newLine();
     process.exit(1);
   }
 };
@@ -167,7 +167,7 @@ export const listAvailableCheckersAction = () => {
     fmt.info(
       `  ${fmt.infoIcon()} Found ${fmt.highlight(checkerFiles.length.toString())} checker(s) in ${fmt.dim('assets/checkers')}`
     );
-    console.log();
+    fmt.newLine();
 
     for (const [index, file] of checkerFiles.entries()) {
       const filePath = path.join(checkersDir, file);
@@ -193,18 +193,18 @@ export const listAvailableCheckersAction = () => {
       );
     }
 
-    console.log();
+    fmt.newLine();
     fmt.info(
       `  ${fmt.infoIcon()} ${fmt.dim(`Use these checkers in your Config.json file under the "checker" section, with ${fmt.highlight('isStandard: false')}.`)}`
     );
-    console.log();
+    fmt.newLine();
 
     // Listing complete
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     fmt.errorBox('FAILED TO LIST CHECKERS!');
     fmt.error(`${message}`);
-    console.log();
+    fmt.newLine();
     process.exit(1);
   }
 };
@@ -239,19 +239,19 @@ export const downloadTestlibAction = async () => {
 
     // Final success message
     fmt.successBox('TESTLIB.H DOWNLOADED SUCCESSFULLY!');
-    console.log();
+    fmt.newLine();
     fmt.info(
       `  ${fmt.infoIcon()} ${fmt.dim('File saved to:')} ${fmt.highlight(path.join(process.cwd(), 'testlib.h'))}`
     );
-    console.log();
+    fmt.newLine();
 
     // Provide installation instructions
     fmt.section('📝 INSTALLATION INSTRUCTIONS');
-    console.log();
+    fmt.newLine();
     fmt.info(
       `  ${fmt.infoIcon()} To use testlib.h system-wide, copy it to your C++ include directory:`
     );
-    console.log();
+    fmt.newLine();
 
     if (process.platform === 'win32') {
       fmt.log(`  ${fmt.dim('Windows (MinGW):')}
@@ -267,16 +267,16 @@ export const downloadTestlibAction = async () => {
       `);
     }
 
-    console.log();
+    fmt.newLine();
     fmt.info(
       `  ${fmt.infoIcon()} ${fmt.dim('After installation, you can use')} #include <testlib.h> ${fmt.dim('in your C++ files')}`
     );
-    console.log();
+    fmt.newLine();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     fmt.errorBox('TESTLIB DOWNLOAD FAILED!');
     fmt.error(`${message}`);
-    console.log();
+    fmt.newLine();
     process.exit(1);
   }
 };
@@ -409,7 +409,7 @@ export const generateTestsAction = async (
     const message = error instanceof Error ? error.message : String(error);
     fmt.errorBox('TEST GENERATION FAILED!');
     fmt.error(`${message}`);
-    console.log();
+    fmt.newLine();
     process.exit(1);
   }
 };
@@ -533,7 +533,7 @@ export const validateTestsAction = async (
     const message = error instanceof Error ? error.message : String(error);
     fmt.errorBox('VALIDATION FAILED!');
     fmt.error(`${message}`);
-    console.log();
+    fmt.newLine();
     process.exit(1);
   }
 };
@@ -687,7 +687,7 @@ export const runSolutionAction = async (
     const message = error instanceof Error ? error.message : String(error);
     fmt.errorBox('SOLUTION EXECUTION FAILED!');
     fmt.error(`${message}`);
-    console.log();
+    fmt.newLine();
     process.exit(1);
   }
 };
@@ -790,7 +790,7 @@ export const testWhatAction = async (what: string) => {
     const message = error instanceof Error ? error.message : String(error);
     fmt.errorBox('TESTING FAILED!');
     fmt.error(`${message}`);
-    console.log();
+    fmt.newLine();
     process.exit(1);
   }
 };
@@ -866,16 +866,16 @@ export const fullVerificationAction = async () => {
 
     // Final success message
     fmt.successBox('🎉 FULL VERIFICATION COMPLETE!');
-    console.log();
+    fmt.newLine();
     fmt.success(
       `  ${fmt.checkmark()} All components tested and verified successfully`
     );
-    console.log();
+    fmt.newLine();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     fmt.errorBox('VERIFICATION FAILED!');
     fmt.error(`${message}`);
-    console.log();
+    fmt.newLine();
     process.exit(1);
   }
 };
@@ -905,7 +905,7 @@ export const listTestsetsAction = () => {
     fmt.info(
       `  ${fmt.infoIcon()} Found ${fmt.highlight(config.testsets!.length.toString())} testset(s)`
     );
-    console.log();
+    fmt.newLine();
 
     for (const [index, description] of descriptions.entries()) {
       fmt.log(
@@ -913,14 +913,14 @@ export const listTestsetsAction = () => {
       );
     }
 
-    console.log();
+    fmt.newLine();
 
     // Listing complete
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     fmt.errorBox('FAILED TO LIST TESTSETS!');
     fmt.error(`${message}`);
-    console.log();
+    fmt.newLine();
     process.exit(1);
   }
 };
@@ -949,14 +949,14 @@ export const listSolutionsAction = () => {
 
     if (!config.solutions || config.solutions.length === 0) {
       fmt.warning(`${fmt.warningIcon()} No solutions found in Config.json`);
-      console.log();
+      fmt.newLine();
       return;
     }
 
     fmt.info(
       `  ${fmt.infoIcon()} Found ${fmt.highlight(config.solutions.length.toString())} solution(s)`
     );
-    console.log();
+    fmt.newLine();
 
     const tagDescriptions: Record<string, string> = {
       MA: 'Main Accepted',
@@ -979,14 +979,14 @@ export const listSolutionsAction = () => {
       );
     }
 
-    console.log();
+    fmt.newLine();
 
     // Listing complete
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     fmt.errorBox('FAILED TO LIST SOLUTIONS!');
     fmt.error(`${message}`);
-    console.log();
+    fmt.newLine();
     process.exit(1);
   }
 };
@@ -1015,14 +1015,14 @@ export const listGeneratorsAction = () => {
 
     if (!config.generators || config.generators.length === 0) {
       fmt.warning(`${fmt.warningIcon()} No generators found in Config.json`);
-      console.log();
+      fmt.newLine();
       return;
     }
 
     fmt.info(
       `  ${fmt.infoIcon()} Found ${fmt.highlight(config.generators.length.toString())} generator(s)`
     );
-    console.log();
+    fmt.newLine();
 
     for (const [index, generator] of config.generators.entries()) {
       fmt.log(
@@ -1030,14 +1030,14 @@ export const listGeneratorsAction = () => {
       );
     }
 
-    console.log();
+    fmt.newLine();
 
     // Listing complete
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     fmt.errorBox('FAILED TO LIST GENERATORS!');
     fmt.error(`${message}`);
-    console.log();
+    fmt.newLine();
     process.exit(1);
   }
 };
@@ -1084,17 +1084,17 @@ export const registerApiKeyAndSecretAction = (
     fs.writeFileSync(secretPath, secret, 'utf-8');
     fmt.success(`  ${fmt.checkmark()} Secret saved to: ${secretPath}`);
 
-    console.log();
+    fmt.newLine();
     fmt.successBox('CREDENTIALS REGISTERED SUCCESSFULLY!');
     fmt.info(
       '  You can now use remote commands like: polyman remote-list, remote-pull, remote-push'
     );
-    console.log();
+    fmt.newLine();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     fmt.errorBox('REGISTRATION FAILED!');
     fmt.error(`${message}`);
-    console.log();
+    fmt.newLine();
     process.exit(1);
   }
 };
@@ -1158,7 +1158,7 @@ export const remoteListProblemsAction = async (
     const message = error instanceof Error ? error.message : String(error);
     fmt.errorBox('FAILED TO LIST PROBLEMS!');
     fmt.error(`${message}`);
-    console.log();
+    fmt.newLine();
     process.exit(1);
   }
 };
@@ -1262,7 +1262,7 @@ export const remotePullProblemAction = async (
       }
     }
 
-    console.log();
+    fmt.newLine();
     fmt.successBox('PROBLEM PULLED SUCCESSFULLY!');
     fmt.info(
       `  ${fmt.infoIcon()} Problem saved to: ${fmt.highlight(savePath)}`
@@ -1270,12 +1270,12 @@ export const remotePullProblemAction = async (
     fmt.info(
       `  ${fmt.infoIcon()} Review Config.json and update solution tags as needed`
     );
-    console.log();
+    fmt.newLine();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     fmt.errorBox('FAILED TO PULL PROBLEM!');
     fmt.error(`${message}`);
-    console.log();
+    fmt.newLine();
     process.exit(1);
   }
 };
@@ -1357,9 +1357,9 @@ export const remotePushProblemAction = async (
       const shouldProceed = await stepPromptCreateProblem(stepNum++);
 
       if (!shouldProceed) {
-        console.log();
+        fmt.newLine();
         fmt.info('  Push cancelled.');
-        console.log();
+        fmt.newLine();
         return;
       }
 
@@ -1381,7 +1381,7 @@ export const remotePushProblemAction = async (
         problemId,
         problemName
       );
-      console.log();
+      fmt.newLine();
     }
 
     // step 5: Update problem information
@@ -1484,7 +1484,7 @@ export const remotePushProblemAction = async (
       }
     }
 
-    console.log();
+    fmt.newLine();
     fmt.successBox('PROBLEM PUSHED SUCCESSFULLY!');
     fmt.info(
       `  ${fmt.infoIcon()} Problem ID: ${fmt.highlight(problemId.toString())}`
@@ -1492,12 +1492,12 @@ export const remotePushProblemAction = async (
     fmt.info(
       `  ${fmt.infoIcon()} Don't forget to commit your changes on Polygon using: ${fmt.highlight('polyman remote commit')}`
     );
-    console.log();
+    fmt.newLine();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     fmt.errorBox('FAILED TO PUSH PROBLEM!');
     fmt.error(`${message}`);
-    console.log();
+    fmt.newLine();
     process.exit(1);
   }
 };
@@ -1592,7 +1592,7 @@ export const remoteViewProblemAction = async (
     const message = error instanceof Error ? error.message : String(error);
     fmt.errorBox('FAILED TO VIEW PROBLEM!');
     fmt.error(`${message}`);
-    console.log();
+    fmt.newLine();
     process.exit(1);
   }
 };
@@ -1642,7 +1642,7 @@ export const remoteCommitProblemAction = async (
     const message = error instanceof Error ? error.message : String(error);
     fmt.errorBox('FAILED TO COMMIT CHANGES!');
     fmt.error(`${message}`);
-    console.log();
+    fmt.newLine();
     process.exit(1);
   }
 };
@@ -1698,7 +1698,7 @@ export const remotePackageProblemAction = async (
       packageType
     );
 
-    console.log();
+    fmt.newLine();
     // Final success message
 
     if (packageInfo.state === 'FAILED') {
@@ -1714,12 +1714,12 @@ export const remotePackageProblemAction = async (
       fmt.info(`  ${fmt.infoIcon()} Message: ${packageInfo.comment}`);
     }
     // fmt.info(`  ${fmt.infoIcon()} You can download the package from Polygon`);
-    console.log();
+    fmt.newLine();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     fmt.errorBox('PACKAGE OPERATION FAILED!');
     fmt.error(`${message}`);
-    console.log();
+    fmt.newLine();
     process.exit(1);
   }
 };

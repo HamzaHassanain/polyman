@@ -143,6 +143,14 @@ export class Formatter {
       chalk.bold.blue(`┌─ Step ${stepNumber}: `) + chalk.bold.white(title)
     );
   }
+  /**
+   * Prints a newLine.
+   * @example
+   * fmt.newLine();
+   */
+  newLine() {
+    console.log();
+  }
 
   /**
    * Prints a step completion message with a bottom corner bracket and checkmark.

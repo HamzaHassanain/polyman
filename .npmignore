@@ -72,4 +72,6 @@ DOCUMENTATION.md
 # - assets/ (checkers needed at runtime)
 # - template/ (needed for 'polyman new' command, except PDF)
 
-coverage
+
+coverage/
+./coverage

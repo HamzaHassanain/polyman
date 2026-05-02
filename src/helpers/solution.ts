@@ -356,7 +356,7 @@ export async function runSolutionOnTestset(
     for (const errMsg of thrownErrors) {
       fmt.error(`      ${fmt.cross()} ${errMsg}`);
     }
-    console.log();
+    fmt.newLine();
     throw new Error(
       `Solution ${fmt.highlight(solution.name)} failed on testset ${testsetName}:\n${Array.from(thrownErrors).join('\n')}`
     );
@@ -365,7 +365,7 @@ export async function runSolutionOnTestset(
       `    ${fmt.dim('→')} Completed testset ${fmt.highlight(testsetName)}`
     );
   }
-  console.log();
+  fmt.newLine();
 }
 
 /**
@@ -447,14 +447,14 @@ export async function runSolutionOnGroup(
     for (const errMsg of thrownErrors) {
       fmt.error(`      ${fmt.cross()} ${errMsg}`);
     }
-    console.log();
+    fmt.newLine();
     throw new Error(
       `Solution ${fmt.highlight(solution.name)} failed on group ${groupName}:\n${Array.from(thrownErrors).join('\n')}`
     );
   } else {
     fmt.log(`    ${fmt.dim('→')} Completed group ${fmt.highlight(groupName)}`);
   }
-  console.log();
+  fmt.newLine();
 }
 
 /**
@@ -536,7 +536,7 @@ export async function testSolutionAgainstMainCorrect(solutionName: string) {
     fmt.info(
       `  ${fmt.infoIcon()} Target solution: ${fmt.highlight(solutionName)} ${fmt.dim(`(${solution.tag})`)}`
     );
-    console.log();
+    fmt.newLine();
 
     fmt.log(
       `  ${fmt.dim('→')} Running main solution ${fmt.dim('(generating outputs...)')}`

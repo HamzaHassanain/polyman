@@ -533,7 +533,7 @@ export class CommandExecutor {
     }
 
     if (code === 0) {
-      this.handleSuccess(options, result, resolve);
+      this.handleSuccess(options, result, resolve, reject);
     } else {
       this.handleError(options, result, resolve, reject);
     }
@@ -612,8 +612,12 @@ export class CommandExecutor {
     }
 
     if (options.onMemoryExceeded) {
-      options.onMemoryExceeded(result);
-      resolve(result);
+      try {
+        options.onMemoryExceeded(result);
+        resolve(result);
+      } catch (error) {
+        reject(error);
+      }
     } else {
       reject(new Error('Memory limit exceeded'));
     }
@@ -635,7 +639,8 @@ export class CommandExecutor {
   private handleSuccess(
     options: ExecutionOptions,
     result: ExecutionResult,
-    resolve: (value: ExecutionResult) => void
+    resolve: (value: ExecutionResult) => void,
+    reject: (reason?: unknown) => void
   ) {
     result.success = true;
 
@@ -643,8 +648,14 @@ export class CommandExecutor {
       fmt.dim(result.stdout.trim());
     }
 
-    options.onSuccess?.(result);
-    resolve(result);
+    try {
+      if (options.onSuccess) {
+        options.onSuccess(result);
+      }
+      resolve(result);
+    } catch (error) {
+      reject(error instanceof Error ? error : new Error(String(error)));
+    }
   }
 
   /**
@@ -674,8 +685,12 @@ export class CommandExecutor {
     }
 
     if (options.onError) {
-      options.onError(result);
-      resolve(result);
+      try {
+        options.onError(result);
+        resolve(result);
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
     } else {
       reject(
         new Error(
@@ -716,8 +731,12 @@ export class CommandExecutor {
     }
 
     if (options.onError) {
-      options.onError(result);
-      resolve(result);
+      try {
+        options.onError(result);
+        resolve(result);
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
     } else {
       reject(err);
     }
@@ -755,9 +774,10 @@ export class CommandExecutor {
           process.kill(pid, 'SIGSEGV');
         }
       }
-    } catch (error) {
-      console.log(error);
-
+    } catch (error: unknown) {
+      if ((error as { code?: string }).code !== 'ESRCH') {
+        console.log(error);
+      }
       // Process already terminated
     }
   }
@@ -932,7 +952,6 @@ export class CommandExecutor {
  * });
  */
 export const executor = new CommandExecutor();
-
 
 /**
  * Register signal handlers to ensure child processes are cleaned up

@@ -22,8 +22,8 @@ export const printComprehensiveHelp = (command: Command): void => {
     if (cmd.alias()) {
       signature += `|${cmd.alias()}`;
     }
-    const args = cmd
-      .registeredArguments?.map((arg) => {
+    const args = cmd.registeredArguments
+      ?.map(arg => {
         return arg.required ? `<${arg.name()}>` : `[${arg.name()}]`;
       })
       .join(' ');
@@ -40,7 +40,7 @@ export const printComprehensiveHelp = (command: Command): void => {
     const options = cmd.options;
     if (options && options.length > 0) {
       console.log(`${subIndent}${chalk.yellow('Options:')}`);
-      options.forEach((option) => {
+      options.forEach(option => {
         console.log(
           `${subIndent}  ${option.flags.padEnd(25)} ${option.description}`
         );
@@ -53,8 +53,8 @@ export const printComprehensiveHelp = (command: Command): void => {
       if (depth === 0) {
         console.log(`\n${chalk.underline('Commands:')}\n`);
       }
-      subcommands.forEach((subCmd) => {
-        printCommand(subCmd as Command, depth + 1);
+      subcommands.forEach(subCmd => {
+        printCommand(subCmd, depth + 1);
         console.log(''); // Add spacing between commands
       });
     }
@@ -64,10 +64,12 @@ export const printComprehensiveHelp = (command: Command): void => {
   // Note: 'program' itself is the root, usually we want to list its commands.
   // The root command usually doesn't have a name like 'new' unless explicitly set,
   // but here we are passed 'program' which is 'polyman'.
-  
+
   // We iterate over the top-level commands directly
-  command.commands.forEach((cmd) => {
-    printCommand(cmd as Command, 0);
-    console.log(chalk.gray('--------------------------------------------------'));
+  command.commands.forEach(cmd => {
+    printCommand(cmd, 0);
+    console.log(
+      chalk.gray('--------------------------------------------------')
+    );
   });
 };

@@ -70,12 +70,14 @@ export async function runChecker(
         fmt.error(
           `${fmt.cross()} ${fmt.bold('Checker Unexpectedly Exceeded Time Limit!')} (${DEFAULT_TIMEOUT}ms)`
         );
+        void executor.cleanup();
         process.exit(1);
       },
       onMemoryExceeded: () => {
         fmt.error(
           `${fmt.cross()} ${fmt.bold('Checker Unexpectedly Exceeded Memory Limit!')} (${DEFAULT_MEMORY_LIMIT} MB)`
         );
+        void executor.cleanup();
         process.exit(1);
       },
     }

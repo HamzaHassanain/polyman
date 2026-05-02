@@ -16,11 +16,11 @@ export function normalizeLineEndingsFromWinToUnix(content: string): string {
   // Handle all possible line ending combinations
   // 1. First normalize \r\n to \n (Windows to Unix)
   // 2. Then normalize any remaining \r to \n (old Mac style)
-  // 3. Finally collapse multiple consecutive newlines if corrupted
+  // 3. Finally collapse multiple consecutive newLines if corrupted
   return content
     .replace(/\r\n/g, '\n') // Windows CRLF -> Unix LF
     .replace(/\r/g, '\n') // Old Mac CR -> Unix LF
-    .replace(/\n{3,}/g, '\n\n'); // Collapse 3+ newlines to max 2 (preserve paragraph breaks)
+    .replace(/\n{3,}/g, '\n\n'); // Collapse 3+ newLines to max 2 (preserve paragraph breaks)
 }
 
 /**
@@ -37,7 +37,7 @@ export function normalizeLineEndingsFromUnixToWin(content: string): string {
   return content
     .replace(/\r\n/g, '\n') // Existing Windows CRLF -> Unix LF
     .replace(/\r/g, '\n') // Old Mac CR -> Unix LF
-    .replace(/\n{3,}/g, '\n\n') // Collapse excessive newlines
+    .replace(/\n{3,}/g, '\n\n') // Collapse excessive newLines
     .replace(/\n/g, '\r\n'); // Convert all Unix LF -> Windows CRLF
 }
 

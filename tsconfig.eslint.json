@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "src/**/*",
+    "tests/**/*",
+    "vitest.config.ts",
+    "eslint.config.cjs" 
+  ],
+  "compilerOptions": {
+    "allowJs": true,
+    "noEmit": true
+  }
+}
