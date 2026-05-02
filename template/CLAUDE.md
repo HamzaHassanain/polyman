@@ -4,6 +4,8 @@ You are working inside a problem directory created by [polyman](https://github.c
 
 This file is the fast-path orientation for any AI agent (Claude, Cursor, Aider, Codex, etc.) working in this directory. `AGENTS.md` is a pointer to this file.
 
+> **Before editing any solution / generator / validator / checker / statement / `Config.json`, read [`AUTHORING.md`](./AUTHORING.md).** It contains the non-negotiable rules (three modes, statement/solution/generator/validator/checker patterns, C++ performance standards) that polyman + testlib + Polygon enforce. CLAUDE.md is orientation; AUTHORING.md is the rules.
+
 ---
 
 ## 1. The mental model
