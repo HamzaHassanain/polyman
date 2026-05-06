@@ -10,6 +10,7 @@ The validator decides whether an input file is well-formed *and* satisfies const
 4. Use `inf.readSpace()` between values on the same line, `inf.readEoln()` between lines.
 5. End with `inf.readEoln(); inf.readEof();` to reject trailing whitespace and trailing data.
 6. **Constraints in the validator must match the constraints in `statements/<lang>/input-format.tex`.** When you tighten one, tighten the other and update `validator_tests.json`.
+7. **Use C++14 digit separators for numeric literals ≥ 10000.** Polygon warns on `1000000` and friends. Write `1'000'000` instead of `1000000`, `200'000` instead of `200000`, `1'000'000'000` instead of `1000000000`. Apply the same rule in **generators** and **checkers** — anywhere the magnitude of a literal matters for review.
 
 ## Config.json entry
 

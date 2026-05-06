@@ -69,6 +69,18 @@ int main() {
 }
 ```
 
+## Digit separators on large literals
+
+Use C++14 single-quote separators on any integer literal `≥ 10000`. Polygon's review surface flags bare `1000000` etc. as readability warnings, and large bare numbers are easy to miscount when reading code.
+
+```cpp
+const int MAXN   = 200'000;        // ✓     not 200000
+const int LIMIT  = 1'000'000'000;  // ✓     not 1000000000
+const long long M = 1'000'000'007; // ✓     not 1000000007
+```
+
+Apply everywhere it would otherwise be a wall of digits: validator bounds, generator bounds, checker thresholds, solution constants.
+
 ## Other notes
 
 - `printf` / `scanf` are sometimes marginally faster than fast iostream, but the difference is rarely measurable. Don't reach for them unless you have a profile.
