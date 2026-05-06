@@ -87,14 +87,14 @@ Action functions in `src/actions.ts` orchestrate workflows by composing helpers.
 Each helper module owns a single domain. Function-level documentation is on TypeDoc; this section lists the responsibility of each module so contributors know where to look.
 
 - **`src/helpers/utils.ts`** — Cross-cutting utilities: config file reading, directory management, C++ and Java compilation, error logging, and the shared exit/throw helpers used by every action.
-- **`src/helpers/generator.ts`** — Generator compilation, script parsing, and test file production. Handles the special `samples` and `manual` generator names that bypass compilation.
+- **`src/helpers/generator.ts`** — Generator compilation and test file production. Drives Polygon-format scripts: parses, resolves to concrete test indices, then runs each generator (or copies each manual test) into the testset's output directory.
 - **`src/helpers/validator.ts`** — Validator compilation, validation of generated test inputs, and validator self-testing against `validator_tests.json`.
 - **`src/helpers/checker.ts`** — Checker compilation (custom or standard from `assets/checkers/`), checker invocation, and checker self-testing. Owns the verdict mapping from checker stdout to `CheckerVerdict`.
 - **`src/helpers/solution.ts`** — Solution compilation, execution against a testset, and verdict comparison. Responsible for enforcing the solution-tag contract (e.g. WA solutions must produce WA on at least one test).
 - **`src/helpers/create-template.ts`** — Materialises the bundled `template/` tree into a new problem directory when `polyman new` runs.
 - **`src/helpers/testlib-download.ts`** — Fetches `testlib.h` from the upstream GitHub repo for the `polyman download-testlib` command.
 - **`src/helpers/testset.ts`** — Testset and group resolution: given filters from CLI options, returns the matching testsets, groups, and indices.
-- **`src/helpers/script-parser.ts`** — Parses Polygon-style generation scripts and the structured `commands[]` form into a flat list of test-production instructions.
+- **`src/helpers/script-parser.ts`** — Parses Polygon-format generation scripts (`gen [args] > N|$|{indices}`, FreeMarker comments and `<#list>` loops, `<#-- @group X -->` headers) and resolves them, together with `manualTests[]`, into a flat list of test-production instructions with concrete indices.
 - **`src/helpers/remote/`** — Polygon integration. `pulling.ts` and `pushing.ts` implement the per-component download/upload steps; `utils.ts` handles credentials, line-ending normalization, and problem-id extraction; `viewer.ts` formats `polyman remote view` output.
 
 For function-level docs see TypeDoc at https://hamzahassanain.github.io/polyman/.
@@ -305,7 +305,13 @@ int main(int argc, char* argv[]) {
 
 ## Generator System
 
-Generators are testlib C++ programs that take the test number as `argv[1]` and write the test content to stdout. The generator helper compiles the source once, then for each test in the requested range invokes `./generator <testNum> > tests/test<testNum>.txt` and verifies the file was produced. Two reserved generator names bypass compilation: `samples` reuses pre-existing `tests/test*.txt` files (typically the statement examples) and `manual` reuses files placed by the author under `manual/`.
+Generators are testlib C++ programs that take parameters as positional `argv[]` and write the test content to stdout. The pipeline is:
+
+1. **Parse** — `script-parser.ts` reads the testset's `generatorScript.script` (or `scriptFile`) as Codeforces-Polygon syntax: each non-comment line is `gen-name [args...] > target` where `target` is `N`, `$` (smallest unused), or `{1-3,7}` (multi-output). FreeMarker `<#-- comments -->` and `<#list a..b as i> ... ${i} ... </#list>` blocks are supported, and `<#-- @group <name> -->` headers tag every following line.
+2. **Resolve** — `script-parser.ts:resolveTests` merges parsed lines with the testset's `manualTests[]`, assigning concrete Polygon indices to every `$`. Manual indices and explicit indices reserve slots; `$` walks the smallest free integer. Duplicate indices are an error.
+3. **Compile + run** — `generator.ts:executeResolvedTests` compiles each referenced generator once and, per resolved test, either copies the manual `.in` file into `testsets/<name>/test<index>.txt`, runs the generator with stdout redirected to that file, or (for `> {indices}` lines) runs the generator with cwd set to the testset directory and verifies it wrote the promised files itself.
+
+Generator names with extensions (`gen.exe`, `gen.cpp`) are rejected — Polygon strips them on the server side, so polyman keeps the same constraint.
 
 ---
 

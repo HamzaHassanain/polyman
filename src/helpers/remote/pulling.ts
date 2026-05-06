@@ -9,10 +9,10 @@ import { PolygonSDK } from '../../polygon';
 import type {
   LocalChecker,
   LocalGenerator,
+  LocalManualTest,
   LocalSolution,
   LocalValidator,
   LocalTestset,
-  GeneratorScriptCommand,
   SolutionTag,
   StatementConfig,
 } from '../../types';
@@ -461,7 +461,7 @@ export async function downloadTestsetAndBuildGenerationScripts(
   problemId: number,
   problemDir: string,
   testsetName: string,
-  generators: LocalGenerator[]
+  _generators: LocalGenerator[]
 ): Promise<{
   testset: LocalTestset;
   manualCount: number;
@@ -472,148 +472,61 @@ export async function downloadTestsetAndBuildGenerationScripts(
     fs.mkdirSync(testsDir, { recursive: true });
   }
 
-  // Get tests from Polygon
-  const tests = await sdk.getTests(problemId, testsetName, false);
-
-  // Get Generation Script
+  // Polygon owns the script text — store it verbatim, no parsing back.
   const generationScript = await sdk.getScript(problemId, testsetName);
 
-  const commands: GeneratorScriptCommand[] = [];
-  let manualCount = 0;
-  const generatorNameMap = new Map<string, string>();
-  for (const g of generators) {
-    const filename = g.source
-      .split('/')
-      .pop()
-      ?.replace(/\.[^.]+$/, '');
-    if (filename) {
-      generatorNameMap.set(filename, g.name);
-    }
-  }
+  const tests = await sdk.getTests(problemId, testsetName, false);
 
-  // Process each test
+  const manualTests: LocalManualTest[] = [];
+  let manualCount = 0;
+
   for (const test of tests) {
     if (test.manual && test.input) {
-      // Manual test - save to file
       if (!fs.existsSync(manualTestsDir)) {
         fs.mkdirSync(manualTestsDir, { recursive: true });
       }
 
-      const filename = `test${test.index}.txt`;
-      const filePath = path.join(manualTestsDir, filename);
-      const content = test.input.replace(/\r\n/g, '\n');
-      fs.writeFileSync(filePath, content, 'utf-8');
+      const padded = String(test.index).padStart(2, '0');
+      const inFilename = `m-${padded}.in`;
+      const inPath = path.join(manualTestsDir, inFilename);
+      fs.writeFileSync(inPath, test.input.replace(/\r\n/g, '\n'), 'utf-8');
       manualCount++;
 
-      const command: GeneratorScriptCommand = {
-        type: 'manual',
-        manualFile: `./manual/${testsetName}/${filename}`,
-        useInStatements: test.useInStatements,
+      const entry: LocalManualTest = {
+        input: `./manual/${testsetName}/${inFilename}`,
+        index: test.index,
       };
-      if (test.group) command.group = test.group;
-      if (test.points !== undefined) command.points = test.points;
-      commands.push(command);
+      if (test.group) entry.group = test.group;
+      if (test.points !== undefined) entry.points = test.points;
+      if (test.useInStatements) entry.useInStatements = true;
+      manualTests.push(entry);
     }
   }
 
-  // Parse generation script and merge commands
-  const scriptCommands = parseGenerationScript(
-    generationScript,
-    generatorNameMap
-  );
-
-  // Build testset configuration
   const testset: LocalTestset = {
     name: testsetName,
     generatorScript: {
-      commands: [...commands, ...scriptCommands],
+      script: generationScript,
     },
   };
 
-  // Check if groups are used
+  if (manualTests.length > 0) {
+    testset.manualTests = manualTests;
+  }
+
   const hasGroups = tests.some(t => t.group);
   if (hasGroups) {
     testset.groupsEnabled = true;
-    // Extract unique groups
     const groupNames = [
       ...new Set(tests.filter(t => t.group).map(t => t.group!)),
     ];
-    testset.groups = groupNames.map(name => ({
-      name,
-    }));
+    testset.groups = groupNames.map(name => ({ name }));
   }
 
-  // Check if points are used
   const hasPoints = tests.some(t => t.points !== undefined);
   if (hasPoints) {
     testset.pointsEnabled = true;
   }
 
   return { testset, manualCount };
-}
-
-/**
- * Parses FreeMarker template generation script to extract generator commands.
- * Handles patterns like: <#list from..to as s> GeneratorName ${s} > $ </#list>
- *
- * @param {string} script - Generation script with FreeMarker syntax
- * @param {Map<string, string>} generatorNameMap - Map of generator filenames to names
- * @returns {GeneratorScriptCommand[]} Array of generator commands
- */
-function parseGenerationScript(
-  script: string,
-  generatorNameMap: Map<string, string>
-): GeneratorScriptCommand[] {
-  const commands: GeneratorScriptCommand[] = [];
-
-  // Pattern to match: <#list from..to as var> GeneratorName ${var} args > $ </#list>
-  const listPattern =
-    /<#list\s+(\d+|[a-zA-Z_]\w*)\.\.(\d+|[a-zA-Z_]\w*)\s+as\s+\w+>\s*([^<]+?)\s*<\/#list>/gs;
-
-  let match;
-  while ((match = listPattern.exec(script)) !== null) {
-    const fromStr = match[1];
-    const toStr = match[2];
-    const commandLine = match[3].trim();
-
-    // Parse the command line to extract generator name and arguments
-    // Remove "> $" output redirection
-    const cleanedLine = commandLine.replace(/\s*>\s*\$\s*$/, '').trim();
-
-    // Extract generator name (first token) and check for ${var} placeholder
-    const parts = cleanedLine.split(/\s+/);
-    if (parts.length === 0) continue;
-
-    const generatorFile = parts[0];
-
-    // Try to find the generator name in our map
-    let generatorName = generatorNameMap.get(generatorFile) || generatorFile;
-
-    // If not found, try case-insensitive match
-    if (!generatorNameMap.has(generatorFile)) {
-      const lowerFile = generatorFile.toLowerCase();
-      for (const [file, name] of generatorNameMap.entries()) {
-        if (file.toLowerCase() === lowerFile) {
-          generatorName = name;
-          break;
-        }
-      }
-    }
-
-    // Check if from and to are numeric literals or variables
-    const fromNum = parseInt(fromStr, 10);
-    const toNum = parseInt(toStr, 10);
-
-    if (!isNaN(fromNum) && !isNaN(toNum)) {
-      // Numeric range - create generator command
-      commands.push({
-        type: 'generator',
-        generator: generatorName,
-        range: [fromNum, toNum],
-        useInStatements: false,
-      });
-    }
-  }
-
-  return commands;
 }

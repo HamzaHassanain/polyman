@@ -32,7 +32,6 @@ import type {
   LocalSolution,
   LocalTestset,
   LocalChecker,
-  GeneratorScriptCommand,
   CheckerVerdict,
 } from '../../src/types';
 
@@ -105,8 +104,8 @@ const mockedGetTestFiles = vi.mocked(utils.getTestFiles);
 const mockedCompileCPP = vi.mocked(utils.compileCPP);
 const mockedCompileJava = vi.mocked(utils.compileJava);
 const mockedRunChecker = vi.mocked(checker.runChecker);
-const mockedGetGeneratorCommands = vi.mocked(
-  testsetHelper.getGeneratorCommands
+const mockedGetTestIndicesForGroup = vi.mocked(
+  testsetHelper.getTestIndicesForGroup
 );
 const mockedFsExistsSync = vi.mocked(fs.existsSync);
 const mockedFsMkdirSync = vi.mocked(fs.mkdirSync);
@@ -413,12 +412,7 @@ describe('solution.ts', () => {
     const mockTestset: LocalTestset = { name: 'ts1' };
 
     it('should run tests belonging to group', async () => {
-      const cmds: GeneratorScriptCommand[] = [
-        { type: 'manual', group: 'g1' },
-        { type: 'manual', group: 'g2' },
-        { type: 'manual', group: 'g1' },
-      ];
-      mockedGetGeneratorCommands.mockReturnValue(cmds);
+      mockedGetTestIndicesForGroup.mockReturnValue([1, 3]);
       mockedExecuteWithRedirect.mockResolvedValue(okResult);
 
       await solution.runSolutionOnGroup(
@@ -445,16 +439,14 @@ describe('solution.ts', () => {
     });
 
     it('should throw if no tests found for group', async () => {
-      const cmds: GeneratorScriptCommand[] = [{ type: 'manual', group: 'g2' }];
-      mockedGetGeneratorCommands.mockReturnValue(cmds);
+      mockedGetTestIndicesForGroup.mockReturnValue([]);
       await expect(
         solution.runSolutionOnGroup(mockSolution, mockConfig, mockTestset, 'g1')
       ).rejects.toThrow('No tests found for group "g1"');
     });
 
     it('should throw if tests fail', async () => {
-      const cmds: GeneratorScriptCommand[] = [{ type: 'manual', group: 'g1' }];
-      mockedGetGeneratorCommands.mockReturnValue(cmds);
+      mockedGetTestIndicesForGroup.mockReturnValue([1]);
       mockedExecuteWithRedirect.mockRejectedValue(new Error('Fail'));
 
       await expect(
@@ -964,11 +956,7 @@ describe('solution.ts', () => {
           const mockConfig: ConfigFile = makeConfig();
           const mockTestset: LocalTestset = { name: 'ts1' };
 
-          const cmds: GeneratorScriptCommand[] = [
-            { type: 'manual', group: 'g1' },
-            { type: 'manual', group: 'g1' },
-          ];
-          mockedGetGeneratorCommands.mockReturnValue(cmds);
+          mockedGetTestIndicesForGroup.mockReturnValue([1, 2]);
 
           mockedExecuteWithRedirect.mockRejectedValueOnce(new Error('Fail'));
 

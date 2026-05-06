@@ -59,7 +59,9 @@ The single source of truth for the **on-disk problem schema** is `src/types.d.ts
 | Format write          | `npm run format`                         |
 | Generate TypeDoc      | `npm run docs`                           |
 
-Before declaring any change "done": run `npm run build` **and** `npm run lint`. Both must pass. There is no Jest/Vitest suite in CI right now — verification is done manually with `polyman new` + `polyman verify` against a sample problem.
+Before declaring any change "done": run `npm run build`, `npm run lint`, **and** `npm test`. All three must pass. End-to-end verification is still done manually with `polyman new` + `polyman verify` against a sample problem.
+
+**Tests are mandatory for logic changes.** When you add a new module/file/function, *also* add Vitest tests covering its behavior under `tests/`. When you change existing behavior, update the corresponding tests in the same commit so they describe the new contract. When you delete behavior, delete its tests. The rule applies to bug fixes too — a fix without a regression test will accept the same bug back.
 
 To smoke-test a change end-to-end:
 

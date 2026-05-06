@@ -201,13 +201,7 @@ The `Config.json` file defines your problem:
     {
       "name": "tests",
       "generatorScript": {
-        "commands": [
-          {
-            "type": "generator",
-            "generator": "gen",
-            "range": [1, 50]
-          }
-        ]
+        "script": "<#list 1..50 as i>\ngen ${i} > $\n</#list>"
       }
     }
   ]

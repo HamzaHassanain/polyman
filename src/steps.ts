@@ -57,7 +57,7 @@ import {
   testCheckerItself,
 } from './helpers/checker';
 import {
-  compileAllGenerators,
+  compileGeneratorsForTests,
   compileGeneratorsForTestsets,
 } from './helpers/generator';
 import {
@@ -65,7 +65,7 @@ import {
   generateSingleTest,
   generateTestsForGroup,
   generateTestsForTestset,
-  getGeneratorCommands,
+  getResolvedTests,
   ensureTestsetsExist,
 } from './helpers/testset';
 import {
@@ -278,9 +278,16 @@ export async function stepCompileGeneratorsForSingleTest(
   testIndex: number
 ): Promise<void> {
   fmt.step(stepNum, 'Compiling Generators');
-  const commands = getGeneratorCommands(testset);
-  const command = commands[testIndex - 1];
-  await compileAllGenerators([command], config.generators!);
+  const tests = getResolvedTests(testset, config.generators ?? []);
+  const target = tests.find(t => t.index === testIndex);
+  if (!target) {
+    const available = tests.map(t => t.index).join(', ');
+    throw new Error(
+      `Test ${testIndex} not found in testset "${testset.name}". ` +
+        `Available indices: ${available || '(none)'}`
+    );
+  }
+  await compileGeneratorsForTests([target], config.generators ?? []);
   fmt.stepComplete('Generators compiled');
 }
 
@@ -302,11 +309,11 @@ export async function stepCompileGeneratorsForGroup(
   groupName: string
 ): Promise<void> {
   fmt.step(stepNum, 'Compiling Generators');
-  const allCommands = getGeneratorCommands(testset);
-  const groupCommands = allCommands.filter(
-    cmd => groupName === 'all' || cmd.group === groupName
+  const allTests = getResolvedTests(testset, config.generators ?? []);
+  const groupTests = allTests.filter(
+    t => groupName === 'all' || t.group === groupName
   );
-  await compileAllGenerators(groupCommands, config.generators!);
+  await compileGeneratorsForTests(groupTests, config.generators ?? []);
   fmt.stepComplete('Generators compiled');
 }
 
@@ -327,8 +334,8 @@ export async function stepCompileGeneratorsForTestset(
   testset: LocalTestset
 ): Promise<void> {
   fmt.step(stepNum, 'Compiling Generators');
-  const commands = getGeneratorCommands(testset);
-  await compileAllGenerators(commands, config.generators!);
+  const tests = getResolvedTests(testset, config.generators ?? []);
+  await compileGeneratorsForTests(tests, config.generators ?? []);
   fmt.stepComplete('Generators compiled');
 }
 
@@ -1169,9 +1176,9 @@ export async function stepDownloadTests(
 
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
 
-    const totalTests = testsetConfig.generatorScript?.commands?.length || 0;
+    const totalTests = testsetConfig.manualTests?.length ?? manualCount;
     fmt.info(
-      `  ${fmt.infoIcon()} Downloaded ${fmt.highlight(manualCount.toString())} manual test(s) out of ${totalTests} total`
+      `  ${fmt.infoIcon()} Downloaded ${fmt.highlight(manualCount.toString())} manual test(s); ${totalTests} configured`
     );
     fmt.stepComplete('Tests downloaded and testset configured');
   } catch {

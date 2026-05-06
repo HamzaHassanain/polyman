@@ -822,27 +822,23 @@ describe('pushing.ts', () => {
       mockedReadFileSync.mockReturnValue('manual-input');
 
       const cfg = asConfig({
+        generators: [{ name: 'gen', source: './gen.cpp' }],
         testsets: [
           {
             name: 'tests',
             groupsEnabled: true,
             generatorScript: {
-              commands: [
-                {
-                  type: 'manual',
-                  manualFile: 'm1.txt',
-                  group: 'samples',
-                  points: 5,
-                  useInStatements: true,
-                },
-                {
-                  type: 'generator',
-                  generator: 'gen',
-                  range: [1, 3],
-                  group: 'main',
-                },
-              ],
+              script: '<#-- @group main -->\ngen 1 > $\ngen 2 > $\ngen 3 > $',
             },
+            manualTests: [
+              {
+                input: 'm1.txt',
+                index: 4,
+                group: 'samples',
+                points: 5,
+                useInStatements: true,
+              },
+            ],
           },
         ],
       });
@@ -853,12 +849,12 @@ describe('pushing.ts', () => {
       expect(mocks.saveScript).toHaveBeenCalledWith(
         1,
         'tests',
-        expect.stringContaining('<#list 1..3 as i>')
+        expect.stringContaining('gen 1 > $')
       );
       expect(mocks.saveTest).toHaveBeenCalledWith(
         1,
         'tests',
-        1,
+        4,
         'manual-input',
         expect.objectContaining({
           testGroup: 'samples',
@@ -867,7 +863,7 @@ describe('pushing.ts', () => {
         })
       );
       expect(result.manualsCount).toBe(1);
-      expect(result.testsCount).toBe(2);
+      expect(result.testsCount).toBe(4);
     });
 
     it('should throw inside manual promise creation when manual file is missing', async () => {
@@ -878,9 +874,7 @@ describe('pushing.ts', () => {
         testsets: [
           {
             name: 'tests',
-            generatorScript: {
-              commands: [{ type: 'manual', manualFile: 'missing.txt' }],
-            },
+            manualTests: [{ input: 'missing.txt', index: 1 }],
           },
         ],
       });
@@ -901,48 +895,34 @@ describe('pushing.ts', () => {
       mockedReadFileSync.mockReturnValue('m');
 
       const cfg = asConfig({
+        generators: [{ name: 'gen', source: './gen.cpp' }],
         testsets: [
           {
             name: 'tests',
             groupsEnabled: true,
-            generatorScript: {
-              commands: [
-                { type: 'manual', manualFile: 'm.txt' },
-                {
-                  type: 'generator',
-                  generator: 'gen',
-                  range: [1, 2],
-                },
-              ],
-            },
+            generatorScript: { script: 'gen 1 > $\ngen 2 > $' },
+            manualTests: [{ input: 'm.txt', index: 3 }],
           },
         ],
       });
 
       const result = await pushing.uploadTestsets(sdk, 1, 'dir', cfg);
-      expect(result.testsCount).toBe(2);
+      expect(result.testsCount).toBe(3);
     });
 
-    it('should not fail when generator command lacks group', async () => {
+    it('should not call saveTest for generator tests with no per-test metadata', async () => {
       const { sdk, mocks } = buildSdk();
       const cfg = asConfig({
+        generators: [{ name: 'gen', source: './gen.cpp' }],
         testsets: [
           {
             name: 'tests',
-            generatorScript: {
-              commands: [
-                {
-                  type: 'generator',
-                  generator: 'gen',
-                  range: [1, 2],
-                },
-              ],
-            },
+            generatorScript: { script: 'gen 1 > $\ngen 2 > $' },
           },
         ],
       });
       const result = await pushing.uploadTestsets(sdk, 1, 'dir', cfg);
-      expect(result.testsCount).toBe(1);
+      expect(result.testsCount).toBe(2);
       expect(mocks.saveTest).not.toHaveBeenCalled();
     });
 
@@ -955,18 +935,11 @@ describe('pushing.ts', () => {
         return Promise.resolve(undefined);
       });
       const cfg = asConfig({
+        generators: [{ name: 'gen', source: './gen.cpp' }],
         testsets: [
           {
             name: 'tests',
-            generatorScript: {
-              commands: [
-                {
-                  type: 'generator',
-                  generator: 'gen',
-                  range: [1, 1],
-                },
-              ],
-            },
+            generatorScript: { script: 'gen 1 > $' },
           },
         ],
       });
@@ -978,24 +951,18 @@ describe('pushing.ts', () => {
       const { sdk, mocks } = buildSdk();
       mocks.saveTest.mockRejectedValue(new Error('save test fail'));
       const cfg = asConfig({
+        generators: [{ name: 'gen', source: './gen.cpp' }],
         testsets: [
           {
             name: 'tests',
             generatorScript: {
-              commands: [
-                {
-                  type: 'generator',
-                  generator: 'gen',
-                  range: [1, 2],
-                  group: 'g1',
-                },
-              ],
+              script: '<#-- @group g1 -->\ngen 1 > $\ngen 2 > $',
             },
           },
         ],
       });
       const result = await pushing.uploadTestsets(sdk, 1, 'dir', cfg);
-      expect(result.testsCount).toBe(1);
+      expect(result.testsCount).toBe(2);
     });
   });
 });

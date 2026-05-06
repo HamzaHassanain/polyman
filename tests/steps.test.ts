@@ -242,9 +242,20 @@ describe('steps.ts', () => {
   });
 
   describe('stepCompileGeneratorsForSingleTest', () => {
-    it('should compile only the indexed command', async () => {
-      const cmds = [{ type: 'generator' }, { type: 'manual' }];
-      vi.mocked(testset.getGeneratorCommands).mockReturnValue(cmds as any);
+    it('should compile only the resolved test at the given index', async () => {
+      const tests = [
+        {
+          index: 1,
+          source: {
+            kind: 'generator',
+            generator: 'g',
+            args: [],
+            multiOutputs: null,
+          },
+        },
+        { index: 2, source: { kind: 'manual', inputFile: './m.in' } },
+      ];
+      vi.mocked(testset.getResolvedTests).mockReturnValue(tests as any);
       const config = baseConfig({
         generators: [{ name: 'g', source: 'g.cpp' }],
       });
@@ -254,8 +265,8 @@ describe('steps.ts', () => {
         { name: 'tests' } as any,
         2
       );
-      expect(generator.compileAllGenerators).toHaveBeenCalledWith(
-        [cmds[1]],
+      expect(generator.compileGeneratorsForTests).toHaveBeenCalledWith(
+        [tests[1]],
         config.generators
       );
     });
@@ -279,12 +290,30 @@ describe('steps.ts', () => {
   });
 
   describe('stepCompileGeneratorsForGroup', () => {
-    it('should filter by group name', async () => {
-      const cmds = [
-        { type: 'generator', group: 'a' },
-        { type: 'generator', group: 'b' },
+    it('should filter resolved tests by group name', async () => {
+      const tests = [
+        {
+          index: 1,
+          source: {
+            kind: 'generator',
+            generator: 'g',
+            args: [],
+            multiOutputs: null,
+          },
+          group: 'a',
+        },
+        {
+          index: 2,
+          source: {
+            kind: 'generator',
+            generator: 'g',
+            args: [],
+            multiOutputs: null,
+          },
+          group: 'b',
+        },
       ];
-      vi.mocked(testset.getGeneratorCommands).mockReturnValue(cmds as any);
+      vi.mocked(testset.getResolvedTests).mockReturnValue(tests as any);
       const config = baseConfig();
       await steps.stepCompileGeneratorsForGroup(
         1,
@@ -292,18 +321,36 @@ describe('steps.ts', () => {
         { name: 'tests' } as any,
         'a'
       );
-      expect(generator.compileAllGenerators).toHaveBeenCalledWith(
-        [cmds[0]],
+      expect(generator.compileGeneratorsForTests).toHaveBeenCalledWith(
+        [tests[0]],
         config.generators
       );
     });
 
-    it('should keep all commands when group is "all"', async () => {
-      const cmds = [
-        { type: 'generator', group: 'a' },
-        { type: 'generator', group: 'b' },
+    it('should pass every resolved test when group is "all"', async () => {
+      const tests = [
+        {
+          index: 1,
+          source: {
+            kind: 'generator',
+            generator: 'g',
+            args: [],
+            multiOutputs: null,
+          },
+          group: 'a',
+        },
+        {
+          index: 2,
+          source: {
+            kind: 'generator',
+            generator: 'g',
+            args: [],
+            multiOutputs: null,
+          },
+          group: 'b',
+        },
       ];
-      vi.mocked(testset.getGeneratorCommands).mockReturnValue(cmds as any);
+      vi.mocked(testset.getResolvedTests).mockReturnValue(tests as any);
       const config = baseConfig();
       await steps.stepCompileGeneratorsForGroup(
         1,
@@ -311,8 +358,8 @@ describe('steps.ts', () => {
         { name: 'tests' } as any,
         'all'
       );
-      expect(generator.compileAllGenerators).toHaveBeenCalledWith(
-        cmds,
+      expect(generator.compileGeneratorsForTests).toHaveBeenCalledWith(
+        tests,
         config.generators
       );
     });
@@ -336,15 +383,25 @@ describe('steps.ts', () => {
   });
 
   describe('stepCompileGeneratorsForTestset', () => {
-    it('should compile all commands of testset', async () => {
-      const cmds = [{ type: 'generator' }];
-      vi.mocked(testset.getGeneratorCommands).mockReturnValue(cmds as any);
+    it('should compile every resolved test in the testset', async () => {
+      const tests = [
+        {
+          index: 1,
+          source: {
+            kind: 'generator',
+            generator: 'g',
+            args: [],
+            multiOutputs: null,
+          },
+        },
+      ];
+      vi.mocked(testset.getResolvedTests).mockReturnValue(tests as any);
       const config = baseConfig();
       await steps.stepCompileGeneratorsForTestset(1, config, {
         name: 'tests',
       } as any);
-      expect(generator.compileAllGenerators).toHaveBeenCalledWith(
-        cmds,
+      expect(generator.compileGeneratorsForTests).toHaveBeenCalledWith(
+        tests,
         config.generators
       );
     });

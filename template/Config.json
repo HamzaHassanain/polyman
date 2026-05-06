@@ -74,29 +74,20 @@
     {
       "name": "tests",
       "generatorScript": {
-        "commands": [
-          {
-            "useInStatements": true,
-            "type": "manual",
-            "manualFile": "./manual/tests/sample1.txt",
-            "group": "samples"
-          },
-          {
-            "type": "generator",
-            "generator": "gen-random",
-            "range": [1, 10],
-            "group": "main"
-          }
-        ]
+        "scriptFile": "./generators/gen-script.txt"
       },
+      "manualTests": [
+        {
+          "input": "./manual/tests/m-01-sample.in",
+          "index": 1,
+          "group": "samples",
+          "useInStatements": true
+        }
+      ],
       "groupsEnabled": true,
       "groups": [
-        {
-          "name": "samples"
-        },
-        {
-          "name": "main"
-        }
+        { "name": "samples" },
+        { "name": "main" }
       ]
     }
   ]

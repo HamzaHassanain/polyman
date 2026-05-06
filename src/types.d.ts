@@ -507,120 +507,149 @@ interface LocalValidator {
 }
 
 /**
- * Test generation script command.
- * Represents a single command in a test generation script.
+ * Polygon-format test generation script.
  *
- * @interface GeneratorScriptCommand
- * @property { 'manual' | "generator"} type - Command type
- * @property {string} [generator] - Generator name (for type='generator')
- * @property {string[]} [args] - Arguments to pass to generator
- * @property {string} [manualFile] - Path to manual test file (for type='manual')
- * @property {string} [group] - Test group assignment
- * @property {number} [points] - Points for this test
+ * The script is plain text using the same syntax as Codeforces Polygon:
  *
- * @example
- * // Generator command
- * {
- *   type: 'generator',
- *   generator: 'gen-random',
- *   args: ['10', '100']
- * }
+ * ```
+ * gen-name [args...] > N         # write to test N
+ * gen-name [args...] > $         # write to smallest unused index
+ * gen-name [args...] > {1-3,7}   # generator writes its own files at the listed indices
+ * <#-- @group name -->           # all subsequent generator lines belong to this group
+ * <#-- comment -->               # ignored
+ * <#list 1..5 as i> gen ${i} > $ </#list>   # FreeMarker loop expansion
+ * ```
  *
- * @example
- * // Manual test
- * {
- *   type: 'manual',
- *   manualFile: './tests/manual/sample1.txt',
- *   group: 'samples'
- * }
- */
-interface GeneratorScriptCommand {
-  type: 'manual' | 'generator';
-  useInStatements?: boolean;
-  generator?: string;
-  manualFile?: string;
-  group?: string;
-  points?: number;
-  range?: [number, number];
-}
-
-/**
- * Test generation script configuration.
- * Defines how tests are generated using generators and manual test files.
+ * Manual tests are NOT in this script — they live in {@link LocalTestset.manualTests}.
  *
  * @interface GeneratorScript
- * @property {GeneratorScriptCommand[]} [commands] - Array of generation commands
- * @property {string} [script] - Inline script definition (Polygon format)
- * @property {string} [scriptFile] - Path to external script file
- * @example
- * // Using structured commands
- * {
- *   commands: [
- *     { type: 'manual', manualFile: './tests/sample1.txt', group: 'samples' },
- *     { type: 'manual', manualFile: './tests/sample2.txt', group: 'samples' },
- *     { type: 'generator', generator: 'gen-random', args: ['1'] },
- *     { type: 'generator', generator: 'gen-random', args: ['2'] },
- *     { type: 'generator', generator: 'gen-large', args: ['1000', '10000'] }
- *   ]
- * }
- *
- * @example
- * // Using Polygon-format script
- * {
- *   script: 'gen 1 > $\ngen 2 > $\ngen 10 20 > $'
- * }
- *
- * @example
- * // Using external script file
- * {
- *   scriptFile: './tests/generation-script.txt'
- * }
+ * @property {string} [script] - Inline Polygon-format script text
+ * @property {string} [scriptFile] - Path to a file containing the script
  */
 interface GeneratorScript {
-  commands?: GeneratorScriptCommand[];
   script?: string;
   scriptFile?: string;
 }
 
 /**
+ * A manual (hand-authored) test in a testset.
+ *
+ * Manual tests pair an input file (and optionally a reference output) with an
+ * explicit Polygon test index. The convention is to name files
+ * `m-<NN>[-label].in` and `m-<NN>[-label].out` under `./manual/<testset>/`,
+ * but {@link LocalManualTest.input} can point anywhere.
+ *
+ * @interface LocalManualTest
+ * @property {string} input - Path to the test input file
+ * @property {string} [output] - Optional path to the reference output
+ * @property {number} index - 1-based Polygon test index this manual occupies
+ * @property {string} [group] - Test group name
+ * @property {number} [points] - Points for this test
+ * @property {boolean} [useInStatements] - Whether to embed in problem statement
+ */
+interface LocalManualTest {
+  input: string;
+  output?: string;
+  index: number;
+  group?: string;
+  points?: number;
+  useInStatements?: boolean;
+}
+
+/**
+ * Internal: a single parsed line of a Polygon-format generator script.
+ * Produced by the parser; not part of `Config.json`.
+ *
+ * @interface ParsedScriptLine
+ * @property {string} generator - Generator name (no extension)
+ * @property {string[]} args - Raw arguments after FreeMarker expansion
+ * @property {ScriptOutput} output - Output target(s) — single index or multi
+ * @property {string} [group] - Active group from the most recent `@group` header
+ * @property {string} raw - Original source line for diagnostics
+ * @property {number} lineNumber - 1-based line number in the source script
+ */
+interface ParsedScriptLine {
+  generator: string;
+  args: string[];
+  output: ScriptOutput;
+  group?: string;
+  raw: string;
+  lineNumber: number;
+}
+
+/**
+ * Internal: output target of a script line.
+ *
+ * - `single` — one test index. `index === null` means `$` (assign at resolve time).
+ * - `multi` — generator writes the listed indices itself (no stdout redirect).
+ */
+type ScriptOutput =
+  | { kind: 'single'; index: number | null }
+  | { kind: 'multi'; indices: number[] };
+
+/**
+ * Internal: a fully resolved test (manual or generator-driven) with a
+ * concrete Polygon index assigned. Produced after merging the parsed script
+ * with the testset's manual tests.
+ *
+ * @interface ResolvedTest
+ */
+interface ResolvedTest {
+  index: number;
+  source: ResolvedTestSource;
+  group?: string;
+  points?: number;
+  useInStatements?: boolean;
+}
+
+type ResolvedTestSource =
+  | { kind: 'manual'; inputFile: string; outputFile?: string }
+  | {
+      kind: 'generator';
+      generator: string;
+      args: string[];
+      multiOutputs: number[] | null;
+    };
+
+/**
  * Local testset configuration.
- * Polygon-compatible testset with script-based test generation.
+ *
+ * The generator script is plain Polygon-format text (inline or in a file);
+ * manual tests are listed separately so they can carry an explicit index and
+ * per-test metadata (group, points, useInStatements).
  *
  * @interface LocalTestset
  * @property {string} name - Testset name (usually 'tests')
- * @property {GeneratorScript} [generatorScript] - Test generation script configuration
+ * @property {GeneratorScript} [generatorScript] - Polygon-format script
+ * @property {LocalManualTest[]} [manualTests] - Hand-authored test files
  * @property {boolean} [groupsEnabled] - Whether test groups are enabled
  * @property {boolean} [pointsEnabled] - Whether point scoring is enabled
  * @property {LocalTestGroup[]} [groups] - Test group configurations
  *
  * @example
- * // Complete testset with generation script
  * {
  *   name: 'tests',
  *   generatorScript: {
- *     commands: [
- *       { type: 'manual', manualFile: './tests/sample.txt', group: 'samples' },
- *       { type: 'generator', generator: 'gen-random', args: ['10'] }
- *     ]
+ *     script: [
+ *       '<#-- @group samples -->',
+ *       '<#-- (samples are usually manual; generators only here for illustration) -->',
+ *       '<#-- @group main -->',
+ *       'gen-small 10 100 > $',
+ *       'gen-big  1000000 > $',
+ *     ].join('\n')
  *   },
+ *   manualTests: [
+ *     { input: './manual/tests/m-01-sample.in', index: 1,
+ *       group: 'samples', useInStatements: true }
+ *   ],
  *   groupsEnabled: true,
- *   groups: [
- *     { name: 'samples', pointsPolicy: 'EACH_TEST', feedbackPolicy: 'COMPLETE' }
- *   ]
- * }
- *
- * @example
- * // Using Polygon-format script
- * {
- *   name: 'tests',
- *   generatorScript: {
- *     script: 'gen 1 > $\ngen 2 > $\ngen-large 100 1000 > $'
- *   }
+ *   groups: [{ name: 'samples' }, { name: 'main' }]
  * }
  */
 interface LocalTestset {
   name: string;
   generatorScript?: GeneratorScript;
+  manualTests?: LocalManualTest[];
   groupsEnabled?: boolean;
   pointsEnabled?: boolean;
   groups?: LocalTestGroup[];
@@ -740,8 +769,12 @@ export {
   LocalValidator,
   LocalTestset,
   LocalTestGroup,
+  LocalManualTest,
   GeneratorScript,
-  GeneratorScriptCommand,
+  ParsedScriptLine,
+  ScriptOutput,
+  ResolvedTest,
+  ResolvedTestSource,
   // Utilities
   VerdictTracker,
 };

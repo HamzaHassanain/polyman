@@ -444,13 +444,13 @@ Testsets are collections of test cases that define how your problem will be test
       "name": "pretests",
       "groupsEnabled": true,
       "groups": [{"name": "samples"}],
-      "generatorScript": { "commands": [...] }
+      "generatorScript": { "scriptFile": "./pretests-gen-script.txt" }
     },
     {
       "name": "system-tests",
       "groupsEnabled": true,
       "groups": [{"name": "full"}],
-      "generatorScript": { "commands": [...] }
+      "generatorScript": { "scriptFile": "./system-tests-gen-script.txt" }
     }
   ]
 }
@@ -493,335 +493,174 @@ Testsets are collections of test cases that define how your problem will be test
 {
   "groupsEnabled": false,
   "generatorScript": {
-    "commands": [
-      // No "group" field needed in commands
-    ]
+    "script": "gen 1 > $\ngen 2 > $"
   }
 }
 ```
 
 **Important:** If `groupsEnabled: true`, you **must**:
 
-1. Define groups in the `groups` array
-2. Specify a `group` field in each command
-3. Use only group names that are defined
+1. Define groups in the `groups` array.
+2. Tag script lines via `<#-- @group <name> -->` headers and tag every manual entry with a `group` field.
+3. Only use group names that appear in the `groups` array.
 
 ---
 
 #### Complete Testset Structure
 
+A testset has two independent inputs:
+
+- `generatorScript` — a Polygon-format text script (inline or in a file).
+- `manualTests[]` — a list of hand-written test files with explicit indices.
+
 ```json
 {
   "testsets": [
     {
-      "name": "tests", // Testset name (required)
-      "groupsEnabled": true, // Enable/disable groups (required)
+      "name": "tests",
+      "groupsEnabled": true,
       "groups": [
-        // Group definitions (required if groupsEnabled: true)
-        {
-          "name": "samples" // Group name (required)
-        },
-        {
-          "name": "main"
-        },
-        {
-          "name": "edge-cases"
-        }
+        { "name": "samples" },
+        { "name": "main" },
+        { "name": "edge-cases" }
       ],
       "generatorScript": {
-        // Test generation commands (required)
-        "commands": [
-          {
-            "type": "manual", // Command type (required)
-            "manualFile": "./tests/manual/sample1.txt",
-            "group": "samples" // Group assignment (required if groupsEnabled: true)
-          },
-          {
-            "type": "generator",
-            "generator": "gen-random",
-            "range": [100, 130],
-            "group": "main"
-          }
-        ]
-      }
+        "scriptFile": "./generators/gen-script.txt"
+      },
+      "manualTests": [
+        {
+          "input": "./manual/tests/m-01-sample.in",
+          "index": 1,
+          "group": "samples",
+          "useInStatements": true
+        }
+      ]
     }
   ]
 }
 ```
 
+The script (here in `generators/gen-script.txt`) is plain Codeforces-Polygon syntax:
+
+```
+<#-- @group main -->
+<#list 1..50 as i>
+gen-random ${i} > $
+</#list>
+
+<#-- @group edge-cases -->
+gen-edge boundary-low  > $
+gen-edge boundary-high > $
+```
+
 ---
 
-#### Generator Command Types
+#### The Generator Script Format (Polygon-compatible)
 
-Commands define how individual tests are created. There are three types:
+Each non-empty, non-comment line has the form:
+
+```
+generator-name [args...] > target
+```
+
+Where `target` is one of:
+
+| Form        | Meaning                                                  |
+| ----------- | -------------------------------------------------------- |
+| `N`         | Write the test to index `N` (e.g. `> 5` → `test5.txt`).  |
+| `$`         | Smallest unused index. Polyman assigns it at parse time. |
+| `{1-3,7,9}` | Multi-output. The generator itself writes the listed files (no stdout redirect). Polyman runs the generator once with cwd set to the testset directory and verifies each promised file appears. |
+
+**Constraints:**
+
+- Generator names **must not** include extensions (`gen.exe`, `gen.cpp` are rejected).
+- Indices are unique across the script *and* `manualTests[]` — no two tests can claim the same number.
+- `$` walks the smallest available index, skipping anything taken by a manual test or an earlier line.
+
+**FreeMarker constructs:**
+
+- `<#-- comment -->` is stripped.
+- `<#-- @group <name> -->` headers tag every following script line with that group.
+- `<#list a..b as i> ... ${i} ... </#list>` expands into one line per integer in the inclusive range.
+
+**Example (the canonical Polygon shape from the docs):**
+
+```
+gen_small 1   0      1 > $
+gen_small 2   10     1 > $
+gen_small 5   1000   3 > $
+
+<#-- @group big-tests -->
+gen_big   1000   100000  0 > $
+gen_big   100000 1000000 3 > $
+
+<#-- @group multi -->
+gen_pair 4 7 > {1-3,7}
+```
+
+The last line invokes `gen_pair 4 7` once; `gen_pair` is expected to write `1`, `2`, `3`, and `7` files in the testset directory (Polyman renames them to `test1.txt`, `test2.txt`, `test3.txt`, `test7.txt` if they aren't already named that way).
 
 ---
 
-**1. Manual Tests**
+#### Manual tests — `manualTests[]`
 
-Manual tests use pre-written test files that you create yourself.
+Manual tests live next to the testset under `manual/<testset>/m-<NN>[-label].in`, with an optional matching `m-<NN>[-label].out` reference answer:
 
 ```json
-{
-  "type": "manual", // Required: Command type
-  "manualFile": "./tests/manual/test.txt", // Required: Path to test file
-  "group": "samples" // Required if groupsEnabled: true
-}
+"manualTests": [
+  {
+    "input": "./manual/tests/m-01-sample.in",
+    "output": "./manual/tests/m-01-sample.out",
+    "index": 1,
+    "group": "samples",
+    "useInStatements": true,
+    "points": 0
+  }
+]
 ```
 
 **What Happens:**
 
-1. Polyman reads the file at `manualFile` path
-2. Copies it to `testsets/<testset-name>/test<index>.txt`
-3. The file is used as-is (when generating the testset, gets copied directly)
+1. Polyman reads the `input` file.
+2. Copies it to `testsets/<testset-name>/test<index>.txt` (using the explicit `index`).
+3. The script's `$` operator skips reserved indices, so manuals and generator tests coexist cleanly.
+4. On `polyman remote push`, the input is uploaded as a manual test on Polygon with the supplied group / points / `useInStatements` metadata.
 
 **When to Use:**
 
-- Sample tests (shown in problem statement)
-- Carefully crafted edge cases
-- Tests that are hard to generate programmatically
-- Initial tests while developing generators
+- Sample tests shown in the problem statement (`useInStatements: true`).
+- Carefully crafted edge cases.
+- Tests that are hard to generate programmatically.
 
-**Example Setup:**
-
-```bash
-# Create manual test files
-mkdir -p tests/manual
-echo "5 3" > tests/manual/sample1.txt
-echo "10 7" > tests/manual/sample2.txt
-```
-
-```json
-{
-  "commands": [
-    {
-      "type": "manual",
-      "manualFile": "./tests/manual/sample1.txt",
-      "group": "samples"
-    },
-    {
-      "type": "manual",
-      "manualFile": "./tests/manual/sample2.txt",
-      "group": "samples"
-    }
-  ]
-}
-```
-
-**Result:**
-
-- `testsets/tests/test1.txt` (contains: `5 3`)
-- `testsets/tests/test2.txt` (contains: `10 7`)
-
-**Important:**
-
-- File must exist before running `polyman generate`
-- Use relative paths from `Config.json` location
-- Test index is assigned sequentially if not specified
-
----
-
-**2. Single Generator Call**
-
-Executes a generator once with a specific parameter.
-
-```json
-{
-  "type": "generator", // Required: Command type
-  "generator": "gen-random", // Required: Generator name (must be defined in generators)
-  "range": [42, 42], // Required: [start, end] inclusive range (same value for single call)
-  "group": "main" // Required if groupsEnabled: true
-}
-```
-
-**What Happens:**
-
-1. Polyman compiles the generator (e.g., `gen-random.cpp`)
-2. Runs: `./gen-random 42`
-3. Captures the output
-4. Saves to `testsets/<testset-name>/test<index>.txt`
-
-**When to Use:**
-
-- Specific test cases with known parameters
-- Tests with particular characteristics (e.g., n=1000, n=10^5)
-- When you need control over exact parameters
-
-**Example:**
-
-```json
-{
-  "commands": [
-    {
-      "type": "generator",
-      "generator": "gen-random",
-      "range": [10, 10],
-      "group": "small"
-    },
-  ]
-}
-```
-
-**Execution:**
-
-- Test 1: Runs `gen-random 10` → generates small test
-- Test 2: Runs `gen-random 1000` → generates medium test
-- Test 3: Runs `gen-random 100000` → generates large test
-
-**Generator Parameters:**
-The `number` field is passed as `argv[1]` to your generator:
-
-```cpp
-int main(int argc, char* argv[]) {
-    registerGen(argc, argv, 1);
-    int n = atoi(argv[1]);  // Receives the "number" from config
-    // Generate test with parameter n
-}
-```
-
-**Important:**
-
-- Generator must be defined in `generators` array
-- Generator must handle the parameter correctly
-- Each command creates exactly one test
-
----
-
-**3. Range Generator Calls**
-
-Executes a generator multiple times with different parameters.
-
-```json
-{
-  "type": "generator", // Required: Command type
-  "generator": "gen-random", // Required: Generator name
-  "range": [1, 100], // Required: [start, end] inclusive range
-  "group": "stress" // Required if groupsEnabled: true
-}
-```
-
-**What Happens:**
-
-1. Polyman compiles the generator
-2. Runs the generator once for each number in the range
-3. For range `[1, 100]`: runs `gen-random 1`, `gen-random 2`, ..., `gen-random 100`
-4. Creates 100 test files
-
-**When to Use:**
-
-- Generating many similar tests with varying sizes
-- Stress testing with gradual complexity increase
-- Creating comprehensive test coverage
-
-**Example:**
-
-```json
-{
-  "commands": [
-    {
-      "type": "generator",
-      "generator": "gen-random",
-      "range": [1, 10],
-      "group": "small"
-    },
-    {
-      "type": "generator",
-      "generator": "gen-random",
-      "range": [100, 1000],
-      "group": "main"
-    }
-  ]
-}
-```
-
-**Execution:**
-
-- Tests 1-10: Runs `gen-random 1`, `gen-random 2`, ..., `gen-random 10`
-- Tests 11-910: Runs `gen-random 100`, `gen-random 101`, ..., `gen-random 1000`
-- **Total:** 910 tests created
-
-**Important:**
-
-- Range is **inclusive**: `[1, 100]` generates 100 tests
-- Be careful with large ranges (can create many files)
-- Tests are numbered sequentially across all commands
-
-**Advanced Usage:**
-
-```json
-{
-  "commands": [
-    // Manual samples
-    {
-      "type": "manual",
-      "manualFile": "./tests/manual/sample1.txt",
-      "group": "samples"
-    },
-    {
-      "type": "manual",
-      "manualFile": "./tests/manual/sample2.txt",
-      "group": "samples"
-    },
-    {
-      "type": "generator",
-      "generator": "gen-random",
-      "range": [1, 10],
-      "group": "small"
-    },
-    {
-      "type": "generator",
-      "generator": "gen-random",
-      "range": [10000, 10050],
-      "group": "stress"
-    }
-  ]
-}
-```
-
-**Result:**
-
-- Tests 1-2: Manual samples
-- Tests 3-12: Small generated tests (n=1 to n=10)
-- Tests 13-14: Specific tests (n=100, n=1000)
-- Tests 15-115: Stress tests (n=10000 to n=10100)
-- **Total:** 115 tests
+The `output` field is optional and round-trips with Polygon. Locally, polyman still runs the `MA` solution to derive the canonical answer during `verify` — the `.out` file is bookkeeping that survives cleanly across `pull`/`push`.
 
 ---
 
 #### Test Numbering and Indexing
 
-**Automatic Numbering:**
-Tests are numbered sequentially starting from 1:
+Indices are explicit and Polygon-faithful. Whatever you write after `>` is the test number. `$` resolves to the smallest positive integer not already claimed.
 
-```json
-{
-  "commands": [
-    { "type": "manual", "manualFile": "./tests/manual/sample1.txt" }, // test1.txt
-    { "type": "manual", "manualFile": "./tests/manual/sample2.txt" }, // test2.txt
-    { "type": "generator", "generator": "gen", "range": [1, 3] } // test4.txt, test5.txt, test6.txt
-  ]
-}
+```
+<#-- @group main -->
+gen 100 > $       # → test1.txt   ($ picked 1)
+gen 200 > $       # → test2.txt   ($ picked 2)
+gen 999 > 50      # → test50.txt  (explicit)
+gen 333 > $       # → test3.txt   ($ skips 50, picks the smallest open slot)
 ```
 
-**Manual Index Assignment:**
-You can specify the test number explicitly for manual tests:
+Combined with `manualTests`:
 
 ```json
-{
-  "commands": [
-    {
-      "type": "manual",
-      "manualFile": "./tests/manual/sample1.txt"
-    },
-    {
-      "type": "manual",
-      "manualFile": "./tests/manual/special.txt"
-    }
-  ]
-}
+"manualTests": [
+  { "input": "./manual/tests/m-01.in", "index": 1 },
+  { "input": "./manual/tests/m-02.in", "index": 2 }
+]
 ```
 
-**⚠️ Note:** Manual index assignment is primarily for manual tests. Generator commands use automatic numbering.
+```
+gen 1 > $   # → test3.txt  (1 and 2 are taken by manuals)
+gen 2 > $   # → test4.txt
+```
 
 ---
 
@@ -831,23 +670,20 @@ You can specify the test number explicitly for manual tests:
 
 ```json
 {
-  "testsets": [
-    {
-      "name": "tests",
-      "groupsEnabled": false,
-      "generatorScript": {
-        "commands": [
-          { "type": "manual", "manualFile": "./tests/manual/sample1.txt" },
-          { "type": "manual", "manualFile": "./tests/manual/sample2.txt" },
-          { "type": "generator", "generator": "gen", "range": [1, 50] }
-        ]
-      }
-    }
-  ]
+  "testsets": [{
+    "name": "tests",
+    "generatorScript": {
+      "script": "<#list 1..50 as i>\ngen ${i} > $\n</#list>"
+    },
+    "manualTests": [
+      { "input": "./manual/tests/m-01-sample.in", "index": 1 },
+      { "input": "./manual/tests/m-02-sample.in", "index": 2 }
+    ]
+  }]
 }
 ```
 
-**Result:** 52 tests (2 manual + 50 generated)
+**Result:** 52 tests (2 manual + 50 generated).
 
 ---
 
@@ -855,44 +691,36 @@ You can specify the test number explicitly for manual tests:
 
 ```json
 {
-  "testsets": [
-    {
-      "name": "tests",
-      "groupsEnabled": true,
-      "groups": [{ "name": "samples" }, { "name": "main" }, { "name": "edge" }],
-      "generatorScript": {
-        "commands": [
-          // Samples
-          {
-            "type": "manual",
-            "manualFile": "./tests/manual/sample1.txt",
-            "group": "samples"
-          },
-          {
-            "type": "manual",
-            "manualFile": "./tests/manual/sample2.txt",
-            "group": "samples"
-          },
-
-          // Main tests
-          {
-            "type": "generator",
-            "generator": "gen-random",
-            "range": [10, 100],
-            "group": "main"
-          },
-        ]
-      }
-    }
-  ]
+  "testsets": [{
+    "name": "tests",
+    "groupsEnabled": true,
+    "groups": [{ "name": "samples" }, { "name": "main" }, { "name": "edge" }],
+    "generatorScript": {
+      "scriptFile": "./generators/gen-script.txt"
+    },
+    "manualTests": [
+      { "input": "./manual/tests/m-01-sample.in", "index": 1,
+        "group": "samples", "useInStatements": true },
+      { "input": "./manual/tests/m-02-sample.in", "index": 2,
+        "group": "samples", "useInStatements": true }
+    ]
+  }]
 }
 ```
 
-**Result:** 95 tests
+```
+# generators/gen-script.txt
+<#-- @group main -->
+<#list 1..91 as i>
+gen-random ${i} > $
+</#list>
 
-- 2 samples
-- 91 main tests (n=10 to n=100)
-- 2 edge tests (n=1, n=100000)
+<#-- @group edge -->
+gen-edge tiny > $
+gen-edge huge > $
+```
+
+**Result:** 95 tests — 2 samples (manual), 91 main, 2 edge.
 
 ---
 
@@ -900,127 +728,42 @@ You can specify the test number explicitly for manual tests:
 
 **✅ Do's:**
 
-1. **Always include sample tests**
-   - Use manual tests for samples shown in problem statement
-   - Place in separate "samples" group
-   - 2-3 samples are typical
-
-2. **Use meaningful group names**
-
-   ```json
-   {"name": "samples"}      // ✅ Clear
-   {"name": "edge-cases"}   // ✅ Descriptive
-   {"name": "group1"}       // ❌ Not descriptive
-   ```
-
-3. **Order tests logically**
-   - Start with manual samples
-   - Progress from small to large
-   - End with stress tests
-
-4. **Validate generated tests**
-
+1. **Always include sample tests** — manual entries with `group: "samples"` and `useInStatements: true`.
+2. **Use meaningful group names** — `samples`, `edge-cases`, `stress` beats `group1`.
+3. **Order tests logically** in the script — small to large reads better in the Polygon UI.
+4. **Validate after generating**:
    ```bash
    polyman generate --testset tests
    polyman validate --all
    ```
-
-5. **Use range for many similar tests**
-
-   ```json
-   // ✅ Good: One command for 100 tests
-   {"type": "generator", "generator": "gen", "range": [1, 100]}
-
-    // ❌ Bad: 100 separate commands
-    {"type": "generator", "generator": "gen", "range": [1, 1]}
-    {"type": "generator", "generator": "gen", "range": [2, 2]}
-   // ... (98 more)
-   ```
+5. **Use `<#list>` for many similar tests** — one block instead of 100 lines.
 
 **❌ Don'ts:**
 
-1. **Don't forget to define groups**
-
-   ```json
-   {
-     "groupsEnabled": true,
-     "groups": [], // ❌ Empty groups array
-     "generatorScript": {
-       "commands": [
-         { "type": "manual", "manualFile": "./test.txt", "group": "samples" } // ❌ "samples" not defined
-       ]
-     }
-   }
-   ```
-
-2. **Don't use undefined groups**
-
-   ```json
-   {
-     "groups": [{ "name": "samples" }],
-     "generatorScript": {
-       "commands": [
-         { "type": "manual", "manualFile": "./test.txt", "group": "main" } // ❌ "main" not defined
-       ]
-     }
-   }
-   ```
-
-3. **Don't create too many tests**
-   - Be mindful of range sizes
-   - `[1, 10000]` creates 10,000 tests!
-   - Consider if you really need that many
-
-4. **Don't mix group modes**
-
-   ```json
-   // ❌ Bad: groupsEnabled: true but no groups in commands
-   {
-     "groupsEnabled": true,
-     "groups": [{ "name": "main" }],
-     "generatorScript": {
-       "commands": [
-         { "type": "manual", "manualFile": "./test.txt" } // ❌ Missing "group" field
-       ]
-     }
-   }
-   ```
-
-5. **Don't use missing manual files**
-   - Create manual test files before running generate
-   - Use correct relative paths
-   - Verify files exist
+1. **Don't put generator extensions in the script** — `gen.exe 1 > $` is rejected. Use `gen 1 > $`.
+2. **Don't reuse an index across script + manuals** — duplicates are an error.
+3. **Don't put manual entries inside the script** — they belong in `manualTests[]`. The script is uploaded verbatim to Polygon, which already handles manual tests through a separate channel.
+4. **Don't reference an undefined group** without adding it to `groups[]`.
 
 **⚠️ Common Mistakes:**
 
-```json
-// ❌ Wrong: Generator not defined
-{
-  "generators": [
-    {"name": "gen-random", "source": "./generators/random.cpp"}
-  ],
-  "testsets": [{
-    "generatorScript": {
-      "commands": [
-        {"type": "generator", "generator": "gen-wrong", "range": [10, 10]}  // ❌ "gen-wrong" doesn't exist
-      ]
-    }
-  }]
-}
+```
+# ❌ Wrong: extension in generator name
+gen.exe 1 > $
 
-// ✅ Correct: Use defined generator
-{
-  "generators": [
-    {"name": "gen-random", "source": "./generators/random.cpp"}
-  ],
-  "testsets": [{
-    "generatorScript": {
-      "commands": [
-        {"type": "generator", "generator": "gen-random", "range": [10, 10]}  // ✅ Matches defined generator
-      ]
-    }
-  }]
-}
+# ✅ Correct
+gen 1 > $
+
+# ❌ Wrong: same index claimed twice
+gen 1 > 5
+gen 2 > 5
+
+# ✅ Correct
+gen 1 > 5
+gen 2 > 6
+# or
+gen 1 > $
+gen 2 > $
 ```
 
 ---
@@ -1495,36 +1238,36 @@ polyman run main --all
 Create manual test files in `tests/manual/`:
 
 ```
-tests/manual/
-├── sample1.txt
-├── sample2.txt
-└── edge-case.txt
+manual/tests/
+├── m-01-sample.in
+├── m-02-sample.in
+└── m-03-edge.in
 ```
 
 Reference in Config.json:
 
 ```json
-{
-  "type": "manual",
-  "manualFile": "./tests/manual/sample1.txt",
-  "group": "samples"
-}
+"manualTests": [
+  { "input": "./manual/tests/m-01-sample.in", "index": 1,
+    "group": "samples", "useInStatements": true }
+]
 ```
 
 ### Generated Tests
 
-Use generator commands:
+Use the Polygon-format script. A single explicit call:
 
-```json
-{
-  "type": "generator",
-  "generator": "gen-random",
-  "range": [42, 42],
-  "group": "main"
-}
+```
+gen-random 42 > $
 ```
 
-This calls: `gen-random 42`
+A loop (FreeMarker `<#list>`):
+
+```
+<#list 1..10 as i>
+gen-random ${i} > $
+</#list>
+```
 
 ### Test Organization
 
@@ -2371,10 +2114,10 @@ problem/
 │   ├── main.cpp
 │   ├── wa.cpp
 │   └── tle.py
-└── tests/
-    └── manual/
-        ├── sample1.txt
-        └── sample2.txt
+└── manual/
+    └── tests/
+        ├── m-01-sample.in
+        └── m-02-sample.in
 ```
 
 ### 2. Configuration Management
@@ -2609,13 +2352,13 @@ Solution tle-solution marked as TL but did not timeout
 **Problem:** Manual test file not found
 
 ```
-Error: Cannot read manual file: ./tests/manual/sample1.txt
+Error: Manual test input not found: ./manual/tests/m-01-sample.in
 ```
 
 **Solution:**
 
-- Create the directory: `mkdir -p tests/manual`
-- Verify file path in Config.json is correct
+- Create the directory: `mkdir -p manual/tests`
+- Verify the `input` path in `manualTests[]` matches an `m-*.in` file on disk.
 - Use relative path from Config.json location
 
 ---
@@ -2887,7 +2630,7 @@ Each directory is independent. Use separate `Config.json` for each problem.
 1. **Run on samples manually:**
 
    ```bash
-   ./solution < tests/manual/sample1.txt
+   ./solution < manual/tests/m-01-sample.in
    ```
 
 2. **Run specific test:**

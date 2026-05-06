@@ -2,15 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as testset from '../../src/helpers/testset';
 import * as generator from '../../src/helpers/generator';
 import * as utils from '../../src/helpers/utils';
-import { LocalTestset, GeneratorScriptCommand } from '../../src/types';
+import { LocalTestset } from '../../src/types';
 
 vi.mock('../../src/helpers/generator');
 vi.mock('../../src/helpers/utils');
 vi.mock('fs');
 vi.mock('../../src/formatter');
-vi.mock('../../src/helpers/script-parser', () => ({
-  validateGeneratorCommands: vi.fn(),
-}));
 
 describe('testset.ts', () => {
   beforeEach(() => {
@@ -38,7 +35,7 @@ describe('testset.ts', () => {
 
   describe('findTestset', () => {
     const testsets: LocalTestset[] = [
-      { name: 'main', generatorScript: { commands: [] } },
+      { name: 'main', generatorScript: { script: '' } },
     ];
 
     it('should find testset by name', () => {
@@ -52,195 +49,189 @@ describe('testset.ts', () => {
     });
   });
 
-  describe('getGeneratorCommands', () => {
-    it('should return commands if present', () => {
-      const commands: GeneratorScriptCommand[] = [
-        { type: 'manual', manualFile: 'gen' },
-      ];
-      const ts: LocalTestset = {
-        name: 'ts1',
-        generatorScript: { commands },
-      };
-      expect(testset.getGeneratorCommands(ts)).toEqual(commands);
+  describe('getTestIndicesForGroup', () => {
+    const ts: LocalTestset = {
+      name: 'main',
+      generatorScript: {
+        script:
+          '<#-- @group small -->\ngen 1 > 1\ngen 2 > 2\n<#-- @group large -->\ngen 3 > 3',
+      },
+      manualTests: [{ input: './m.in', index: 5, group: 'samples' }],
+    };
+
+    it('returns indices in the named group', () => {
+      expect(testset.getTestIndicesForGroup(ts, 'small')).toEqual([1, 2]);
+      expect(testset.getTestIndicesForGroup(ts, 'large')).toEqual([3]);
+      expect(testset.getTestIndicesForGroup(ts, 'samples')).toEqual([5]);
     });
 
-    it('should throw if generatorScript is undefined', () => {
-      const ts: LocalTestset = { name: 'ts1' };
-      expect(() => testset.getGeneratorCommands(ts)).toThrow(
-        /has no generator script defined/
-      );
-    });
-
-    it('should throw if commands array is empty (and no other options)', () => {
-      const ts: LocalTestset = {
-        name: 'ts1',
-        generatorScript: { commands: [] },
-      };
-      expect(() => testset.getGeneratorCommands(ts)).toThrow(/has no commands/);
+    it('groupName "all" returns every index', () => {
+      expect(testset.getTestIndicesForGroup(ts, 'all').sort()).toEqual([
+        1, 2, 3, 5,
+      ]);
     });
   });
 
   describe('generateTestsForTestset', () => {
-    it('should generate tests successfully with default dir', async () => {
-      const mockTestset: LocalTestset = {
-        name: 'main',
-        generatorScript: {
-          commands: [{ type: 'generator', generator: 'gen', args: [] }],
-        },
-      };
+    it('uses default testsets/<name> directory', async () => {
+      vi.mocked(generator.resolveTestsetTests).mockReturnValue([]);
+      vi.mocked(generator.executeResolvedTests).mockResolvedValue();
       vi.mocked(utils.ensureDirectoryExists).mockImplementation(() => {});
-      vi.mocked(generator.executeGeneratorScript).mockResolvedValue(undefined);
-
-      await expect(
-        testset.generateTestsForTestset(mockTestset, [])
-      ).resolves.not.toThrow();
-
+      const ts: LocalTestset = {
+        name: 'main',
+        generatorScript: { script: '' },
+      };
+      await testset.generateTestsForTestset(ts, []);
       expect(utils.ensureDirectoryExists).toHaveBeenCalledWith(
         expect.stringContaining('testsets/main')
-      ); // Default
-      expect(generator.executeGeneratorScript).toHaveBeenCalled();
+      );
+      expect(generator.executeResolvedTests).toHaveBeenCalled();
     });
 
-    it('should use custom output directory', async () => {
-      const mockTestset: LocalTestset = {
+    it('honors a custom output directory', async () => {
+      vi.mocked(generator.resolveTestsetTests).mockReturnValue([]);
+      vi.mocked(generator.executeResolvedTests).mockResolvedValue();
+      vi.mocked(utils.ensureDirectoryExists).mockImplementation(() => {});
+      const ts: LocalTestset = {
         name: 'main',
-        generatorScript: { commands: [{ type: 'manual', manualFile: '' }] },
+        generatorScript: { script: '' },
       };
-      await testset.generateTestsForTestset(mockTestset, [], '/custom/path');
+      await testset.generateTestsForTestset(ts, [], '/custom/path');
       expect(utils.ensureDirectoryExists).toHaveBeenCalledWith('/custom/path');
     });
   });
 
   describe('generateSingleTest', () => {
-    const c1: GeneratorScriptCommand = { type: 'manual', manualFile: 'c1' };
-    const c2: GeneratorScriptCommand = { type: 'manual', manualFile: 'c2' };
-    const mockTestset: LocalTestset = {
-      name: 'main',
-      generatorScript: {
-        commands: [c1, c2],
-      },
-    };
+    it('runs only the resolved test with the given index', async () => {
+      vi.mocked(generator.resolveTestsetTests).mockReturnValue([
+        {
+          index: 1,
+          source: { kind: 'manual', inputFile: './a.in' },
+        },
+        {
+          index: 2,
+          source: { kind: 'manual', inputFile: './b.in' },
+        },
+      ]);
+      vi.mocked(generator.executeResolvedTests).mockResolvedValue();
 
-    it('should generate specific test index', async () => {
-      await testset.generateSingleTest(mockTestset, 2, []);
-      expect(generator.executeGeneratorScript).toHaveBeenCalledWith(
-        [c2],
+      await testset.generateSingleTest({ name: 'main' } as LocalTestset, 2, []);
+      expect(generator.executeResolvedTests).toHaveBeenCalledWith(
+        [expect.objectContaining({ index: 2 })],
         [],
         expect.anything()
       );
     });
 
-    it('should throw if index is too low', async () => {
+    it('throws when the index does not exist', async () => {
+      vi.mocked(generator.resolveTestsetTests).mockReturnValue([
+        {
+          index: 1,
+          source: { kind: 'manual', inputFile: './a.in' },
+        },
+      ]);
       await expect(
-        testset.generateSingleTest(mockTestset, 0, [])
-      ).rejects.toThrow(/Test index 0 is out of range/);
-    });
-
-    it('should throw if index is too high', async () => {
-      await expect(
-        testset.generateSingleTest(mockTestset, 3, [])
-      ).rejects.toThrow(/Test index 3 is out of range/);
+        testset.generateSingleTest({ name: 'main' } as LocalTestset, 99, [])
+      ).rejects.toThrow(/Test 99 not found/);
     });
   });
 
   describe('generateTestsForGroup', () => {
-    const c1: GeneratorScriptCommand = {
-      type: 'manual',
-      manualFile: 'c1',
-      group: 'g1',
-    };
-    const c2: GeneratorScriptCommand = {
-      type: 'manual',
-      manualFile: 'c2',
-      group: 'g2',
-    };
-    const c3: GeneratorScriptCommand = {
-      type: 'manual',
-      manualFile: 'c3',
-      group: 'g1',
-    };
-    const mockTestset: LocalTestset = {
-      name: 'main',
-      generatorScript: {
-        commands: [c1, c2, c3],
-      },
-    };
-
-    it('should generate tests for specific group', async () => {
-      await testset.generateTestsForGroup(mockTestset, 'g1', []);
-      expect(generator.executeGeneratorScript).toHaveBeenCalledWith(
-        [c1, c3],
-        [],
-        expect.anything()
+    it('passes only matching-group tests to the executor', async () => {
+      vi.mocked(generator.resolveTestsetTests).mockReturnValue([
+        {
+          index: 1,
+          source: { kind: 'manual', inputFile: './a.in' },
+          group: 'g1',
+        },
+        {
+          index: 2,
+          source: { kind: 'manual', inputFile: './b.in' },
+          group: 'g2',
+        },
+        {
+          index: 3,
+          source: { kind: 'manual', inputFile: './c.in' },
+          group: 'g1',
+        },
+      ]);
+      vi.mocked(generator.executeResolvedTests).mockResolvedValue();
+      await testset.generateTestsForGroup(
+        { name: 'main' } as LocalTestset,
+        'g1',
+        []
       );
+      const passed = vi.mocked(generator.executeResolvedTests).mock.calls[0][0];
+      expect(passed.map(t => t.index)).toEqual([1, 3]);
     });
 
-    it('should generate all tests if group is "all"', async () => {
-      await testset.generateTestsForGroup(mockTestset, 'all', []);
-      expect(generator.executeGeneratorScript).toHaveBeenCalledWith(
-        mockTestset.generatorScript!.commands,
-        [],
-        expect.anything()
+    it('groupName "all" runs every resolved test', async () => {
+      vi.mocked(generator.resolveTestsetTests).mockReturnValue([
+        {
+          index: 1,
+          source: { kind: 'manual', inputFile: './a.in' },
+        },
+        {
+          index: 2,
+          source: { kind: 'manual', inputFile: './b.in' },
+        },
+      ]);
+      vi.mocked(generator.executeResolvedTests).mockResolvedValue();
+      await testset.generateTestsForGroup(
+        { name: 'main' } as LocalTestset,
+        'all',
+        []
       );
+      const passed = vi.mocked(generator.executeResolvedTests).mock.calls[0][0];
+      expect(passed).toHaveLength(2);
     });
 
-    it('should throw if group not found', async () => {
+    it('throws when no tests match the group', async () => {
+      vi.mocked(generator.resolveTestsetTests).mockReturnValue([
+        {
+          index: 1,
+          source: { kind: 'manual', inputFile: './a.in' },
+          group: 'g1',
+        },
+      ]);
       await expect(
-        testset.generateTestsForGroup(mockTestset, 'missing', [])
+        testset.generateTestsForGroup(
+          { name: 'main' } as LocalTestset,
+          'missing',
+          []
+        )
       ).rejects.toThrow(/No tests found in group/);
     });
   });
 
   describe('generateAllTestsets', () => {
-    it('should iterate all testsets', async () => {
-      const ts1: LocalTestset = {
-        name: 'ts1',
-        generatorScript: { commands: [{ type: 'manual' }] },
-      };
-      const ts2: LocalTestset = {
-        name: 'ts2',
-        generatorScript: { commands: [{ type: 'manual' }] },
-      };
-
+    it('iterates every testset', async () => {
+      vi.mocked(generator.resolveTestsetTests).mockReturnValue([]);
+      vi.mocked(generator.executeResolvedTests).mockResolvedValue();
+      const ts1: LocalTestset = { name: 'a', generatorScript: { script: '' } };
+      const ts2: LocalTestset = { name: 'b', generatorScript: { script: '' } };
       await testset.generateAllTestsets([ts1, ts2], []);
-      expect(generator.executeGeneratorScript).toHaveBeenCalledTimes(2);
-    });
-
-    it('should handle errors in individual testsets', async () => {
-      // generatorScript explicitly undefined will throw inside getGeneratorCommands
-      const ts1: LocalTestset = { name: 'ts1' };
-      vi.mocked(utils.throwError).mockImplementation(
-        (_err: unknown, msg?: string): never => {
-          throw new Error(msg);
-        }
-      );
-
-      await expect(testset.generateAllTestsets([ts1], [])).rejects.toThrow(
-        /Failed to generate testset "ts1"/
-      );
+      expect(generator.executeResolvedTests).toHaveBeenCalledTimes(2);
     });
   });
 
   describe('listTestsets', () => {
-    it('should list testsets with info', () => {
+    it('reports test count and group names', () => {
       const ts: LocalTestset = {
         name: 'ts1',
-        generatorScript: {
-          commands: [{ type: 'manual' }, { type: 'manual' }],
-        },
+        generatorScript: { script: 'gen 1 > 1\ngen 2 > 2' },
         groups: [{ name: 'g1' }],
       };
-
-      const result = testset.listTestsets([ts]);
-      expect(result[0]).toContain('ts1: 2 tests');
-      expect(result[0]).toContain('groups: g1');
+      const out = testset.listTestsets([ts])[0];
+      expect(out).toContain('ts1: 2 tests');
+      expect(out).toContain('groups: g1');
     });
 
-    it('should handle missing scripts/groups', () => {
+    it('handles testsets with no script and no groups', () => {
       const ts: LocalTestset = { name: 'ts1' };
-      const result = testset.listTestsets([ts]);
-      expect(result[0]).toContain('ts1: 0 tests');
-      expect(result[0]).toContain('groups: none');
+      const out = testset.listTestsets([ts])[0];
+      expect(out).toContain('ts1: 0 tests');
+      expect(out).toContain('groups: none');
     });
   });
 });

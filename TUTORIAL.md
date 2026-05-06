@@ -329,14 +329,7 @@ The `Config.json` file tells Polyman about your problem. Open it and update it t
     {
       "name": "tests",
       "generatorScript": {
-        "commands": [
-          {
-            "type": "generator",
-            "generator": "gen",
-            "range": [1, 10],
-            "group": "main"
-          }
-        ]
+        "script": "<#-- @group main -->\n<#list 1..10 as i>\ngen ${i} > $\n</#list>"
       },
       "groupsEnabled": true,
       "groups": [
@@ -478,7 +471,7 @@ Create the directory structure first:
 mkdir -p manual/tests
 ```
 
-Create file `manual/tests/sample1.txt`:
+Create file `manual/tests/m-01-sample.in`:
 
 ```
 3 5
@@ -488,7 +481,7 @@ This is a simple case with small numbers.
 
 ### Sample Test 2
 
-Create file `manual/tests/sample2.txt`:
+Create file `manual/tests/m-02-sample.in`:
 
 ```
 1000 1000
@@ -521,35 +514,26 @@ Update the `testsets` section in `Config.json`:
   {
     "name": "tests",
     "generatorScript": {
-      "commands": [
-        {
-          "useInStatements": true,
-          "type": "manual",
-          "manualFile": "./manual/tests/sample1.txt",
-          "group": "samples"
-        },
-        {
-          "useInStatements": true,
-          "type": "manual",
-          "manualFile": "./manual/tests/sample2.txt",
-          "group": "samples"
-        },
-        {
-          "type": "generator",
-          "generator": "gen",
-          "range": [3, 12],
-          "group": "main"
-        }
-      ]
+      "script": "<#-- @group main -->\n<#list 3..12 as i>\ngen ${i} > $\n</#list>"
     },
-    "groupsEnabled": true,
-    "groups": [
+    "manualTests": [
       {
-        "name": "samples"
+        "input": "./manual/tests/m-01-sample.in",
+        "index": 1,
+        "group": "samples",
+        "useInStatements": true
       },
       {
-        "name": "main"
+        "input": "./manual/tests/m-02-sample.in",
+        "index": 2,
+        "group": "samples",
+        "useInStatements": true
       }
+    ],
+    "groupsEnabled": true,
+    "groups": [
+      { "name": "samples" },
+      { "name": "main" }
     ]
   }
 ]
@@ -557,23 +541,22 @@ Update the `testsets` section in `Config.json`:
 
 **What changed?**
 
-1. **Manual tests (samples):** These are our sample tests we created manually
-   - `"type": "manual"` means we wrote these ourselves
-   - `"manualFile": "./manual/tests/sample1.txt"` points to the actual file
-   - `"useInStatements": true` means these will be shown in the problem statement
-   - `"group": "samples"` puts them in the samples group
-   - We have two manual test commands, one for each sample
+1. **Manual tests** live in `manualTests[]`, separate from the generator script:
+   - `input` points to the on-disk file (`m-<NN>[-label].in` convention).
+   - `index` is the explicit Polygon test number — manuals reserve 1 and 2.
+   - `useInStatements: true` makes Polygon embed them under the statement.
+   - `group: "samples"` tags them.
 
-2. **Generated tests (3-12):** These will be created by the generator
-   - `"type": "generator"` means use a generator
-   - `"range": [3, 12]` means generate tests 3 through 12 (10 tests)
-   - `"group": "main"` puts them in the main group
+2. **Generated tests** are produced by the inline Polygon-format script:
+   - `<#-- @group main -->` tags every following line with the `main` group.
+   - `<#list 3..12 as i>` expands into ten lines, each running `gen ${i} > $`.
+   - `> $` resolves to the smallest unused index. Since 1 and 2 are taken by the manuals, generated tests fill 3–12.
 
 So now we have:
 
-- 2 sample tests (manual, shown in statements)
-- 10 generated tests (random, hidden)
-- Total: 12 tests
+- 2 sample tests (manual, shown in statements) — indices 1 and 2.
+- 10 generated tests (random, hidden) — indices 3–12.
+- Total: 12 tests.
 
 ---
 
@@ -633,14 +616,14 @@ This will:
 You can look at the generated tests:
 
 ```bash
-cat manual/tests/sample1.txt
+cat manual/tests/m-01-sample.in
 cat testsets/tests/test5.txt
 cat testsets/tests/test12.txt
 ```
 
 You should see:
 
-- sample1.txt: `3 5` (our manual sample)
+- m-01-sample.in: `3 5` (our manual sample)
 - test5.txt and test12.txt: random pairs of numbers
 
 ### Validate Tests

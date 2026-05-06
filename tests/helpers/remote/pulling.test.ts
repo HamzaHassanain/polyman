@@ -633,7 +633,7 @@ describe('pulling.ts', () => {
   });
 
   describe('downloadTestsetAndBuildGenerationScripts', () => {
-    it('should build testset with manual tests and generator commands', async () => {
+    it('builds testset with manual tests + verbatim script', async () => {
       mockSdk.getTests.mockResolvedValue([
         {
           index: 1,
@@ -643,14 +643,10 @@ describe('pulling.ts', () => {
           group: 'g1',
           points: 10,
         },
-        {
-          index: 2,
-          manual: false,
-          useInStatements: false,
-        },
+        { index: 2, manual: false, useInStatements: false },
       ]);
       mockSdk.getScript.mockResolvedValue(
-        '<#list 1..3 as s> gen ${s} > $ </#list>'
+        '<#list 1..3 as s>\ngen ${s} > $\n</#list>'
       );
 
       const result = await pulling.downloadTestsetAndBuildGenerationScripts(
@@ -663,27 +659,23 @@ describe('pulling.ts', () => {
 
       expect(result.manualCount).toBe(1);
       expect(result.testset.name).toBe('tests');
-      expect(result.testset.generatorScript?.commands).toHaveLength(2);
-      const cmds = result.testset.generatorScript!.commands!;
-      expect(cmds[0]).toMatchObject({
-        type: 'manual',
-        manualFile: './manual/tests/test1.txt',
-        useInStatements: true,
+      expect(result.testset.generatorScript?.script).toContain(
+        '<#list 1..3 as s>'
+      );
+      expect(result.testset.manualTests).toHaveLength(1);
+      expect(result.testset.manualTests![0]).toMatchObject({
+        input: './manual/tests/m-01.in',
+        index: 1,
         group: 'g1',
         points: 10,
-      });
-      expect(cmds[1]).toMatchObject({
-        type: 'generator',
-        generator: 'GenName',
-        range: [1, 3],
-        useInStatements: false,
+        useInStatements: true,
       });
       expect(result.testset.groupsEnabled).toBe(true);
       expect(result.testset.groups).toEqual([{ name: 'g1' }]);
       expect(result.testset.pointsEnabled).toBe(true);
     });
 
-    it('should not create directories that already exist', async () => {
+    it('does not create directories that already exist', async () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
       mockSdk.getTests.mockResolvedValue([]);
       mockSdk.getScript.mockResolvedValue('');
@@ -699,11 +691,11 @@ describe('pulling.ts', () => {
       expect(fs.mkdirSync).not.toHaveBeenCalled();
     });
 
-    it('should not enable groups or points when not present', async () => {
+    it('does not enable groups or points when not present', async () => {
       mockSdk.getTests.mockResolvedValue([
         { index: 1, manual: false, useInStatements: false },
       ]);
-      mockSdk.getScript.mockResolvedValue('');
+      mockSdk.getScript.mockResolvedValue('gen 1 > $');
 
       const result = await pulling.downloadTestsetAndBuildGenerationScripts(
         asSdk(mockSdk),
@@ -715,17 +707,13 @@ describe('pulling.ts', () => {
 
       expect(result.testset.groupsEnabled).toBeUndefined();
       expect(result.testset.pointsEnabled).toBeUndefined();
-      expect(result.testset.generatorScript?.commands).toEqual([]);
+      expect(result.testset.manualTests).toBeUndefined();
+      expect(result.testset.generatorScript?.script).toBe('gen 1 > $');
     });
 
-    it('should handle manual tests without group or points', async () => {
+    it('handles manual tests without group or points', async () => {
       mockSdk.getTests.mockResolvedValue([
-        {
-          index: 1,
-          manual: true,
-          input: 'data',
-          useInStatements: false,
-        },
+        { index: 1, manual: true, input: 'data', useInStatements: false },
       ]);
       mockSdk.getScript.mockResolvedValue('');
 
@@ -738,12 +726,13 @@ describe('pulling.ts', () => {
       );
 
       expect(result.manualCount).toBe(1);
-      const cmd = result.testset.generatorScript!.commands![0];
-      expect(cmd.group).toBeUndefined();
-      expect(cmd.points).toBeUndefined();
+      const m = result.testset.manualTests![0];
+      expect(m.group).toBeUndefined();
+      expect(m.points).toBeUndefined();
+      expect(m.useInStatements).toBeUndefined();
     });
 
-    it('should skip manual tests that have no input', async () => {
+    it('skips manual tests that have no input', async () => {
       mockSdk.getTests.mockResolvedValue([
         { index: 1, manual: true, useInStatements: false },
       ]);
@@ -758,14 +747,14 @@ describe('pulling.ts', () => {
       );
 
       expect(result.manualCount).toBe(0);
-      expect(result.testset.generatorScript?.commands).toEqual([]);
+      expect(result.testset.manualTests).toBeUndefined();
     });
 
-    it('should resolve generator names case-insensitively when not in map', async () => {
+    it('stores the script text verbatim regardless of contents', async () => {
       mockSdk.getTests.mockResolvedValue([]);
-      mockSdk.getScript.mockResolvedValue(
-        '<#list 1..2 as s> GEN ${s} > $ </#list>'
-      );
+      const verbatim =
+        '<#-- @group main -->\n<#list 1..2 as s>\nGEN ${s} > $\n</#list>';
+      mockSdk.getScript.mockResolvedValue(verbatim);
 
       const result = await pulling.downloadTestsetAndBuildGenerationScripts(
         asSdk(mockSdk),
@@ -775,20 +764,14 @@ describe('pulling.ts', () => {
         [{ name: 'genCanonical', source: './generators/gen.cpp' }]
       );
 
-      const cmds = result.testset.generatorScript!.commands!;
-      expect(cmds).toHaveLength(1);
-      expect(cmds[0]).toMatchObject({
-        type: 'generator',
-        generator: 'genCanonical',
-        range: [1, 2],
-      });
+      expect(result.testset.generatorScript?.script).toBe(verbatim);
+      expect(result.testset.manualTests).toBeUndefined();
     });
 
-    it('should fall back to raw generator name when not in map at all', async () => {
+    it('stores unrecognized generator-name scripts unchanged', async () => {
       mockSdk.getTests.mockResolvedValue([]);
-      mockSdk.getScript.mockResolvedValue(
-        '<#list 5..7 as s> unknownGen ${s} > $ </#list>'
-      );
+      const verbatim = 'unknownGen 5 > 5\nunknownGen 6 > 6\nunknownGen 7 > 7';
+      mockSdk.getScript.mockResolvedValue(verbatim);
 
       const result = await pulling.downloadTestsetAndBuildGenerationScripts(
         asSdk(mockSdk),
@@ -798,17 +781,13 @@ describe('pulling.ts', () => {
         []
       );
 
-      const cmds = result.testset.generatorScript!.commands!;
-      expect(cmds).toHaveLength(1);
-      expect(cmds[0].generator).toBe('unknownGen');
-      expect(cmds[0].range).toEqual([5, 7]);
+      expect(result.testset.generatorScript?.script).toBe(verbatim);
     });
 
-    it('should skip list ranges with non-numeric bounds', async () => {
+    it('keeps non-numeric <#list> bounds in the script verbatim', async () => {
       mockSdk.getTests.mockResolvedValue([]);
-      mockSdk.getScript.mockResolvedValue(
-        '<#list a..b as s> gen ${s} > $ </#list>'
-      );
+      const verbatim = '<#list a..b as s> gen ${s} > $ </#list>';
+      mockSdk.getScript.mockResolvedValue(verbatim);
 
       const result = await pulling.downloadTestsetAndBuildGenerationScripts(
         asSdk(mockSdk),
@@ -818,10 +797,10 @@ describe('pulling.ts', () => {
         []
       );
 
-      expect(result.testset.generatorScript?.commands).toEqual([]);
+      expect(result.testset.generatorScript?.script).toBe(verbatim);
     });
 
-    it('should handle generators with empty source filename gracefully', async () => {
+    it('returns an empty script when Polygon returns empty', async () => {
       mockSdk.getTests.mockResolvedValue([]);
       mockSdk.getScript.mockResolvedValue('');
 
@@ -833,10 +812,10 @@ describe('pulling.ts', () => {
         [{ name: 'g', source: '' }]
       );
 
-      expect(result.testset.generatorScript?.commands).toEqual([]);
+      expect(result.testset.generatorScript?.script).toBe('');
     });
 
-    it('should normalize CRLF in manual test inputs to LF', async () => {
+    it('normalizes CRLF in manual test inputs to LF', async () => {
       mockSdk.getTests.mockResolvedValue([
         {
           index: 1,
@@ -857,7 +836,7 @@ describe('pulling.ts', () => {
 
       const writeCalls = vi.mocked(fs.writeFileSync).mock.calls;
       const manualWrite = writeCalls.find(c =>
-        String(c[0]).includes('test1.txt')
+        String(c[0]).includes('m-01.in')
       );
       expect(manualWrite).toBeDefined();
       expect(manualWrite![1]).toBe('line1\nline2\n');

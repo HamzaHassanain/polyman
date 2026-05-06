@@ -24,7 +24,7 @@ import {
 import { fmt } from '../formatter';
 import { ensureCheckerExists, runChecker } from './checker';
 import type { LocalChecker } from '../types';
-import { getGeneratorCommands } from './testset';
+import { getTestIndicesForGroup } from './testset';
 
 /**
  * Ensures solutions are defined in configuration.
@@ -398,37 +398,32 @@ export async function runSolutionOnGroup(
     const compiledPath = getCompiledCommandToRun(solution);
     ensureOutputDirectory(solution.name, testset.name);
 
-    const commands = getGeneratorCommands(testset);
-    const groupCommands = commands.filter(cmd => cmd.group === groupName);
+    const groupIndices = getTestIndicesForGroup(testset, groupName);
 
-    if (groupCommands.length === 0) {
+    if (groupIndices.length === 0) {
       throw new Error(
         `No tests found for group "${groupName}" in testset "${testset.name}"`
       );
     }
 
-    let testIndex = 1;
-    for (const cmd of commands) {
-      if (cmd.group === groupName) {
-        const testFile = `test${testIndex}.txt`;
-        try {
-          await runSolution(
-            solution,
-            compiledPath,
-            config.timeLimit,
-            config.memoryLimit,
-            testFile,
-            testset.name
-          );
-        } catch (error) {
-          const message =
-            error instanceof Error
-              ? error.message + ` (test: ${testFile})`
-              : String(error);
-          thrownErrors.add(message);
-        }
+    for (const idx of groupIndices) {
+      const testFile = `test${idx}.txt`;
+      try {
+        await runSolution(
+          solution,
+          compiledPath,
+          config.timeLimit,
+          config.memoryLimit,
+          testFile,
+          testset.name
+        );
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message + ` (test: ${testFile})`
+            : String(error);
+        thrownErrors.add(message);
       }
-      testIndex++;
       if (thrownErrors.size > 0) {
         break;
       }

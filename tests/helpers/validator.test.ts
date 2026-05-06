@@ -8,11 +8,7 @@ import { fmt } from '../../src/formatter';
 import fs from 'fs';
 import path from 'path';
 import type ConfigFile from '../../src/types';
-import type {
-  LocalValidator,
-  LocalTestset,
-  GeneratorScriptCommand,
-} from '../../src/types';
+import type { LocalValidator, LocalTestset } from '../../src/types';
 
 vi.mock('fs');
 vi.mock('path');
@@ -61,7 +57,8 @@ const mockedReadConfigFile = mockedUtils['readConfigFile'];
 const mockedEnsureDirectoryExists = mockedUtils['ensureDirectoryExists'];
 const mockedRemoveDirectoryRecursively =
   mockedUtils['removeDirectoryRecursively'];
-const mockedGetGeneratorCommands = mockedTestsetHelper['getGeneratorCommands'];
+const mockedGetTestIndicesForGroup =
+  mockedTestsetHelper['getTestIndicesForGroup'];
 const mockedFmtError = mockedFmt['error'];
 const mockedFmtWarning = mockedFmt['warning'];
 
@@ -378,11 +375,7 @@ describe('validator.ts', () => {
       };
       mockedGetCompiledCommandToRun.mockReturnValue('./val');
       mockedExistsSync.mockReturnValue(true);
-      const commands: GeneratorScriptCommand[] = [
-        { type: 'generator', generator: 'gen', group: 'samples' },
-        { type: 'generator', generator: 'gen', group: 'other' },
-      ];
-      mockedGetGeneratorCommands.mockReturnValue(commands);
+      mockedGetTestIndicesForGroup.mockReturnValue([1]);
       mockedExecuteWithRedirect.mockResolvedValue(SUCCESS_RESULT);
       mockedCleanup.mockResolvedValue();
 
@@ -413,10 +406,7 @@ describe('validator.ts', () => {
       const mockTestset: LocalTestset = { name: 'testsets', groups: [] };
       mockedGetCompiledCommandToRun.mockReturnValue('./val');
       mockedExistsSync.mockReturnValue(true);
-      const commands: GeneratorScriptCommand[] = [
-        { type: 'generator', generator: 'gen', group: 'other' },
-      ];
-      mockedGetGeneratorCommands.mockReturnValue(commands);
+      mockedGetTestIndicesForGroup.mockReturnValue([]);
       mockedThrowError.mockImplementation(rethrowImpl);
       mockedCleanup.mockResolvedValue();
 
@@ -432,15 +422,7 @@ describe('validator.ts', () => {
       const mockTestset: LocalTestset = { name: 'testsets', groups: [] };
       mockedGetCompiledCommandToRun.mockReturnValue('./val');
       mockedExistsSync.mockReturnValue(true);
-      const commands: GeneratorScriptCommand[] = [
-        {
-          type: 'generator',
-          generator: 'gen',
-          group: 'samples',
-          range: [1, 3],
-        },
-      ];
-      mockedGetGeneratorCommands.mockReturnValue(commands);
+      mockedGetTestIndicesForGroup.mockReturnValue([1, 2, 3]);
       mockedExecuteWithRedirect.mockResolvedValue(SUCCESS_RESULT);
       mockedCleanup.mockResolvedValue();
 
@@ -457,10 +439,7 @@ describe('validator.ts', () => {
       const mockTestset: LocalTestset = { name: 'testsets', groups: [] };
       mockedGetCompiledCommandToRun.mockReturnValue('./val');
       mockedExistsSync.mockReturnValue(true);
-      const commands: GeneratorScriptCommand[] = [
-        { type: 'generator', generator: 'gen', group: 'samples' },
-      ];
-      mockedGetGeneratorCommands.mockReturnValue(commands);
+      mockedGetTestIndicesForGroup.mockReturnValue([1]);
       mockedExecuteWithRedirect.mockImplementation(
         executeOnErrorThrow('Group validation error', 'Group validation error')
       );
@@ -822,20 +801,7 @@ describe('validator.ts', () => {
       const mockTestset: LocalTestset = { name: 'testsets', groups: [] };
       mockedGetCompiledCommandToRun.mockReturnValue('./val');
       mockedExistsSync.mockReturnValue(true);
-      const commands: GeneratorScriptCommand[] = [
-        {
-          type: 'generator',
-          generator: 'gen',
-          group: 'other',
-          range: [1, 5],
-        },
-        {
-          type: 'generator',
-          generator: 'gen',
-          group: 'samples',
-        },
-      ];
-      mockedGetGeneratorCommands.mockReturnValue(commands);
+      mockedGetTestIndicesForGroup.mockReturnValue([6]);
       mockedExecuteWithRedirect.mockResolvedValue(SUCCESS_RESULT);
       mockedCleanup.mockResolvedValue();
 

@@ -24,7 +24,7 @@ import {
 } from './utils';
 import { DEFAULT_TIMEOUT, DEFAULT_MEMORY_LIMIT } from './utils';
 import { fmt } from '../formatter';
-import { getGeneratorCommands } from './testset';
+import { getTestIndicesForGroup } from './testset';
 
 /**
  * Compiles the validator program.
@@ -228,41 +228,13 @@ export async function validateGroup(
       throw new Error(`Testset directory not found: ${testsDir}`);
     }
 
-    // Get commands for this testset
-    const commands = getGeneratorCommands(testset);
+    const groupIndices = getTestIndicesForGroup(testset, groupName);
 
-    // Filter commands by group and get their indices
-    const groupCommands: number[] = [];
-    let currentIndex = 1;
-
-    for (const command of commands) {
-      if (command.group === groupName) {
-        if (command.type === 'generator' && command.range) {
-          const [start, end] = command.range;
-          for (let i = start; i <= end; i++) {
-            groupCommands.push(currentIndex);
-            currentIndex++;
-          }
-        } else {
-          groupCommands.push(currentIndex);
-          currentIndex++;
-        }
-      } else {
-        // Count tests not in this group
-        if (command.type === 'generator' && command.range) {
-          const [start, end] = command.range;
-          currentIndex += end - start + 1;
-        } else {
-          currentIndex++;
-        }
-      }
-    }
-
-    if (groupCommands.length === 0) {
+    if (groupIndices.length === 0) {
       throw new Error(`No tests found in group "${groupName}"`);
     }
 
-    for (const testIndex of groupCommands) {
+    for (const testIndex of groupIndices) {
       const testFilePath = path.join(testsDir, `test${testIndex}.txt`);
       try {
         await runValidator(compiledPath, testFilePath, 'VALID');

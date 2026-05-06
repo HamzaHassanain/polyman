@@ -1,25 +1,20 @@
 /**
- * @fileoverview Testset management utilities.
- * Handles testset selection, test generation, and testset operations.
+ * @fileoverview Testset management — resolves Polygon-format scripts plus
+ * manual tests into concrete test lists, and drives generation by testset,
+ * group, or single index.
  */
 
-import type {
-  LocalTestset,
-  LocalGenerator,
-  GeneratorScriptCommand,
-} from '../types';
-import { validateGeneratorCommands } from './script-parser';
-import { executeGeneratorScript } from './generator';
+import type { LocalTestset, LocalGenerator, ResolvedTest } from '../types';
+import { executeResolvedTests, resolveTestsetTests } from './generator';
+import {
+  parseGeneratorScript,
+  readScriptText,
+  resolveTests,
+  validateManualTests,
+} from './script-parser';
 import { ensureDirectoryExists, throwError } from './utils';
 import path from 'path';
 
-/**
- * Ensures testsets are defined in configuration.
- *
- * @param {LocalTestset[] | undefined} testsets - Testsets array to validate
- *
- * @throws {Error} If no testsets are defined
- */
 export function ensureTestsetsExist(
   testsets: LocalTestset[] | undefined
 ): asserts testsets is LocalTestset[] {
@@ -28,15 +23,6 @@ export function ensureTestsetsExist(
   }
 }
 
-/**
- * Finds a testset by name.
- *
- * @param {LocalTestset[]} testsets - Available testsets
- * @param {string} name - Testset name
- * @returns {LocalTestset} Found testset
- *
- * @throws {Error} If testset not found
- */
 export function findTestset(
   testsets: LocalTestset[],
   name: string
@@ -52,74 +38,62 @@ export function findTestset(
 }
 
 /**
- * Gets generator script commands from a testset.
- * Handles all three formats: commands array, script string, and script file.
- *
- * @param {LocalTestset} testset - Testset configuration
- * @returns {GeneratorScriptCommand[]} Array of generator commands
- *
- * @throws {Error} If no generator script is defined
- * @throws {Error} If script parsing fails
+ * Resolves the full ordered test list (manual + script) for a testset.
+ * Throws on parse errors, missing files, or duplicate indices.
  */
-export function getGeneratorCommands(
-  testset: LocalTestset
-): GeneratorScriptCommand[] {
-  if (!testset.generatorScript) {
-    throw new Error(
-      `Testset "${testset.name}" has no generator script defined`
-    );
-  }
-
-  const { commands } = testset.generatorScript;
-
-  // Priority: commands > scriptFile > script
-  if (commands && commands.length > 0) {
-    return commands;
-  }
-
-  throw new Error(
-    `Testset "${testset.name}" generator script has no commands, script, or scriptFile`
-  );
+export function getResolvedTests(
+  testset: LocalTestset,
+  generators: LocalGenerator[]
+): ResolvedTest[] {
+  return resolveTestsetTests(testset, generators);
 }
 
 /**
- * Generates tests for a specific testset.
- *
- * @param {LocalTestset} testset - Testset to generate
- * @param {LocalGenerator[]} generators - Available generators
- * @param {string} [outputDir] - Custom output directory (defaults to tests/<testset-name>)
- *
- * @throws {Error} If generator script is invalid
- * @throws {Error} If test generation fails
+ * Lightweight resolver: parses script + manuals to get test indices/groups
+ * without checking that referenced generators or manual files exist on disk.
+ * Useful for filtering/validating already-on-disk tests (validate, run, …).
+ */
+export function getTestIndicesForGroup(
+  testset: LocalTestset,
+  groupName: string
+): number[] {
+  const lines = parseGeneratorScript(readScriptText(testset));
+  const manuals = testset.manualTests ?? [];
+  const tests = resolveTests(lines, manuals);
+  return tests
+    .filter(t => groupName === 'all' || t.group === groupName)
+    .map(t => t.index);
+}
+
+/**
+ * Like {@link getTestIndicesForGroup} but returns every index in the testset.
+ */
+export function getAllTestIndices(testset: LocalTestset): number[] {
+  const lines = parseGeneratorScript(readScriptText(testset));
+  const manuals = testset.manualTests ?? [];
+  return resolveTests(lines, manuals).map(t => t.index);
+}
+
+function testsetOutputDir(testsetName: string, override?: string): string {
+  return override || path.resolve(process.cwd(), 'testsets', testsetName);
+}
+
+/**
+ * Generates every test in a single testset.
  */
 export async function generateTestsForTestset(
   testset: LocalTestset,
   generators: LocalGenerator[],
   outputDir?: string
 ): Promise<void> {
-  const commands = getGeneratorCommands(testset);
-
-  const generatorNames = generators.map(g => g.name);
-  validateGeneratorCommands(commands, generatorNames);
-
-  const testsDir =
-    outputDir || path.resolve(process.cwd(), 'testsets', testset.name);
-
-  ensureDirectoryExists(testsDir);
-
-  await executeGeneratorScript(commands, generators, testsDir);
+  const tests = getResolvedTests(testset, generators);
+  const dir = testsetOutputDir(testset.name, outputDir);
+  ensureDirectoryExists(dir);
+  await executeResolvedTests(tests, generators, dir);
 }
 
 /**
- * Generates a single test by index within a testset.
- *
- * @param {LocalTestset} testset - Testset containing the test
- * @param {number} testIndex - 1-based test index
- * @param {LocalGenerator[]} generators - Available generators
- * @param {string} [outputDir] - Custom output directory
- *
- * @throws {Error} If test index is out of range
- * @throws {Error} If test generation fails
+ * Generates a single test by Polygon index.
  */
 export async function generateSingleTest(
   testset: LocalTestset,
@@ -127,37 +101,43 @@ export async function generateSingleTest(
   generators: LocalGenerator[],
   outputDir?: string
 ): Promise<void> {
-  const commands = getGeneratorCommands(testset);
-
-  if (testIndex < 1 || testIndex > commands.length) {
+  const tests = getResolvedTests(testset, generators);
+  const target = tests.find(t => t.index === testIndex);
+  if (!target) {
+    const indices = tests.map(t => t.index).join(', ');
     throw new Error(
-      `Test index ${testIndex} is out of range. Testset "${testset.name}" has ${commands.length} tests.`
+      `Test ${testIndex} not found in testset "${testset.name}". ` +
+        `Available indices: ${indices || '(none)'}`
     );
   }
+  const dir = testsetOutputDir(testset.name, outputDir);
+  ensureDirectoryExists(dir);
 
-  const generatorNames = generators.map(g => g.name);
-  validateGeneratorCommands(commands, generatorNames);
-
-  const command = commands[testIndex - 1];
-
-  const testsDir =
-    outputDir || path.resolve(process.cwd(), 'testsets', testset.name);
-
-  ensureDirectoryExists(testsDir);
-
-  await executeGeneratorScript([command], generators, testsDir);
+  // For multi-output lines we need every test that shares the same line so
+  // the generator runs exactly once and writes all promised files.
+  let toRun: ResolvedTest[] = [target];
+  if (
+    target.source.kind === 'generator' &&
+    target.source.multiOutputs !== null
+  ) {
+    const multi = target.source.multiOutputs;
+    const generatorName = target.source.generator;
+    toRun = tests.filter(t => {
+      if (t.source.kind !== 'generator') return false;
+      if (t.source.multiOutputs === null) return false;
+      if (t.source.generator !== generatorName) return false;
+      return arraysEqual(t.source.multiOutputs, multi);
+    });
+  }
+  await executeResolvedTests(toRun, generators, dir);
 }
 
 /**
- * Generates tests for a specific group within a testset.
+ * Generates every test in a named group.
  *
- * @param {LocalTestset} testset - Testset containing the group
- * @param {string} groupName - Group name
- * @param {LocalGenerator[]} generators - Available generators
- * @param {string} [outputDir] - Custom output directory
- *
- * @throws {Error} If group doesn't exist
- * @throws {Error} If test generation fails
+ * Group annotations come from the script (`<#-- @group name -->` headers) and
+ * from each manual test's `group` field. `groupName === 'all'` means every
+ * test.
  */
 export async function generateTestsForGroup(
   testset: LocalTestset,
@@ -165,41 +145,22 @@ export async function generateTestsForGroup(
   generators: LocalGenerator[],
   outputDir?: string
 ): Promise<void> {
-  const allCommands = getGeneratorCommands(testset);
-
-  // Filter commands by group
-  const groupCommands = allCommands.filter(
-    cmd => groupName === 'all' || cmd.group === groupName
+  const tests = getResolvedTests(testset, generators);
+  const filtered = tests.filter(
+    t => groupName === 'all' || t.group === groupName
   );
-
-  if (groupCommands.length === 0) {
-    const availableGroups = [
-      ...new Set(allCommands.filter(c => c.group).map(c => c.group)),
-    ];
+  if (filtered.length === 0) {
+    const groups = [...new Set(tests.map(t => t.group).filter(Boolean))];
     throw new Error(
-      `No tests found in group "${groupName}". Available groups: ${availableGroups.join(', ') || 'none'}`
+      `No tests found in group "${groupName}". ` +
+        `Available groups: ${groups.join(', ') || '(none)'}`
     );
   }
-
-  const generatorNames = generators.map(g => g.name);
-  validateGeneratorCommands(groupCommands, generatorNames);
-
-  const testsDir =
-    outputDir || path.resolve(process.cwd(), 'testsets', testset.name);
-
-  ensureDirectoryExists(testsDir);
-
-  await executeGeneratorScript(groupCommands, generators, testsDir);
+  const dir = testsetOutputDir(testset.name, outputDir);
+  ensureDirectoryExists(dir);
+  await executeResolvedTests(filtered, generators, dir);
 }
 
-/**
- * Generates tests for all testsets.
- *
- * @param {LocalTestset[]} testsets - All testsets
- * @param {LocalGenerator[]} generators - Available generators
- *
- * @throws {Error} If any testset generation fails
- */
 export async function generateAllTestsets(
   testsets: LocalTestset[],
   generators: LocalGenerator[]
@@ -214,18 +175,26 @@ export async function generateAllTestsets(
 }
 
 /**
- * Lists available testsets with their configurations.
- *
- * @param {LocalTestset[]} testsets - Testsets to list
- * @returns {string[]} Array of formatted testset descriptions
+ * One-line summary per testset for `polyman list testsets`.
  */
 export function listTestsets(testsets: LocalTestset[]): string[] {
   return testsets.map(testset => {
-    const commands = testset.generatorScript
-      ? getGeneratorCommands(testset)
-      : [];
+    let count = 0;
+    try {
+      const lines = parseGeneratorScript(readScriptText(testset));
+      const manuals = testset.manualTests ?? [];
+      validateManualTests(manuals);
+      count = resolveTests(lines, manuals).length;
+    } catch {
+      count = testset.manualTests?.length ?? 0;
+    }
     const groups = testset.groups?.map(g => g.name).join(', ') || 'none';
-
-    return `${testset.name}: ${commands.length} tests, groups: ${groups}`;
+    return `${testset.name}: ${count} tests, groups: ${groups}`;
   });
+}
+
+function arraysEqual(a: number[], b: number[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
 }
