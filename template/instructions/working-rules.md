@@ -59,6 +59,8 @@ If asked "are you an AI?", a brief honest answer is fine; don't derail.
 
 ## Useful commands
 
+The most-used set is below. Full per-command reference is in [`commands/`](./commands/index.md) — read only the file for the command you're invoking.
+
 ```bash
 polyman generate --all                          # regenerate every test
 polyman generate --testset tests --index 5      # one test
@@ -67,7 +69,7 @@ polyman run main --all                          # run a solution against every t
 polyman test validator                          # validator self-tests
 polyman test checker                            # checker self-tests
 polyman test wa-solution                        # diff a named solution against main
-polyman verify                                  # full pipeline
+polyman verify                                  # full pipeline (the bar for "done")
 polyman list solutions | generators | checkers | testsets
 
 polyman remote pull <id> .                      # sync from Polygon

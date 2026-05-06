@@ -43,7 +43,8 @@ instructions/            Per-component reference docs (read on demand).
 | **Statements** | `statements/<lang>/*.tex` | LaTeX fragments (`legend`, `input-format`, `output-format`, `notes`) per language. | [`instructions/statements.md`](./instructions/statements.md) |
 | **Manual tests** | `manual/<testset>/m-*.in` + `Config.json.testsets[].manualTests[]` | Hand-authored test inputs with explicit Polygon indices (samples + edge cases). | [`instructions/manual-tests.md`](./instructions/manual-tests.md) |
 | **C++ performance** | every C++ source on a hot path | Required standards (fast I/O, custom hash, container choice) for `MA`/`OK`/checker/validator/generator. | [`instructions/cpp-performance.md`](./instructions/cpp-performance.md) |
-| **Working rules** | covers every interaction | Three modes, always/never, voice, workflow checklist, command reference. | [`instructions/working-rules.md`](./instructions/working-rules.md) |
+| **Working rules** | covers every interaction | Three modes, always/never, voice, workflow checklist. | [`instructions/working-rules.md`](./instructions/working-rules.md) |
+| **CLI commands** | every polyman invocation | One file per top-level command (`new`, `generate`, `validate`, `run`, `test`, `verify`, `list`, `remote`, …). Read only the file for the command you're about to invoke. | [`instructions/commands/`](./instructions/commands/index.md) |
 
 ## How to use these docs
 
@@ -59,4 +60,4 @@ polyman verify              # full pipeline (the bar for "done")
 polyman list checkers       # standard checker options
 ```
 
-Full command reference is in [`instructions/working-rules.md`](./instructions/working-rules.md).
+Full per-command reference is in [`instructions/commands/`](./instructions/commands/index.md) — one file per command, read only the one you need.
