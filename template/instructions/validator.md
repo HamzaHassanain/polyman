@@ -84,6 +84,30 @@ Run `polyman test validator` after editing.
 - Don't drift from `input-format.tex`. If `n` becomes `≤ 200000` in the statement, it must become `≤ 200000` in the validator on the same edit, and `validator_tests.json` must add a boundary case.
 - Don't skip `polyman test validator` after editing.
 
-## CRLF on Windows
+## Whitespace, newlines, EOF — the part that wastes the most time
 
-`validator_tests.json` test inputs are JSON string literals. On Windows the embedded `\n` may need to be `\r\n` for the test to round-trip. Match the OS the user is on; consistent line endings prevent `INVALID` false positives.
+testlib's `inf` reader is byte-strict. Most "the validator is wrong" debugging sessions are actually whitespace mismatches. Read this before writing `validator_tests.json`.
+
+**Rules for input format and the validator that enforces it:**
+
+- Tokens on the same line are separated by **exactly one space** — call `inf.readSpace()` between them, never `inf.readSpaces()` (that one swallows trailing whitespace and weakens the contract).
+- Every line ends with **exactly one `\n`** — call `inf.readEoln()` after the last token of the line.
+- The file ends with **`\n` then EOF** — `inf.readEoln(); inf.readEof();` at the bottom of the validator.
+- **No trailing spaces** before `\n`, **no double spaces**, **no tabs**, **no CRLF**, **no BOM**.
+
+If your input format changes, the validator's `readSpace` / `readEoln` calls must change in lockstep. A multi-line input where each line has a different token count needs a `readEoln` per line, not at the end.
+
+**Authoring `validator_tests.json` cases without rage:**
+
+Embedded inputs are JSON string literals. Every byte you put into `"input"` is what testlib reads. Common pitfalls:
+
+| Intent | Wrong | Right |
+| --- | --- | --- |
+| 3 numbers, valid | `"3\n1 2 3"` | `"3\n1 2 3\n"` (trailing `\n` required by `readEof` after `readEoln`) |
+| Reject extra blank line | `"3\n1 2 3\n\n"` should be `INVALID` | mark `expectedVerdict: "INVALID"` and write `"3\n1 2 3\n\n"` |
+| Reject double space | `"3\n1  2 3\n"` should be `INVALID` | use double space deliberately and mark `INVALID` |
+| Reject trailing space | `"3\n1 2 3 \n"` should be `INVALID` | mark `INVALID` |
+
+**Required `INVALID` cases beyond value bounds:** missing trailing `\n`, extra trailing `\n`, double space, trailing space before `\n`, tab between tokens, CRLF (if you support Linux only). These are cheap to write and they keep generator output honest.
+
+**On Windows:** `\n` in JSON sometimes needs to be `\r\n` to match what `git`/editor wrote on disk. If `polyman test validator` returns `INVALID` for an obviously-valid case, run `xxd validator/validator_tests.json | head` and verify the bytes — don't change the validator first.

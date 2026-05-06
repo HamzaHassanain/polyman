@@ -100,6 +100,32 @@ Cover at minimum: one OK, one WA, one PE, and any tricky case the checker handle
 - Don't omit `checker_tests.json` for custom checkers. Without self-tests, regressions go silent.
 - Don't forget to update `checker_tests.json` when you change the checker logic — see `instructions/working-rules.md`.
 
-## CRLF on Windows
+## Whitespace, newlines, EOF — read this before writing checker tests
 
-Same as `validator_tests.json`: embedded `input` / `output` / `answer` strings may need `\r\n` on Windows. Keep line endings consistent or `polyman test checker` will produce confusing PE verdicts.
+Custom checker reads use the same byte-strict testlib API as the validator. Most "checker says PE but the answer is right" sessions are whitespace mismatches. Get this right up front.
+
+**Reading rules inside the checker:**
+
+- Use `ouf.readToken()` / `ouf.readInt()` / `ouf.readLong()` / `ouf.readDouble()`. They skip leading whitespace and stop at the next whitespace or EOF — that's the right behavior for accepting normal contestant output.
+- Don't call `ouf.readEoln()` / `ouf.readEof()` unless the problem **really** requires a strict trailing-newline format. Penalizing a contestant for a missing trailing `\n` is hostile; reach for `wcmp` / `lcmp` standard checkers if that's what you want.
+- Match the way `ans` is written by `MA`: if `MA` prints `"%lld\n"`, read both `ouf` and `ans` with `readLong()` and don't sweat the newline.
+- For multi-line outputs, alternate `readToken` per token on the same line and only worry about line breaks when "which token is on which line" matters semantically.
+- For floating-point: `doubleCompare(ja, pa, EPS)` from testlib, or compare with an explicit absolute/relative tolerance. Never `==`.
+
+**Authoring `checker_tests.json` cases:**
+
+`input` / `output` / `answer` are byte-exact JSON string literals — every space, tab, and `\n` is consumed by the checker as written. Most useful cases pre-trim contestant output to exactly what `ouf.readToken()` would consume (`"5\n"`), but **also** include surface-level junk to prove the checker tolerates it:
+
+| Case | What to write |
+| --- | --- |
+| Plain OK | `"output": "5\n"`, `"answer": "5\n"`, `OK` |
+| Tolerate trailing space | `"output": "5 \n"`, `"answer": "5\n"`, `OK` (`readToken` skips whitespace) |
+| Tolerate missing trailing `\n` | `"output": "5"`, `"answer": "5\n"`, `OK` |
+| Tolerate leading space | `"output": " 5\n"`, `"answer": "5\n"`, `OK` |
+| Wrong value | `"output": "4\n"`, `"answer": "5\n"`, `WRONG_ANSWER` |
+| Garbage where number expected | `"output": "abc\n"`, `"answer": "5\n"`, `PRESENTATION_ERROR` |
+| Empty output | `"output": ""`, `"answer": "5\n"`, `PRESENTATION_ERROR` (`readToken` hits EOF) |
+
+Cover both directions: prove the checker **accepts** cosmetic whitespace differences, and prove it **rejects** garbage. A checker that fails the trailing-space-tolerant test is too strict and will silently fail real contestant submissions.
+
+**On Windows:** if `polyman test checker` reports surprise PE/WA verdicts, dump the JSON with `xxd checker/checker_tests.json | head` first. CRLF in the JSON literally injects `\r` into the output stream, and the checker sees an extra byte before `\n`.

@@ -72,6 +72,31 @@ If you want to shift a manual from index 2 to index 5:
 
 There is no automation for renaming. Both changes happen in the same edit.
 
-## CRLF on Windows
+## Whitespace, newlines, EOF — read this before authoring `.in` files
 
-`.in` files are checked into git. Configure `.gitattributes` so manual `.in` / `.out` files use the same line endings on every platform — mixed CRLF/LF can cause silent validator/checker failures on round-trip.
+testlib validators are byte-strict. Manual files trip the same rules as generator output. Get these right the first time and you will not waste an hour on `INVALID` verdicts that look like logic errors.
+
+**Required shape of every `.in` file:**
+
+- **Use `\n` only**, never `\r\n`. Set the editor to LF; commit `*.in text eol=lf` in `.gitattributes`.
+- **Single space between tokens on the same line.** Not tabs, not double spaces.
+- **No trailing space at end of any line.** `"1 2 3 \n"` ≠ `"1 2 3\n"` to a strict validator.
+- **Exactly one `\n` at the end of file.** Last line ends with `\n`. No second blank line. No missing newline. `inf.readEof()` rejects both.
+- **No BOM.** Some editors prepend `﻿`; testlib reads it as garbage on the first token.
+- **No blank lines between data lines** unless the format explicitly says so.
+
+Concretely: a 3-element array test should be exactly the bytes `3\n1 2 3\n` — that's 8 bytes, two newlines, one space between each pair, nothing else.
+
+**Common author mistakes that cause `INVALID`:**
+
+| What you wrote | What testlib sees | Fix |
+| --- | --- | --- |
+| `"3\n1 2 3"` (no trailing `\n`) | `readEoln` after last value fails | Add `\n` at end. |
+| `"3\n1 2 3\n\n"` | `readEof` sees a stray `\n` | Remove the extra blank line. |
+| `"3\n1  2 3\n"` (double space) | `readSpace` sees a second space | One space exactly. |
+| `"3\n1 2 3 \n"` (trailing space) | `readEoln` fails — non-`\n` byte before EOL | Strip trailing whitespace. |
+| `"3\r\n1 2 3\r\n"` (CRLF) | `readEoln` sees `\r` before `\n` | Reconfigure editor / `.gitattributes`. |
+
+**`.out` files follow the same rules** when present. Polyman compares against the `MA` solution's output, but a `.out` that round-trips to Polygon must still be byte-clean.
+
+When a manual fails the validator, **inspect the bytes** before changing the validator: `xxd manual/tests/m-01-foo.in | head` is faster than guessing.
