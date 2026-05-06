@@ -100,7 +100,7 @@ Four LaTeX fragments per language, **not** standalone documents (no `\documentcl
 - **Never put sample I/O in `.tex`.** Samples are `manualTests[]` with `useInStatements: true`; Polygon renders them.
 - Math: `$...$` inline, `$$...$$` display. Use `\le \ge \cdot \ldots \times \bmod`.
 - `english/` is required.
-- **Do not create or translate the Russian statement unless the user explicitly asks.** The template ships `statements/russian/` as a placeholder; if the user isn't translating, leave it alone or delete it — never auto-fill it from the English version, and never remove it from `Config.json.statements` without confirmation.
+- **Russian statement: delete if not asked for.** The template ships `statements/russian/` as an empty placeholder. If the user did not explicitly ask for a Russian statement, on the first turn that touches statements, *delete* the `statements/russian/` directory **and** remove the `russian` key from `Config.json.statements` (one edit, both changes). Never auto-translate or auto-fill from English. Only create/keep the Russian fragments when the user explicitly asks.
 
 ## Generators — `generators/*.cpp`
 
