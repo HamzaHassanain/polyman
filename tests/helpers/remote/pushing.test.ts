@@ -964,5 +964,39 @@ describe('pushing.ts', () => {
       const result = await pushing.uploadTestsets(sdk, 1, 'dir', cfg);
       expect(result.testsCount).toBe(2);
     });
+
+    it('resolves scriptFile relative to problemDir, not cwd', async () => {
+      const { sdk, mocks } = buildSdk();
+      const path = await import('path');
+      const expectedPath = path.resolve(
+        '/abs/problem',
+        './generators/gen-script.txt'
+      );
+
+      mockedExistsSync.mockImplementation((p: PathLike) => {
+        return String(p) === expectedPath;
+      });
+      mockReadFileSyncWith((p: PathOrFileDescriptor) => {
+        if (String(p) === expectedPath) return 'gen 1 > $';
+        throw new Error(`unexpected read: ${String(p)}`);
+      });
+
+      const cfg = asConfig({
+        generators: [{ name: 'gen', source: './gen.cpp' }],
+        testsets: [
+          {
+            name: 'tests',
+            generatorScript: {
+              scriptFile: './generators/gen-script.txt',
+            },
+          },
+        ],
+      });
+
+      const result = await pushing.uploadTestsets(sdk, 1, '/abs/problem', cfg);
+
+      expect(mocks.saveScript).toHaveBeenCalledWith(1, 'tests', 'gen 1 > $');
+      expect(result.testsCount).toBe(1);
+    });
   });
 });

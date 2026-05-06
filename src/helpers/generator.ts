@@ -274,12 +274,17 @@ async function copyManualInput(
 /**
  * Resolves and validates a testset's tests without running anything.
  * Throws on missing generator, missing manual file, or duplicate index.
+ *
+ * `baseDir` (defaults to cwd) is forwarded to {@link readScriptText} so
+ * `scriptFile` paths resolve correctly when callers run from outside the
+ * problem directory.
  */
 export function resolveTestsetTests(
   testset: LocalTestset,
-  generators: LocalGenerator[]
+  generators: LocalGenerator[],
+  baseDir?: string
 ): ResolvedTest[] {
-  const lines = parseGeneratorScript(readScriptText(testset));
+  const lines = parseGeneratorScript(readScriptText(testset, baseDir));
   validateGeneratorReferences(lines, generators);
   const manuals = testset.manualTests ?? [];
   validateManualTests(manuals);

@@ -358,4 +358,18 @@ describe('readScriptText', () => {
     exists(false);
     expect(() => parser.readScriptText(ts)).toThrow(/scriptFile not found/);
   });
+
+  it('resolves scriptFile against an explicit baseDir, not cwd', () => {
+    const ts: LocalTestset = {
+      name: 'tests',
+      generatorScript: { scriptFile: './gen-script.txt' },
+    };
+    exists(true);
+    vi.mocked(fs.readFileSync).mockReturnValue('gen 1 > $');
+    parser.readScriptText(ts, '/path/to/problem');
+    expect(fs.readFileSync).toHaveBeenCalledWith(
+      path.resolve('/path/to/problem', './gen-script.txt'),
+      'utf-8'
+    );
+  });
 });

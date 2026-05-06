@@ -40,12 +40,17 @@ export function findTestset(
 /**
  * Resolves the full ordered test list (manual + script) for a testset.
  * Throws on parse errors, missing files, or duplicate indices.
+ *
+ * `baseDir` (defaults to cwd) is forwarded to {@link readScriptText} so
+ * callers running from outside the problem directory (e.g. `polyman remote
+ * push <dir>`) can resolve `scriptFile` paths correctly.
  */
 export function getResolvedTests(
   testset: LocalTestset,
-  generators: LocalGenerator[]
+  generators: LocalGenerator[],
+  baseDir?: string
 ): ResolvedTest[] {
-  return resolveTestsetTests(testset, generators);
+  return resolveTestsetTests(testset, generators, baseDir);
 }
 
 /**

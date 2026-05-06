@@ -453,6 +453,11 @@ export async function uploadTestsets(
 
   for (const testset of config.testsets) {
     try {
+      // Read the script up front so a missing scriptFile aborts before we
+      // clear the remote testset. Resolve scriptFile against problemDir,
+      // not cwd, so push works from any directory.
+      const scriptText = readScriptText(testset, problemDir);
+
       await clearTestset(sdk, problemId, testset.name);
 
       if (testset.groupsEnabled) {
@@ -478,7 +483,6 @@ export async function uploadTestsets(
       }
 
       // Upload the generator script verbatim — Polygon parses it itself.
-      const scriptText = readScriptText(testset);
       try {
         await sdk.saveScript(problemId, testset.name, scriptText);
       } catch (error) {
@@ -489,7 +493,7 @@ export async function uploadTestsets(
       // produced by the script. Manuals already carried theirs at saveTest.
       const allTests = (() => {
         try {
-          return getResolvedTests(testset, config.generators ?? []);
+          return getResolvedTests(testset, config.generators ?? [], problemDir);
         } catch {
           return [];
         }

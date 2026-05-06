@@ -41,16 +41,19 @@ const GROUP_DIRECTIVE_RE = /^@group\s+(\S+)\s*$/;
 /**
  * Reads a generator script from a {@link LocalTestset}.
  *
- * Resolves `scriptFile` relative to the current working directory if `script`
- * is absent. Returns an empty string when neither is set (e.g. testsets that
- * only use manual tests).
+ * Resolves `scriptFile` relative to `baseDir` (defaults to the current
+ * working directory) when `script` is absent. Returns an empty string when
+ * neither is set (e.g. testsets that only use manual tests).
  */
-export function readScriptText(testset: LocalTestset): string {
+export function readScriptText(
+  testset: LocalTestset,
+  baseDir: string = process.cwd()
+): string {
   const gs = testset.generatorScript;
   if (!gs) return '';
   if (typeof gs.script === 'string') return gs.script;
   if (gs.scriptFile) {
-    const filePath = path.resolve(process.cwd(), gs.scriptFile);
+    const filePath = path.resolve(baseDir, gs.scriptFile);
     if (!fs.existsSync(filePath)) {
       throw new Error(
         `Generator scriptFile not found for testset "${testset.name}": ${gs.scriptFile}`
