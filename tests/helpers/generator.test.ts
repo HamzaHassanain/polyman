@@ -211,9 +211,51 @@ describe('executeResolvedTests', () => {
       '/out'
     );
     const args = executeWithRedirect.mock.calls[0];
-    expect(args[0]).toContain('gen 7');
+    expect(args[0]).toContain(
+      process.platform === 'win32' ? 'gen "7"' : "gen '7'"
+    );
     expect(args[3]).toContain('test3.txt');
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'quotes generator script arguments as literal shell arguments',
+    async () => {
+      const executeWithRedirect = vi.mocked(
+        (
+          executor as {
+            executeWithRedirect: typeof executor.executeWithRedirect;
+          }
+        ).executeWithRedirect
+      );
+      executeWithRedirect.mockResolvedValue({
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+        success: true,
+      });
+      const tests: ResolvedTest[] = [
+        {
+          index: 3,
+          source: {
+            kind: 'generator',
+            generator: 'gen',
+            args: ["O'Brien", '3)'],
+            multiOutputs: null,
+          },
+        },
+      ];
+
+      await generator.executeResolvedTests(
+        tests,
+        [{ name: 'gen', source: 'gen.cpp' }],
+        '/out'
+      );
+
+      const args = executeWithRedirect.mock.calls[0];
+      expect(args[0]).toContain("'O'\\''Brien'");
+      expect(args[0]).toContain("'3)'");
+    }
+  );
 
   it('throws when manual file is missing', async () => {
     vi.mocked(fs.existsSync).mockReturnValue(false);

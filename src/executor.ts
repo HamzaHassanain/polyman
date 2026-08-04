@@ -10,6 +10,7 @@
 import { spawn } from 'child_process';
 import execa from 'execa';
 import { fmt } from './formatter';
+import { quoteShellArgument } from './helpers/shell';
 
 /**
  * Result of a command execution containing output and status information.
@@ -455,11 +456,11 @@ export class CommandExecutor {
 
     if (inputFile) {
       const inPath = normalizePathForPlatform(inputFile);
-      result = `${result} < "${inPath}"`;
+      result = `${result} < ${quoteShellArgument(inPath)}`;
     }
     if (outputFile) {
       const outPath = normalizePathForPlatform(outputFile);
-      result = `${result} > "${outPath}"`;
+      result = `${result} > ${quoteShellArgument(outPath)}`;
     }
     return result;
   }

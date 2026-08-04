@@ -706,8 +706,26 @@ describe('CommandExecutor', () => {
       await promise;
 
       const cmd = mockExeca.mock.calls[0]?.[0];
-      expect(cmd).toContain('< "in.txt"');
-      expect(cmd).toContain('> "out.txt"');
+      expect(cmd).toContain("< 'in.txt'");
+      expect(cmd).toContain("> 'out.txt'");
+    });
+
+    it('quotes redirected paths with shell metacharacters on POSIX', async () => {
+      const sub = createMockSubprocess();
+      primeExeca(sub);
+
+      const promise = executor.executeWithRedirect(
+        './prog',
+        { timeout: 1000 },
+        "/tmp/polyman path 3)'test/in.txt",
+        "/tmp/polyman path 3)'test/out.txt"
+      );
+      sub.__resolveWith({ exitCode: 0 });
+      await promise;
+
+      const cmd = mockExeca.mock.calls[0]?.[0];
+      expect(cmd).toContain("< '/tmp/polyman path 3)'\\''test/in.txt'");
+      expect(cmd).toContain("> '/tmp/polyman path 3)'\\''test/out.txt'");
     });
 
     it('normalizes redirected paths for Windows', async () => {
@@ -766,7 +784,7 @@ describe('CommandExecutor', () => {
       await promise;
 
       const cmd = mockExeca.mock.calls[0]?.[0];
-      expect(cmd).toContain('< "in.txt"');
+      expect(cmd).toContain("< 'in.txt'");
       expect(cmd).not.toContain('>');
     });
 
@@ -784,7 +802,7 @@ describe('CommandExecutor', () => {
       await promise;
 
       const cmd = mockExeca.mock.calls[0]?.[0];
-      expect(cmd).toContain('> "out.txt"');
+      expect(cmd).toContain("> 'out.txt'");
       expect(cmd).not.toContain('<');
     });
 
