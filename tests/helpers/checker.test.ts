@@ -227,13 +227,36 @@ describe('checker.ts', () => {
         )
       ).resolves.not.toThrow();
 
+      const expectedCommand =
+        process.platform === 'win32'
+          ? `${mockExecCommand} "${mockInput}" "${mockOutput}" "${mockAnswer}"`
+          : `${mockExecCommand} '${mockInput}' '${mockOutput}' '${mockAnswer}'`;
+
       expect(mockedExecute).toHaveBeenCalledWith(
-        expect.stringContaining(
-          `${mockExecCommand} ${mockInput} ${mockOutput} ${mockAnswer}`
-        ),
+        expect.stringContaining(expectedCommand),
         expect.anything()
       );
     });
+
+    it.skipIf(process.platform === 'win32')(
+      'should protect checker file arguments containing shell metacharacters',
+      async () => {
+        mockedExecute.mockResolvedValue(makeExecResult());
+
+        await checker.runChecker(
+          mockExecCommand,
+          "/tmp/polyman path 3)'test/input.txt",
+          "/tmp/polyman path 3)'test/output.txt",
+          "/tmp/polyman path 3)'test/answer.txt",
+          'OK'
+        );
+
+        expect(mockedExecute).toHaveBeenCalledWith(
+          expect.stringContaining("'/tmp/polyman path 3)'\\''test/input.txt'"),
+          expect.anything()
+        );
+      }
+    );
 
     it('should throw error if expected OK but executor returns fail (stderr)', async () => {
       // Mock onError behavior inside execute

@@ -1,13 +1,13 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ReadStream } from 'fs';
-import * as utils from '../../src/helpers/utils';
 import fs from 'fs';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { executor } from '../../src/executor';
 import { fmt } from '../../src/formatter';
+import * as utils from '../../src/helpers/utils';
 import type {
   LocalChecker,
-  LocalSolution,
   LocalGenerator,
+  LocalSolution,
   LocalValidator,
 } from '../../src/types';
 
@@ -118,15 +118,60 @@ describe('utils.ts', () => {
     });
   });
 
+  describe('quoteShellArgument', () => {
+    it('should quote paths with spaces and parentheses', () => {
+      const quoted = utils.quoteShellArgument('/tmp/polyman path 3)test');
+
+      if (process.platform === 'win32') {
+        expect(quoted).toBe('"/tmp/polyman path 3)test"');
+      } else {
+        expect(quoted).toBe("'/tmp/polyman path 3)test'");
+      }
+    });
+
+    it.skipIf(process.platform === 'win32')(
+      'should quote POSIX paths with apostrophes',
+      () => {
+        expect(utils.quoteShellArgument("/tmp/O'Brien/main.cpp")).toBe(
+          "'/tmp/O'\\''Brien/main.cpp'"
+        );
+      }
+    );
+  });
+
   describe('Compilation', () => {
     describe('compileCPP', () => {
       it('should compile cpp file', async () => {
         await utils.compileCPP('main.cpp');
+
         expect(executeMock()).toHaveBeenCalledWith(
-          expect.stringContaining('g++ -o'),
+          expect.stringContaining('g++ -I'),
           expect.anything()
         );
       });
+
+      it.skipIf(process.platform === 'win32')(
+        'should protect C++ paths containing spaces and parentheses',
+        async () => {
+          const cwdSpy = vi
+            .spyOn(process, 'cwd')
+            .mockReturnValue('/tmp/polyman path 3)test');
+
+          try {
+            await utils.compileCPP('gen.cpp');
+
+            expect(executeMock()).toHaveBeenCalledWith(
+              "g++ -I '/tmp/polyman path 3)test' " +
+                "-o '/tmp/polyman path 3)test/gen' " +
+                "'/tmp/polyman path 3)test/gen.cpp'",
+              expect.anything()
+            );
+          } finally {
+            cwdSpy.mockRestore();
+          }
+        }
+      );
+
       it('should throw if file is not .cpp', async () => {
         await expect(utils.compileCPP('main.c')).rejects.toThrow(
           /Expected .cpp file/
@@ -142,6 +187,26 @@ describe('utils.ts', () => {
           expect.anything()
         );
       });
+
+      it.skipIf(process.platform === 'win32')(
+        'should protect Java source paths containing spaces and parentheses',
+        async () => {
+          const cwdSpy = vi
+            .spyOn(process, 'cwd')
+            .mockReturnValue('/tmp/polyman path 3)test');
+
+          try {
+            await utils.compileJava('Main.java');
+
+            expect(executeMock()).toHaveBeenCalledWith(
+              "javac '/tmp/polyman path 3)test/Main.java'",
+              expect.anything()
+            );
+          } finally {
+            cwdSpy.mockRestore();
+          }
+        }
+      );
     });
   });
 
@@ -253,6 +318,28 @@ describe('utils.ts', () => {
       expect(utils.getCompiledCommandToRun(obj)).not.toContain('.cpp');
     });
 
+    it.skipIf(process.platform === 'win32')(
+      'should protect C++ executable paths containing shell metacharacters',
+      () => {
+        const cwdSpy = vi
+          .spyOn(process, 'cwd')
+          .mockReturnValue("/tmp/polyman path 3)'test");
+        const obj: LocalSolution = {
+          source: 'main.cpp',
+          name: 'main',
+          tag: 'MA',
+        };
+
+        try {
+          expect(utils.getCompiledCommandToRun(obj)).toBe(
+            "'/tmp/polyman path 3)'\\''test/main'"
+          );
+        } finally {
+          cwdSpy.mockRestore();
+        }
+      }
+    );
+
     it('should handle .java', () => {
       const obj: LocalSolution = {
         source: 'pkg/Main.java',
@@ -263,6 +350,30 @@ describe('utils.ts', () => {
       expect(utils.getCompiledCommandToRun(obj)).toContain('java -cp');
     });
 
+    it.skipIf(process.platform === 'win32')(
+      'should protect Java classpath paths containing shell metacharacters',
+      () => {
+        const cwdSpy = vi
+          .spyOn(process, 'cwd')
+          .mockReturnValue("/tmp/polyman path 3)'test");
+        const obj: LocalSolution = {
+          source: 'pkg/Main.java',
+          name: 'Main',
+          tag: 'MA',
+        };
+
+        try {
+          const command = utils.getCompiledCommandToRun(obj);
+          expect(command).toContain(
+            "java -cp '/tmp/polyman path 3)'\\''test/pkg'"
+          );
+          expect(command).toContain("'Main'");
+        } finally {
+          cwdSpy.mockRestore();
+        }
+      }
+    );
+
     it('should handle .py', () => {
       const obj: LocalSolution = {
         source: 'script.py',
@@ -272,6 +383,28 @@ describe('utils.ts', () => {
       expect(utils.getCompiledCommandToRun(obj)).toContain('python');
     });
 
+    it.skipIf(process.platform === 'win32')(
+      'should protect Python source paths containing shell metacharacters',
+      () => {
+        const cwdSpy = vi
+          .spyOn(process, 'cwd')
+          .mockReturnValue("/tmp/polyman path 3)'test");
+        const obj: LocalSolution = {
+          source: 'script.py',
+          name: 'script',
+          tag: 'MA',
+        };
+
+        try {
+          expect(utils.getCompiledCommandToRun(obj)).toBe(
+            "python '/tmp/polyman path 3)'\\''test/script.py'"
+          );
+        } finally {
+          cwdSpy.mockRestore();
+        }
+      }
+    );
+
     it('should handle .js', () => {
       const obj: LocalSolution = {
         source: 'script.js',
@@ -280,6 +413,28 @@ describe('utils.ts', () => {
       };
       expect(utils.getCompiledCommandToRun(obj)).toContain('node');
     });
+
+    it.skipIf(process.platform === 'win32')(
+      'should protect JavaScript source paths containing shell metacharacters',
+      () => {
+        const cwdSpy = vi
+          .spyOn(process, 'cwd')
+          .mockReturnValue("/tmp/polyman path 3)'test");
+        const obj: LocalSolution = {
+          source: 'script.js',
+          name: 'script',
+          tag: 'MA',
+        };
+
+        try {
+          expect(utils.getCompiledCommandToRun(obj)).toBe(
+            "node '/tmp/polyman path 3)'\\''test/script.js'"
+          );
+        } finally {
+          cwdSpy.mockRestore();
+        }
+      }
+    );
 
     it('should throw on unknown extension', () => {
       const obj: LocalGenerator = { source: 'script.rb', name: 'script' };
@@ -296,6 +451,16 @@ describe('utils.ts', () => {
       };
       const res = utils.getCompiledCommandToRun(obj);
       expect(res).toContain('assets/checkers/std');
+    });
+
+    it('should not include cpp extension for standard checkers', () => {
+      const obj: LocalChecker = {
+        source: 'std.cpp',
+        name: 'std',
+        isStandard: true,
+      };
+      const res = utils.getCompiledCommandToRun(obj);
+      expect(res).not.toContain('std.cpp');
     });
   });
 
