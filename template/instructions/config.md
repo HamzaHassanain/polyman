@@ -18,6 +18,12 @@ The single source of truth for the whole problem. Every other file is referenced
   "outputFile": "stdout",                // keep "stdout" unless asked
   "interactive": false,                  // see instructions/checker.md (custom checker) — true is rare
 
+  "compiler": {                          // optional, local-only; omit unless the user asks
+    "cpp": "g++-15",                     // C++ compiler executable (default "g++")
+    "javac": "javac",                    // Java compiler executable (default "javac")
+    "flags": ["-O2", "-std=c++23"]       // extra flags appended to every C++ compile
+  },
+
   "statements":  { …see statements.md… },
   "solutions":   [ …see solutions.md…  ],
   "generators":  [ …see generators.md… ],
@@ -26,6 +32,8 @@ The single source of truth for the whole problem. Every other file is referenced
   "testsets":    [ …below             ]
 }
 ```
+
+`compiler` only affects how polyman compiles on this machine; it is never sent to Polygon (Polygon uses `sourceType`). The environment variables `POLYMAN_CXX` and `POLYMAN_JAVAC` override `compiler.cpp` and `compiler.javac`.
 
 ## `testsets[]`
 

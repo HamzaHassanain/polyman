@@ -9,6 +9,7 @@ import { executor } from '../executor';
 import { fmt } from '../formatter';
 import { quoteShellArgument } from './shell';
 import ConfigFile, {
+  CompilerConfig,
   LocalChecker,
   LocalGenerator,
   LocalSolution,
@@ -31,20 +32,101 @@ export const SECRET_KEY_LOCATION =
 export const API_KEY_LOCATION =
   ENV === 'win' ? '%USERPROFILE%\\.polyman\\api_key' : '~/.polyman/api_key';
 
+/** Environment variable that overrides the C++ compiler executable. */
+export const CXX_ENV_VAR = 'POLYMAN_CXX';
+
+/** Environment variable that overrides the Java compiler executable. */
+export const JAVAC_ENV_VAR = 'POLYMAN_JAVAC';
+
+/** Default C++ compiler executable. */
+export const DEFAULT_CXX = 'g++';
+
+/** Default Java compiler executable. */
+export const DEFAULT_JAVAC = 'javac';
+
 /**
- * Compiles a C++ source file using g++.
- * Uses -O2 optimization and C++23 standard.
+ * Reads the optional `compiler` block from `Config.json` in the current
+ * working directory. Never throws: a missing or malformed config simply
+ * yields an empty object so compilation falls back to the defaults.
+ *
+ * @returns {CompilerConfig} The `compiler` block, or `{}` when unavailable
+ */
+function readCompilerConfig(): CompilerConfig {
+  try {
+    const configFilePath = path.resolve(process.cwd(), 'Config.json');
+    if (!fs.existsSync(configFilePath)) return {};
+    const parsed = JSON.parse(
+      fs.readFileSync(configFilePath, 'utf-8')
+    ) as Partial<ConfigFile>;
+    return parsed.compiler ?? {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Resolves the C++ compiler executable.
+ * Precedence: `POLYMAN_CXX` env var, then `compiler.cpp` in `Config.json`,
+ * then `g++`.
+ *
+ * @returns {string} Compiler executable name or path
+ *
+ * @example
+ * // POLYMAN_CXX=g++-15
+ * resolveCppCompiler(); // 'g++-15'
+ */
+export function resolveCppCompiler(): string {
+  const fromEnv = process.env[CXX_ENV_VAR]?.trim();
+  if (fromEnv) return fromEnv;
+  const fromConfig = readCompilerConfig().cpp?.trim();
+  if (fromConfig) return fromConfig;
+  return DEFAULT_CXX;
+}
+
+/**
+ * Resolves extra flags appended to every C++ compile command, from
+ * `compiler.flags` in `Config.json`. Empty when unset.
+ *
+ * @returns {string[]} Extra compiler flags
+ */
+export function resolveCppFlags(): string[] {
+  const flags = readCompilerConfig().flags;
+  if (!Array.isArray(flags)) return [];
+  return flags.filter(
+    (flag): flag is string => typeof flag === 'string' && flag.length > 0
+  );
+}
+
+/**
+ * Resolves the Java compiler executable.
+ * Precedence: `POLYMAN_JAVAC` env var, then `compiler.javac` in
+ * `Config.json`, then `javac`.
+ *
+ * @returns {string} Compiler executable name or path
+ */
+export function resolveJavaCompiler(): string {
+  const fromEnv = process.env[JAVAC_ENV_VAR]?.trim();
+  if (fromEnv) return fromEnv;
+  const fromConfig = readCompilerConfig().javac?.trim();
+  if (fromConfig) return fromConfig;
+  return DEFAULT_JAVAC;
+}
+
+/**
+ * Compiles a C++ source file.
+ * The compiler executable comes from {@link resolveCppCompiler} (defaults to
+ * g++) and any `compiler.flags` from `Config.json` are appended.
  * The problem root (current working directory) is added as a quoted-include
  * search path so sources in subdirectories can `#include "testlib.h"`.
  *
  * @param {string} sourcePath - Path to the .cpp source file
- * @returns {Promise<string>} Path to the compiled executable
+ * @returns {Promise<void>} Resolves when compilation succeeds
  *
  * @throws {Error} If file is not .cpp or compilation fails
  *
  * @example
- * const executablePath = await compileCPP('solutions/main.cpp');
- * // Returns: '/path/to/solutions/main'
+ * await compileCPP('solutions/main.cpp');
+ * // Produces: '/path/to/solutions/main'
  */
 export async function compileCPP(sourcePath: string): Promise<void> {
   const absolutePath = path.resolve(process.cwd(), sourcePath);
@@ -56,7 +138,8 @@ export async function compileCPP(sourcePath: string): Promise<void> {
   const outputPath = absolutePath.replace(/\.cpp$/, '');
 
   const compileCommand = [
-    'g++',
+    quoteShellArgument(resolveCppCompiler()),
+    ...resolveCppFlags().map(quoteShellArgument),
     '-iquote',
     quoteShellArgument(process.cwd()),
     '-o',
@@ -71,21 +154,28 @@ export async function compileCPP(sourcePath: string): Promise<void> {
 }
 
 /**
- * Compiles a Java source file using javac.
+ * Compiles a Java source file.
+ * The compiler executable comes from {@link resolveJavaCompiler} (defaults
+ * to javac).
  *
  * @param {string} sourcePath - Path to the .java source file
- * @returns {Promise<string>} Java execution command (e.g., "java -cp /path ClassName")
+ * @returns {Promise<void>} Resolves when compilation succeeds
  *
  * @throws {Error} If compilation fails
  *
  * @example
- * const javaCommand = await compileJava('solutions/Solution.java');
- * // Returns: 'java -cp /path/to/solutions Solution'
+ * await compileJava('solutions/Solution.java');
+ * // Produces: '/path/to/solutions/Solution.class'
  */
 export async function compileJava(sourcePath: string): Promise<void> {
   const absolutePath = path.resolve(sourcePath);
 
-  await executor.execute(`javac ${quoteShellArgument(absolutePath)}`, {
+  const compileCommand = [
+    quoteShellArgument(resolveJavaCompiler()),
+    quoteShellArgument(absolutePath),
+  ].join(' ');
+
+  await executor.execute(compileCommand, {
     timeout: DEFAULT_TIMEOUT,
     silent: true,
   });

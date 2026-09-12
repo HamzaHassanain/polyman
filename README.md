@@ -39,7 +39,7 @@ Polyman eliminates manual testing and syncing, letting you focus on problem desi
 ### System Requirements
 
 - **Node.js** ≥ 14
-- **C++ Compiler** (g++ with C++17+)
+- **C++ Compiler** (g++ with C++17+; override the executable with `POLYMAN_CXX` or the `compiler.cpp` field in `Config.json`)
 - **Python 3** (optional - for Python solutions)
 - **Java JDK** (optional - for Java solutions)
 

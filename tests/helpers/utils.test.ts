@@ -1,6 +1,14 @@
 import type { ReadStream } from 'fs';
 import fs from 'fs';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type MockInstance,
+} from 'vitest';
 import { executor } from '../../src/executor';
 import { fmt } from '../../src/formatter';
 import * as utils from '../../src/helpers/utils';
@@ -119,12 +127,111 @@ describe('utils.ts', () => {
   });
 
   describe('Compilation', () => {
+    const cwd = '/tmp/polyman path 3)test';
+
+    /** Makes `Config.json` in cwd resolve to the given content. */
+    function mockConfig(content: string | undefined): void {
+      existsSyncMock.mockImplementation(p => {
+        return content !== undefined && String(p).endsWith('Config.json');
+      });
+      readFileSyncMock.mockImplementation(p => {
+        if (content !== undefined && String(p).endsWith('Config.json')) {
+          return content;
+        }
+        throw new Error(`unexpected read: ${String(p)}`);
+      });
+    }
+
+    let cwdSpy: MockInstance<() => string>;
+
+    beforeEach(() => {
+      cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(cwd);
+      mockConfig(undefined);
+      delete process.env['POLYMAN_CXX'];
+      delete process.env['POLYMAN_JAVAC'];
+    });
+
+    afterEach(() => {
+      cwdSpy.mockRestore();
+      delete process.env['POLYMAN_CXX'];
+      delete process.env['POLYMAN_JAVAC'];
+    });
+
+    describe('resolveCppCompiler', () => {
+      it('defaults to g++ without env or config', () => {
+        expect(utils.resolveCppCompiler()).toBe('g++');
+      });
+
+      it('reads compiler.cpp from Config.json', () => {
+        mockConfig(JSON.stringify({ compiler: { cpp: 'g++-15' } }));
+        expect(utils.resolveCppCompiler()).toBe('g++-15');
+      });
+
+      it('prefers POLYMAN_CXX over Config.json', () => {
+        mockConfig(JSON.stringify({ compiler: { cpp: 'g++-15' } }));
+        process.env['POLYMAN_CXX'] = 'clang++';
+        expect(utils.resolveCppCompiler()).toBe('clang++');
+      });
+
+      it('ignores blank env and config values', () => {
+        mockConfig(JSON.stringify({ compiler: { cpp: '   ' } }));
+        process.env['POLYMAN_CXX'] = '';
+        expect(utils.resolveCppCompiler()).toBe('g++');
+      });
+
+      it('falls back to g++ when Config.json is malformed', () => {
+        mockConfig('{ not json');
+        expect(utils.resolveCppCompiler()).toBe('g++');
+      });
+    });
+
+    describe('resolveCppFlags', () => {
+      it('is empty without config', () => {
+        expect(utils.resolveCppFlags()).toEqual([]);
+      });
+
+      it('returns compiler.flags from Config.json', () => {
+        mockConfig(
+          JSON.stringify({ compiler: { flags: ['-O2', '-std=c++23'] } })
+        );
+        expect(utils.resolveCppFlags()).toEqual(['-O2', '-std=c++23']);
+      });
+
+      it('drops non-string and empty entries', () => {
+        mockConfig(
+          JSON.stringify({ compiler: { flags: ['-O2', 3, '', null] } })
+        );
+        expect(utils.resolveCppFlags()).toEqual(['-O2']);
+      });
+    });
+
+    describe('resolveJavaCompiler', () => {
+      it('defaults to javac', () => {
+        expect(utils.resolveJavaCompiler()).toBe('javac');
+      });
+
+      it('reads compiler.javac from Config.json', () => {
+        mockConfig(
+          JSON.stringify({ compiler: { javac: '/opt/jdk/bin/javac' } })
+        );
+        expect(utils.resolveJavaCompiler()).toBe('/opt/jdk/bin/javac');
+      });
+
+      it('prefers POLYMAN_JAVAC over Config.json', () => {
+        mockConfig(
+          JSON.stringify({ compiler: { javac: '/opt/jdk/bin/javac' } })
+        );
+        process.env['POLYMAN_JAVAC'] = 'javac-21';
+        expect(utils.resolveJavaCompiler()).toBe('javac-21');
+      });
+    });
+
     describe('compileCPP', () => {
-      it('should compile cpp file', async () => {
+      it('should compile cpp file with g++ by default', async () => {
         await utils.compileCPP('main.cpp');
 
         expect(executeMock()).toHaveBeenCalledWith(
-          expect.stringContaining('g++ -iquote'),
+          expect.stringMatching(/^['"]g\+\+['"] -iquote/),
           expect.anything()
         );
       });
@@ -132,22 +239,51 @@ describe('utils.ts', () => {
       it.skipIf(process.platform === 'win32')(
         'should protect C++ paths containing spaces and parentheses',
         async () => {
-          const cwdSpy = vi
-            .spyOn(process, 'cwd')
-            .mockReturnValue('/tmp/polyman path 3)test');
+          await utils.compileCPP('gen.cpp');
 
-          try {
-            await utils.compileCPP('gen.cpp');
+          expect(executeMock()).toHaveBeenCalledWith(
+            "'g++' -iquote '/tmp/polyman path 3)test' " +
+              "-o '/tmp/polyman path 3)test/gen' " +
+              "'/tmp/polyman path 3)test/gen.cpp'",
+            expect.anything()
+          );
+        }
+      );
 
-            expect(executeMock()).toHaveBeenCalledWith(
-              "g++ -iquote '/tmp/polyman path 3)test' " +
-                "-o '/tmp/polyman path 3)test/gen' " +
-                "'/tmp/polyman path 3)test/gen.cpp'",
-              expect.anything()
-            );
-          } finally {
-            cwdSpy.mockRestore();
-          }
+      it.skipIf(process.platform === 'win32')(
+        'should use compiler.cpp and compiler.flags from Config.json',
+        async () => {
+          mockConfig(
+            JSON.stringify({
+              compiler: { cpp: 'g++-15', flags: ['-O2', '-std=c++23'] },
+            })
+          );
+
+          await utils.compileCPP('gen.cpp');
+
+          expect(executeMock()).toHaveBeenCalledWith(
+            "'g++-15' '-O2' '-std=c++23' -iquote '/tmp/polyman path 3)test' " +
+              "-o '/tmp/polyman path 3)test/gen' " +
+              "'/tmp/polyman path 3)test/gen.cpp'",
+            expect.anything()
+          );
+        }
+      );
+
+      it.skipIf(process.platform === 'win32')(
+        'should let POLYMAN_CXX override Config.json and quote paths with spaces',
+        async () => {
+          mockConfig(JSON.stringify({ compiler: { cpp: 'g++-15' } }));
+          process.env['POLYMAN_CXX'] = '/opt/my compilers/bin/clang++';
+
+          await utils.compileCPP('gen.cpp');
+
+          expect(executeMock()).toHaveBeenCalledWith(
+            "'/opt/my compilers/bin/clang++' -iquote '/tmp/polyman path 3)test' " +
+              "-o '/tmp/polyman path 3)test/gen' " +
+              "'/tmp/polyman path 3)test/gen.cpp'",
+            expect.anything()
+          );
         }
       );
 
@@ -159,10 +295,10 @@ describe('utils.ts', () => {
     });
 
     describe('compileJava', () => {
-      it('should compile java file', async () => {
+      it('should compile java file with javac by default', async () => {
         await utils.compileJava('Main.java');
         expect(executeMock()).toHaveBeenCalledWith(
-          expect.stringContaining('javac'),
+          expect.stringMatching(/^['"]javac['"] /),
           expect.anything()
         );
       });
@@ -170,20 +306,26 @@ describe('utils.ts', () => {
       it.skipIf(process.platform === 'win32')(
         'should protect Java source paths containing spaces and parentheses',
         async () => {
-          const cwdSpy = vi
-            .spyOn(process, 'cwd')
-            .mockReturnValue('/tmp/polyman path 3)test');
+          await utils.compileJava('Main.java');
 
-          try {
-            await utils.compileJava('Main.java');
+          expect(executeMock()).toHaveBeenCalledWith(
+            "'javac' '/tmp/polyman path 3)test/Main.java'",
+            expect.anything()
+          );
+        }
+      );
 
-            expect(executeMock()).toHaveBeenCalledWith(
-              "javac '/tmp/polyman path 3)test/Main.java'",
-              expect.anything()
-            );
-          } finally {
-            cwdSpy.mockRestore();
-          }
+      it.skipIf(process.platform === 'win32')(
+        'should use POLYMAN_JAVAC when set',
+        async () => {
+          process.env['POLYMAN_JAVAC'] = '/opt/jdk 21/bin/javac';
+
+          await utils.compileJava('Main.java');
+
+          expect(executeMock()).toHaveBeenCalledWith(
+            "'/opt/jdk 21/bin/javac' '/tmp/polyman path 3)test/Main.java'",
+            expect.anything()
+          );
         }
       );
     });

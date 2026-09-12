@@ -230,6 +230,34 @@ my-problem/
 }
 ```
 
+#### Local Compiler Overrides
+
+By default polyman compiles C++ with `g++` and Java with `javac` from your `PATH`. To use a different executable (for example `g++-15`) without changing your system default, add an optional `compiler` block:
+
+```json
+{
+  "compiler": {
+    "cpp": "g++-15",
+    "javac": "javac",
+    "flags": ["-O2", "-std=c++23"]
+  }
+}
+```
+
+| Field   | Type     | Description                                        | Default   |
+| ------- | -------- | -------------------------------------------------- | --------- |
+| `cpp`   | string   | C++ compiler executable name or absolute path      | `"g++"`   |
+| `javac` | string   | Java compiler executable name or absolute path     | `"javac"` |
+| `flags` | string[] | Extra flags appended to every C++ compile command  | `[]`      |
+
+The environment variables `POLYMAN_CXX` and `POLYMAN_JAVAC` take precedence over `compiler.cpp` and `compiler.javac`, which is handy for one-off runs:
+
+```bash
+POLYMAN_CXX=clang++ polyman verify
+```
+
+This block is local only. It is never pushed to Polygon; Polygon picks its compiler from each file's `sourceType`.
+
 ### Statements
 
 Define problem statements in multiple languages:
