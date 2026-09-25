@@ -33,7 +33,7 @@ Fails on the first step that errors. The error names the failing component and (
 ```json
 {
   "schemaVersion": 1,
-  "polymanVersion": "2.3.3",
+  "polymanVersion": "3.0.0",
   "command": "verify",
   "ok": false,
   "failedStep": "verify-solutions",
