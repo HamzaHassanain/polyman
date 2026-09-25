@@ -1093,7 +1093,9 @@ export async function stepDownloadProblemFilesAndSetUpConfig(
     sdk,
     problemId,
     problemDir,
-    validatorResult.data.name
+    checkerResult.data.isStandard
+      ? [validatorResult.data.name]
+      : [validatorResult.data.name, checkerResult.data.name]
   );
   downloadCount += generatorsResult.count;
 
