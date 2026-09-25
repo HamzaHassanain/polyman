@@ -1,8 +1,10 @@
 import type { ReadStream } from 'fs';
 import fs from 'fs';
+import path from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { executor } from '../../src/executor';
 import { fmt } from '../../src/formatter';
+import { cachedCompile } from '../../src/helpers/compile-cache';
 import * as utils from '../../src/helpers/utils';
 import type {
   LocalChecker,
@@ -28,6 +30,14 @@ vi.mock('fs', () => {
 
 vi.mock('../../src/executor');
 vi.mock('../../src/formatter');
+// Pass-through: compile-cache.test.ts covers the cache itself.
+vi.mock('../../src/helpers/compile-cache', () => ({
+  cachedCompile: vi.fn(
+    async (_request: unknown, compile: () => Promise<unknown>) => {
+      await compile();
+    }
+  ),
+}));
 
 // Mock specific console methods to avoid clutter
 const mockExit = vi
@@ -217,6 +227,31 @@ describe('utils.ts', () => {
           /Expected .cpp\/.cc\/.cxx file/
         );
         expect(executeMock()).not.toHaveBeenCalled();
+      });
+
+      it('should route the compile through the cache with its inputs', async () => {
+        const cwd = path.resolve('/p');
+        const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(cwd);
+        try {
+          await utils.compileCPP('solutions/main.cpp', {
+            cppStandard: 'c++20',
+          });
+
+          const output = path.join(cwd, 'solutions', 'main');
+          expect(vi.mocked(cachedCompile)).toHaveBeenCalledWith(
+            {
+              sourcePath: path.join(cwd, 'solutions', 'main.cpp'),
+              binaryPath:
+                process.platform === 'win32' ? `${output}.exe` : output,
+              compiler: 'g++',
+              flags: ['-O2', '-std=c++20'],
+              includeDirs: [cwd],
+            },
+            expect.any(Function)
+          );
+        } finally {
+          cwdSpy.mockRestore();
+        }
       });
     });
 

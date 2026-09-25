@@ -4,6 +4,10 @@ import os from 'os';
 import path from 'path';
 import { describe, expect, it } from 'vitest';
 import { executor } from '../../src/executor';
+import {
+  getCacheStats,
+  resetCompileCacheState,
+} from '../../src/helpers/compile-cache';
 import { compileCPP, getCompiledCommandToRun } from '../../src/helpers/utils';
 import type { LocalSolution } from '../../src/types';
 
@@ -66,5 +70,54 @@ describe('utils.ts integration', () => {
       }
     },
     30_000
+  );
+
+  it.skipIf(process.platform === 'win32' || !hasGpp())(
+    'reuses the cached binary until an included header changes',
+    async () => {
+      const originalCwd = process.cwd();
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'polyman-cache-'));
+      const solution: LocalSolution = {
+        name: 'main',
+        source: 'solutions/main.cpp',
+        tag: 'MA',
+      };
+      const run = async () =>
+        (
+          await executor.execute(getCompiledCommandToRun(solution), {
+            timeout: 1000,
+            silent: true,
+          })
+        ).stdout.trim();
+
+      try {
+        process.chdir(tmpDir);
+        resetCompileCacheState();
+        const header = path.join(tmpDir, 'testlib.h');
+        fs.writeFileSync(header, 'inline int answer() { return 1; }\n');
+        fs.mkdirSync(path.join(tmpDir, 'solutions'));
+        fs.writeFileSync(
+          path.join(tmpDir, 'solutions', 'main.cpp'),
+          '#include "testlib.h"\n#include <cstdio>\nint main() { std::printf("%d\\n", answer()); }\n'
+        );
+
+        await compileCPP('solutions/main.cpp');
+        expect(getCacheStats()).toMatchObject({ hits: 0, misses: 1 });
+
+        fs.rmSync(path.join(tmpDir, 'solutions', 'main'));
+        await compileCPP('solutions/main.cpp');
+        expect(getCacheStats()).toMatchObject({ hits: 1, misses: 1 });
+        expect(await run()).toBe('1');
+
+        fs.writeFileSync(header, 'inline int answer() { return 2; }\n');
+        await compileCPP('solutions/main.cpp');
+        expect(getCacheStats()).toMatchObject({ hits: 1, misses: 2 });
+        expect(await run()).toBe('2');
+      } finally {
+        process.chdir(originalCwd);
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    },
+    60_000
   );
 });

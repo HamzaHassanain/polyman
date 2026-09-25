@@ -82,6 +82,14 @@ import { logTemplateCreationSuccess } from './helpers/create-template';
 import { findTestset, listTestsets } from './helpers/testset';
 import { findMatchingSolutions } from './helpers/solution';
 import { readConfigFile, isNumeric, isCppSource } from './helpers/utils';
+import {
+  clearCache,
+  formatBytes,
+  formatDuration,
+  getCompiledCacheDir,
+  listCacheEntries,
+  logCacheSummary,
+} from './helpers/compile-cache';
 
 import { fmt } from './formatter';
 import { report } from './report';
@@ -902,6 +910,7 @@ export const fullVerificationAction = async (
     await stepVerifySolutionsAgainstMainCorrect(stepNum++, config);
 
     // Final success message
+    logCacheSummary();
     fmt.successBox('🎉 FULL VERIFICATION COMPLETE!');
     fmt.newLine();
     fmt.success(
@@ -911,6 +920,7 @@ export const fullVerificationAction = async (
     report.finish(true);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    logCacheSummary();
     fmt.errorBox('VERIFICATION FAILED!');
     fmt.error(`${message}`);
     fmt.newLine();
@@ -1076,6 +1086,82 @@ export const listGeneratorsAction = () => {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     fmt.errorBox('FAILED TO LIST GENERATORS!');
+    fmt.error(`${message}`);
+    fmt.newLine();
+    process.exit(1);
+  }
+};
+
+/**
+ * Shows the compilation cache of the problem in the current directory:
+ * where it lives, how big it is, and which sources it holds.
+ *
+ * @returns {void}
+ *
+ * @example
+ * // From CLI: polyman cache status
+ * cacheStatusAction();
+ * // Displays:
+ * //   1. solutions/main.cpp   1.9 MB  compiled in 3.1s  last used 2026-09-24 10:15
+ */
+export const cacheStatusAction = () => {
+  fmt.section('⚡ COMPILATION CACHE');
+
+  try {
+    const dir = getCompiledCacheDir();
+    const entries = listCacheEntries();
+
+    fmt.info(`  ${fmt.infoIcon()} Location: ${fmt.dim(dir)}`);
+    if (entries.length === 0) {
+      fmt.info(`  ${fmt.infoIcon()} Cache is empty`);
+      fmt.newLine();
+      return;
+    }
+
+    const totalBytes = entries.reduce((sum, e) => sum + e.binarySize, 0);
+    fmt.info(
+      `  ${fmt.infoIcon()} ${fmt.highlight(entries.length.toString())} cached binar${entries.length === 1 ? 'y' : 'ies'}, ${fmt.highlight(formatBytes(totalBytes))}`
+    );
+    fmt.newLine();
+
+    for (const [index, entry] of entries.entries()) {
+      const lastUsed = entry.lastUsedAt
+        .toISOString()
+        .slice(0, 16)
+        .replace('T', ' ');
+      fmt.log(
+        `  ${fmt.primary((index + 1).toString().padStart(2, ' ') + '.')} ${fmt.highlight(entry.source.padEnd(30))} ${formatBytes(entry.binarySize).padStart(8)}  ${fmt.dim(`compiled in ${formatDuration(entry.compileMs)}, last used ${lastUsed}`)}`
+      );
+    }
+    fmt.newLine();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    fmt.errorBox('FAILED TO READ CACHE!');
+    fmt.error(`${message}`);
+    fmt.newLine();
+    process.exit(1);
+  }
+};
+
+/**
+ * Deletes the compilation cache of the problem in the current directory.
+ * The next compile of every source runs the compiler again.
+ *
+ * @returns {void}
+ *
+ * @example
+ * // From CLI: polyman cache clear
+ * cacheClearAction();
+ */
+export const cacheClearAction = () => {
+  try {
+    const removed = clearCache();
+    fmt.success(
+      `  ${fmt.checkmark()} Cleared compilation cache (${removed} entr${removed === 1 ? 'y' : 'ies'} removed)`
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    fmt.errorBox('FAILED TO CLEAR CACHE!');
     fmt.error(`${message}`);
     fmt.newLine();
     process.exit(1);

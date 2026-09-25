@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as actions from '../src/actions';
 import * as help from '../src/help';
+import { setCacheEnabled } from '../src/helpers/compile-cache';
 
 vi.mock('../src/actions');
+vi.mock('../src/helpers/compile-cache');
 vi.mock('../src/help', () => ({
   printComprehensiveHelp: vi.fn(),
 }));
@@ -183,6 +185,42 @@ describe('cli.ts', () => {
 
   it('should pass --json through to verify', async () => {
     await loadCli(['verify', '--json']);
+    expect(actions.fullVerificationAction).toHaveBeenCalledWith({
+      json: true,
+    });
+  });
+
+  it('should register cache status command', async () => {
+    await loadCli(['cache', 'status']);
+    expect(actions.cacheStatusAction).toHaveBeenCalled();
+  });
+
+  it('should register cache clear command', async () => {
+    await loadCli(['cache', 'clear']);
+    expect(actions.cacheClearAction).toHaveBeenCalled();
+  });
+
+  it('should enable the compilation cache by default', async () => {
+    await loadCli(['verify']);
+    expect(setCacheEnabled).toHaveBeenCalledWith(true);
+  });
+
+  it.each([
+    ['verify'],
+    ['generate', '--all'],
+    ['validate', '--all'],
+    ['run', 'main', '--all'],
+    ['test', 'checker'],
+  ])(
+    'should disable the compilation cache for %s --no-cache',
+    async (...argv) => {
+      await loadCli([...argv, '--no-cache']);
+      expect(setCacheEnabled).toHaveBeenCalledWith(false);
+    }
+  );
+
+  it('should still pass --json to verify alongside --no-cache', async () => {
+    await loadCli(['verify', '--json', '--no-cache']);
     expect(actions.fullVerificationAction).toHaveBeenCalledWith({
       json: true,
     });

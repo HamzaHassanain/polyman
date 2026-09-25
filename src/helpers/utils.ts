@@ -8,6 +8,7 @@ import path from 'path';
 import { executor } from '../executor';
 import { fmt } from '../formatter';
 import { quoteShellArgument } from './shell';
+import { cachedCompile } from './compile-cache';
 import ConfigFile, {
   LocalChecker,
   LocalGenerator,
@@ -121,6 +122,9 @@ export function resolveCppStandard(): string {
  * (`cppStandard`, default C++23).
  * The problem root (current working directory) is added as a quoted-include
  * search path so sources in subdirectories can `#include "testlib.h"`.
+ * Goes through the compilation cache: when the source, its local headers,
+ * the flags, and the compiler are unchanged, the cached binary is restored
+ * and g++ is not run.
  *
  * @param {string} sourcePath - Path to the .cpp / .cc / .cxx source file
  * @param {Object} [options] - Compilation overrides
@@ -149,11 +153,11 @@ export async function compileCPP(
 
   const outputPath = stripCppExtension(absolutePath);
   const cppStandard = options.cppStandard ?? resolveCppStandard();
+  const flags = ['-O2', `-std=${cppStandard}`];
 
   const compileCommand = [
     'g++',
-    '-O2',
-    `-std=${cppStandard}`,
+    ...flags,
     '-iquote',
     quoteShellArgument(process.cwd()),
     '-o',
@@ -161,10 +165,21 @@ export async function compileCPP(
     quoteShellArgument(absolutePath),
   ].join(' ');
 
-  await executor.execute(compileCommand, {
-    timeout: DEFAULT_TIMEOUT,
-    silent: true,
-  });
+  await cachedCompile(
+    {
+      sourcePath: absolutePath,
+      // g++ appends `.exe` to extension-less outputs on Windows.
+      binaryPath: ENV === 'win' ? `${outputPath}.exe` : outputPath,
+      compiler: 'g++',
+      flags,
+      includeDirs: [process.cwd()],
+    },
+    () =>
+      executor.execute(compileCommand, {
+        timeout: DEFAULT_TIMEOUT,
+        silent: true,
+      })
+  );
 }
 
 /**

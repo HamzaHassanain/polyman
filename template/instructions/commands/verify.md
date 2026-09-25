@@ -5,7 +5,10 @@ The full pipeline. **The bar for "done".** A successful compile is not sufficien
 ```bash
 polyman verify
 polyman verify --json      # JSON report on stdout, human log on stderr
+polyman verify --no-cache  # recompile every source (see cache.md)
 ```
+
+Compile steps reuse cached binaries for sources that have not changed; the run ends with a `⚡ Compile cache: …` line. See [`cache.md`](./cache.md).
 
 ## Pipeline (in order)
 

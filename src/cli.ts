@@ -29,8 +29,11 @@ import {
   remoteViewProblemAction,
   remoteCommitProblemAction,
   remotePackageProblemAction,
+  cacheStatusAction,
+  cacheClearAction,
 } from './actions';
 import { printComprehensiveHelp } from './help';
+import { setCacheEnabled } from './helpers/compile-cache';
 
 const program = new Command();
 
@@ -53,7 +56,16 @@ program
   .helpOption(false)
   .option('-h, --help', 'display help for command', () => {
     printComprehensiveHelp(program);
+  })
+  // Commands that compile sources accept `--no-cache`; commander stores it as
+  // `cache: false` on the command that runs.
+  .hook('preAction', (_program, actionCommand) => {
+    setCacheEnabled(actionCommand.opts<{ cache?: boolean }>().cache !== false);
   });
+
+/** Help text for the `--no-cache` flag shared by every compiling command. */
+const NO_CACHE_DESCRIPTION =
+  'Recompile every source instead of reusing cached binaries';
 
 // ============================================================================
 // LOCAL COMMANDS
@@ -170,6 +182,7 @@ program
   .option('-t, --testset <name>', 'Generate specific testset')
   .option('-g, --group <name>', 'Generate specific group within testset')
   .option('-i, --index <number>', 'Generate specific test by index')
+  .option('--no-cache', NO_CACHE_DESCRIPTION)
   .action(
     async (options: {
       all?: boolean;
@@ -222,6 +235,7 @@ program
   .option('-t, --testset <name>', 'Validate specific testset')
   .option('-g, --group <name>', 'Validate specific group within testset')
   .option('-i, --index <number>', 'Validate specific test by index')
+  .option('--no-cache', NO_CACHE_DESCRIPTION)
   .action(
     async (options: {
       all?: boolean;
@@ -279,6 +293,7 @@ program
     '--json',
     'Print a JSON report to stdout (human output goes to stderr)'
   )
+  .option('--no-cache', NO_CACHE_DESCRIPTION)
   .action(
     async (
       solutionName: string,
@@ -329,6 +344,7 @@ program
 program
   .command('test <what>')
   .description('Test validator, checker, or a solution against main correct')
+  .option('--no-cache', NO_CACHE_DESCRIPTION)
   .action(testWhatAction);
 
 // ============================================================================
@@ -352,9 +368,42 @@ program
     '--json',
     'Print a JSON report to stdout (human output goes to stderr)'
   )
+  .option('--no-cache', NO_CACHE_DESCRIPTION)
   .action(async (options: { json?: boolean }) => {
     await fullVerificationAction({ json: options.json === true });
   });
+
+// ============================================================================
+// CACHE COMMANDS
+// ============================================================================
+
+const cache = program
+  .command('cache')
+  .description('Manage the compilation cache of the current problem');
+
+/**
+ * Command: cache status
+ * Shows the cached binaries of the problem in the current directory.
+ *
+ * @example
+ * polyman cache status
+ */
+cache
+  .command('status')
+  .description('Show cached binaries, their size, and when they were used')
+  .action(cacheStatusAction);
+
+/**
+ * Command: cache clear
+ * Deletes the compilation cache so every source is recompiled.
+ *
+ * @example
+ * polyman cache clear
+ */
+cache
+  .command('clear')
+  .description('Delete the compilation cache (forces recompilation)')
+  .action(cacheClearAction);
 
 // ============================================================================
 // REMOTE COMMANDS

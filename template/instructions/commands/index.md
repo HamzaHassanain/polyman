@@ -12,6 +12,7 @@ One file per top-level command. **Read only the file for the command you are abo
 | `polyman run <solution>` | Run a solution on the targeted tests. | [`run.md`](./run.md) |
 | `polyman test <what>` | Run validator / checker self-tests, or compare a solution to main. | [`test.md`](./test.md) |
 | `polyman verify` | Full pipeline: generate, validate, run, tag-check. | [`verify.md`](./verify.md) |
+| `polyman cache …` | Inspect or clear the compiled-binary cache. | [`cache.md`](./cache.md) |
 | `polyman remote …` | Polygon-side operations (register, list, pull, push, view, commit, package). | [`remote.md`](./remote.md) |
 
 ## Filter conventions (shared by `generate`, `validate`, `run`)
@@ -30,3 +31,4 @@ Filter flags are **mutually exclusive** — pick one per invocation:
 - `polyman --version` (or `-V`) — print version.
 - `polyman --help` (or `-h`) — comprehensive help.
 - `polyman <command> --help` — per-command help.
+- `--no-cache` (on `generate`, `validate`, `run`, `test`, `verify`) — recompile every source instead of reusing cached binaries. See [`cache.md`](./cache.md).

@@ -102,6 +102,8 @@ polyman remote commit . "Updated solutions"
 | `polyman test <component>`     | Test validator/checker/solution |
 | `polyman verify`               | Complete verification workflow  |
 | `polyman verify --json`        | Same, as a JSON report on stdout |
+| `polyman cache status`         | Show cached compiled binaries   |
+| `polyman cache clear`          | Delete the compilation cache    |
 
 ### Polygon Commands
 
@@ -115,6 +117,10 @@ polyman remote commit . "Updated solutions"
 | `polyman remote package <id> <type>` | Build package        |
 
 For detailed usage, see [GUIDE.md](GUIDE.md#cli-commands-reference).
+
+### Compilation cache
+
+C++ builds are cached in `.polyman/cache/` inside the problem directory. A source is recompiled only when it, a local header it includes (such as `testlib.h`), `cppStandard`, or the compiler version changes; otherwise the cached binary is reused and `verify` reports the time saved. Pass `--no-cache` to `generate`, `validate`, `run`, `test` or `verify` to force recompilation. See [GUIDE.md](GUIDE.md#compilation-cache).
 
 ### Scripting and AI agents
 

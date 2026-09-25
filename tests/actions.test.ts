@@ -10,6 +10,7 @@ import * as formatter from '../src/formatter';
 import * as testset from '../src/helpers/testset';
 import * as solution from '../src/helpers/solution';
 import * as createTemplate from '../src/helpers/create-template';
+import * as compileCache from '../src/helpers/compile-cache';
 import { report } from '../src/report';
 import type { LocalSolution } from '../src/types';
 import fs from 'fs';
@@ -19,6 +20,7 @@ vi.mock('../src/helpers/utils');
 vi.mock('../src/helpers/testset');
 vi.mock('../src/helpers/solution');
 vi.mock('../src/helpers/create-template');
+vi.mock('../src/helpers/compile-cache');
 vi.mock('../src/formatter');
 vi.mock('fs');
 
@@ -418,6 +420,18 @@ describe('actions.ts', () => {
       expect(process.exit).toHaveBeenCalledWith(1);
     });
 
+    it('should print the compile cache summary on success and failure', async () => {
+      vi.mocked(utils.readConfigFile).mockReturnValue({} as any);
+      await actions.fullVerificationAction();
+      expect(compileCache.logCacheSummary).toHaveBeenCalledTimes(1);
+
+      vi.mocked(utils.readConfigFile).mockImplementation(() => {
+        throw new Error('z');
+      });
+      await actions.fullVerificationAction();
+      expect(compileCache.logCacheSummary).toHaveBeenCalledTimes(2);
+    });
+
     it('should emit a verify JSON report listing every step on success', async () => {
       const main: LocalSolution = {
         name: 'main',
@@ -608,6 +622,77 @@ describe('actions.ts', () => {
         throw new Error('p');
       });
       actions.listSolutionsAction();
+      expect(formatter.fmt.errorBox).toHaveBeenCalled();
+      expect(process.exit).toHaveBeenCalledWith(1);
+    });
+  });
+
+  describe('cacheStatusAction', () => {
+    const entry = (source: string, binarySize: number) =>
+      ({
+        source,
+        binarySize,
+        compileMs: 2500,
+        lastUsedAt: new Date('2026-09-24T10:15:00Z'),
+      }) as any;
+
+    it('should report an empty cache', () => {
+      vi.mocked(compileCache.listCacheEntries).mockReturnValue([]);
+      actions.cacheStatusAction();
+      expect(formatter.fmt.info).toHaveBeenCalledWith(
+        expect.stringContaining('Cache is empty')
+      );
+      expect(formatter.fmt.log).not.toHaveBeenCalled();
+    });
+
+    it('should list every cached binary', () => {
+      vi.mocked(compileCache.listCacheEntries).mockReturnValue([
+        entry('solutions/main.cpp', 100),
+        entry('generators/gen.cpp', 200),
+      ]);
+      vi.mocked(compileCache.formatBytes).mockImplementation(n => `${n} B`);
+      vi.mocked(compileCache.formatDuration).mockReturnValue('2.5s');
+      for (const colour of ['dim', 'highlight', 'primary'] as const) {
+        vi.mocked(formatter.fmt[colour]).mockImplementation(t => t);
+      }
+
+      actions.cacheStatusAction();
+
+      expect(formatter.fmt.info).toHaveBeenCalledWith(
+        expect.stringContaining('cached binaries')
+      );
+      expect(compileCache.formatBytes).toHaveBeenCalledWith(300);
+      expect(formatter.fmt.log).toHaveBeenCalledTimes(2);
+      expect(formatter.fmt.log).toHaveBeenCalledWith(
+        expect.stringContaining('last used 2026-09-24 10:15')
+      );
+    });
+
+    it('should handle errors', () => {
+      vi.mocked(compileCache.listCacheEntries).mockImplementation(() => {
+        throw new Error('EACCES');
+      });
+      actions.cacheStatusAction();
+      expect(formatter.fmt.errorBox).toHaveBeenCalled();
+      expect(process.exit).toHaveBeenCalledWith(1);
+    });
+  });
+
+  describe('cacheClearAction', () => {
+    it('should clear the cache and report the count', () => {
+      vi.mocked(compileCache.clearCache).mockReturnValue(3);
+      actions.cacheClearAction();
+      expect(compileCache.clearCache).toHaveBeenCalled();
+      expect(formatter.fmt.success).toHaveBeenCalledWith(
+        expect.stringContaining('3 entries removed')
+      );
+    });
+
+    it('should handle errors', () => {
+      vi.mocked(compileCache.clearCache).mockImplementation(() => {
+        throw new Error('EBUSY');
+      });
+      actions.cacheClearAction();
       expect(formatter.fmt.errorBox).toHaveBeenCalled();
       expect(process.exit).toHaveBeenCalledWith(1);
     });

@@ -1721,6 +1721,39 @@ This is the **most comprehensive command**. It runs all steps in order:
 
 ---
 
+### Compilation Cache
+
+Compiling testlib-based C++ takes seconds per file, and most runs recompile sources that have not changed. Polyman therefore caches every C++ binary it builds in `.polyman/cache/compiled/` inside the problem directory.
+
+**When a source is recompiled.** Each cached binary is keyed by a SHA-256 over:
+
+- the source file's contents,
+- the contents of every local header it reaches through `#include "..."`, followed recursively (`testlib.h`, your own helpers),
+- the compile flags (`-O2`, `-std=<cppStandard>`),
+- the compiler, as reported by `g++ --version`.
+
+If any of these change, the source is recompiled; otherwise the cached binary is copied into place and `g++` does not run. A cached binary whose checksum no longer matches is discarded and rebuilt. `verify` prints how much compile time the cache saved:
+
+```
+  ⚡ Compile cache: 6 hits, 1 miss · saved ~38.2s
+```
+
+**Managing the cache.**
+
+```bash
+polyman cache status      # list cached binaries, their size, and when they were last used
+polyman cache clear       # delete the cache; the next run recompiles everything
+polyman verify --no-cache # recompile everything this run, without reading or writing the cache
+```
+
+`--no-cache` is accepted by `generate`, `validate`, `run`, `test`, and `verify`.
+
+Entries unused for 30 days are removed, and the cache is capped at 256 MB (least recently used entries go first). The cache lives with the problem, so it survives across sessions; add `.polyman/` to your `.gitignore`.
+
+**Limitations.** Java solutions are always compiled with `javac`. Headers pulled in through angle brackets (`#include <...>`) are treated as part of the compiler, so after editing a system header, run `polyman cache clear`.
+
+---
+
 ### Tips for Efficient Workflow
 
 **Development Cycle:**
@@ -2291,6 +2324,9 @@ testsets/*/test*.txt
 
 # Solution outputs
 solutions-outputs/
+
+# Compilation cache
+.polyman/
 
 # System files
 .DS_Store
