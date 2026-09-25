@@ -1,10 +1,16 @@
 import type { ReadStream } from 'fs';
 import fs from 'fs';
 import path from 'path';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MockInstance } from 'vitest';
 import { executor } from '../../src/executor';
 import { fmt } from '../../src/formatter';
 import { cachedCompile } from '../../src/helpers/compile-cache';
+import {
+  findPrebuiltTestlib,
+  markPrebuiltTestlibUnsupported,
+} from '../../src/helpers/prebuilt-testlib';
+import { quoteShellArgument } from '../../src/helpers/shell';
 import * as utils from '../../src/helpers/utils';
 import type {
   LocalChecker,
@@ -37,6 +43,12 @@ vi.mock('../../src/helpers/compile-cache', () => ({
       await compile();
     }
   ),
+}));
+// No prebuilt testlib unless a test provides one; prebuilt-testlib.test.ts
+// covers building it.
+vi.mock('../../src/helpers/prebuilt-testlib', () => ({
+  findPrebuiltTestlib: vi.fn(() => Promise.resolve(null)),
+  markPrebuiltTestlibUnsupported: vi.fn(),
 }));
 
 // Mock specific console methods to avoid clutter
@@ -252,6 +264,88 @@ describe('utils.ts', () => {
         } finally {
           cwdSpy.mockRestore();
         }
+      });
+
+      describe('with a prebuilt testlib', () => {
+        const cwd = path.resolve('/p');
+        const prebuilt = {
+          key: 'k',
+          includeDir: path.join(cwd, '.polyman', 'cache', 'testlib', 'k'),
+          objectPath: path.join(
+            cwd,
+            '.polyman',
+            'cache',
+            'testlib',
+            'k',
+            'testlib.o'
+          ),
+        };
+        const q = (value: string) => quoteShellArgument(value);
+        const source = path.join(cwd, 'validator', 'val.cpp');
+        const output = path.join(cwd, 'validator', 'val');
+        const splitCommand =
+          `g++ -O2 -std=c++23 -iquote ${q(prebuilt.includeDir)} -iquote ${q(cwd)} ` +
+          `-o ${q(output)} ${q(prebuilt.objectPath)} ${q(source)}`;
+        const fullCommand = `g++ -O2 -std=c++23 -iquote ${q(cwd)} -o ${q(output)} ${q(source)}`;
+        let cwdSpy: MockInstance<() => string>;
+
+        beforeEach(() => {
+          cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(cwd);
+          vi.mocked(findPrebuiltTestlib).mockResolvedValueOnce(prebuilt);
+        });
+
+        afterEach(() => {
+          cwdSpy.mockRestore();
+        });
+
+        it('compiles against the split header and links the object', async () => {
+          await utils.compileCPP('validator/val.cpp', { cppStandard: 'c++23' });
+
+          expect(executeMock()).toHaveBeenCalledTimes(1);
+          expect(executeMock()).toHaveBeenCalledWith(
+            splitCommand,
+            expect.anything()
+          );
+          expect(vi.mocked(findPrebuiltTestlib)).toHaveBeenCalledWith({
+            sourcePath: source,
+            compiler: 'g++',
+            flags: ['-O2', '-std=c++23'],
+          });
+        });
+
+        it('falls back to the original header and marks the split unsupported', async () => {
+          executeMock()
+            .mockRejectedValueOnce(new Error('undefined reference'))
+            .mockResolvedValueOnce({
+              stdout: '',
+              stderr: '',
+              exitCode: 0,
+              success: true,
+            });
+
+          await utils.compileCPP('validator/val.cpp', { cppStandard: 'c++23' });
+
+          expect(executeMock()).toHaveBeenLastCalledWith(
+            fullCommand,
+            expect.anything()
+          );
+          expect(
+            vi.mocked(markPrebuiltTestlibUnsupported)
+          ).toHaveBeenCalledWith(prebuilt);
+        });
+
+        it('reports the normal compile error when the source is broken', async () => {
+          executeMock()
+            .mockRejectedValueOnce(new Error('split: expected ;'))
+            .mockRejectedValueOnce(new Error('val.cpp:3: expected ;'));
+
+          await expect(
+            utils.compileCPP('validator/val.cpp', { cppStandard: 'c++23' })
+          ).rejects.toThrow('val.cpp:3: expected ;');
+          expect(
+            vi.mocked(markPrebuiltTestlibUnsupported)
+          ).not.toHaveBeenCalled();
+        });
       });
     });
 

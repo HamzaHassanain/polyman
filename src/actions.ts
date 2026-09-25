@@ -90,6 +90,7 @@ import {
   listCacheEntries,
   logCacheSummary,
 } from './helpers/compile-cache';
+import { listPrebuiltTestlibs } from './helpers/prebuilt-testlib';
 
 import { fmt } from './formatter';
 import { report } from './report';
@@ -1112,6 +1113,12 @@ export const cacheStatusAction = () => {
     const entries = listCacheEntries();
 
     fmt.info(`  ${fmt.infoIcon()} Location: ${fmt.dim(dir)}`);
+    for (const prebuilt of listPrebuiltTestlibs()) {
+      const version = prebuilt.version === null ? '' : ` ${prebuilt.version}`;
+      fmt.info(
+        `  ${fmt.infoIcon()} Prebuilt testlib${version}: ${fmt.highlight(formatBytes(prebuilt.objectSize))}, linked into every testlib program`
+      );
+    }
     if (entries.length === 0) {
       fmt.info(`  ${fmt.infoIcon()} Cache is empty`);
       fmt.newLine();
