@@ -943,7 +943,7 @@ describe('steps.ts', () => {
   });
 
   describe('stepDownloadProblemFilesAndSetUpConfig', () => {
-    it('should aggregate downloads and write Config.json', async () => {
+    const pullWithChecker = async (checker: object) => {
       vi.mocked(remoteUtils.fetchProblemInfo).mockResolvedValue({
         name: 'p',
         owner: 'o',
@@ -959,7 +959,7 @@ describe('steps.ts', () => {
       } as any);
       vi.mocked(pulling.downloadChecker).mockResolvedValue({
         count: 1,
-        data: { name: 'wcmp', source: 'wcmp.cpp' },
+        data: checker,
       } as any);
       vi.mocked(pulling.downloadValidator).mockResolvedValue({
         count: 1,
@@ -985,10 +985,38 @@ describe('steps.ts', () => {
         7,
         'savePath'
       );
+    };
+
+    it('should aggregate downloads and write Config.json', async () => {
+      await pullWithChecker({
+        name: 'wcmp',
+        source: 'wcmp.cpp',
+        isStandard: true,
+      });
       expect(fs.writeFileSync).toHaveBeenCalledWith(
         expect.stringContaining('Config.json'),
         expect.any(String),
         'utf-8'
+      );
+      expect(pulling.downloadGenerators).toHaveBeenCalledWith(
+        expect.anything(),
+        7,
+        expect.stringContaining('savePath'),
+        ['val']
+      );
+    });
+
+    it('should not download a custom checker as a generator', async () => {
+      await pullWithChecker({
+        name: 'chk',
+        source: './checker/chk.cpp',
+        isStandard: false,
+      });
+      expect(pulling.downloadGenerators).toHaveBeenCalledWith(
+        expect.anything(),
+        7,
+        expect.stringContaining('savePath'),
+        ['val', 'chk']
       );
     });
   });
