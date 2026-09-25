@@ -1125,7 +1125,11 @@ export const cacheStatusAction = () => {
     fmt.newLine();
 
     for (const [index, entry] of entries.entries()) {
-      const lastUsed = entry.lastUsedAt
+      // Shift by the timezone offset so the ISO string reads in local time.
+      const lastUsed = new Date(
+        entry.lastUsedAt.getTime() -
+          entry.lastUsedAt.getTimezoneOffset() * 60_000
+      )
         .toISOString()
         .slice(0, 16)
         .replace('T', ' ');

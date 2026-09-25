@@ -664,8 +664,28 @@ describe('actions.ts', () => {
       expect(compileCache.formatBytes).toHaveBeenCalledWith(300);
       expect(formatter.fmt.log).toHaveBeenCalledTimes(2);
       expect(formatter.fmt.log).toHaveBeenCalledWith(
-        expect.stringContaining('last used 2026-09-24 10:15')
+        expect.stringMatching(/last used \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
       );
+    });
+
+    it('should show when a binary was last used in local time', () => {
+      const originalTz = process.env['TZ'];
+      process.env['TZ'] = 'Asia/Kolkata'; // UTC+05:30, no daylight saving
+      try {
+        vi.mocked(compileCache.listCacheEntries).mockReturnValue([
+          entry('solutions/main.cpp', 100),
+        ]);
+        vi.mocked(formatter.fmt.dim).mockImplementation(t => t);
+
+        actions.cacheStatusAction();
+
+        expect(formatter.fmt.log).toHaveBeenCalledWith(
+          expect.stringContaining('last used 2026-09-24 15:45')
+        );
+      } finally {
+        if (originalTz === undefined) delete process.env['TZ'];
+        else process.env['TZ'] = originalTz;
+      }
     });
 
     it('should handle errors', () => {
