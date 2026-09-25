@@ -9,6 +9,10 @@ import { executor } from '../executor';
 import { fmt } from '../formatter';
 import { quoteShellArgument } from './shell';
 import { cachedCompile } from './compile-cache';
+import {
+  findPrebuiltTestlib,
+  markPrebuiltTestlibUnsupported,
+} from './prebuilt-testlib';
 import ConfigFile, {
   LocalChecker,
   LocalGenerator,
@@ -124,7 +128,9 @@ export function resolveCppStandard(): string {
  * search path so sources in subdirectories can `#include "testlib.h"`.
  * Goes through the compilation cache: when the source, its local headers,
  * the flags, and the compiler are unchanged, the cached binary is restored
- * and g++ is not run.
+ * and g++ is not run. A testlib program is compiled against a
+ * declarations-only testlib and linked with testlib compiled once per
+ * problem (see `prebuilt-testlib.ts`), falling back to the original header.
  *
  * @param {string} sourcePath - Path to the .cpp / .cc / .cxx source file
  * @param {Object} [options] - Compilation overrides
@@ -155,15 +161,23 @@ export async function compileCPP(
   const cppStandard = options.cppStandard ?? resolveCppStandard();
   const flags = ['-O2', `-std=${cppStandard}`];
 
-  const compileCommand = [
-    'g++',
-    ...flags,
-    '-iquote',
-    quoteShellArgument(process.cwd()),
-    '-o',
-    quoteShellArgument(outputPath),
-    quoteShellArgument(absolutePath),
-  ].join(' ');
+  const command = (includeDirs: string[], objects: string[] = []) =>
+    [
+      'g++',
+      ...flags,
+      ...includeDirs.flatMap(dir => ['-iquote', quoteShellArgument(dir)]),
+      '-o',
+      quoteShellArgument(outputPath),
+      // Objects first: testlib's globals are then initialized before the
+      // program's own.
+      ...objects.map(quoteShellArgument),
+      quoteShellArgument(absolutePath),
+    ].join(' ');
+  const run = (compileCommand: string) =>
+    executor.execute(compileCommand, {
+      timeout: DEFAULT_TIMEOUT,
+      silent: true,
+    });
 
   await cachedCompile(
     {
@@ -174,11 +188,27 @@ export async function compileCPP(
       flags,
       includeDirs: [process.cwd()],
     },
-    () =>
-      executor.execute(compileCommand, {
-        timeout: DEFAULT_TIMEOUT,
-        silent: true,
-      })
+    async () => {
+      const prebuilt = await findPrebuiltTestlib({
+        sourcePath: absolutePath,
+        compiler: 'g++',
+        flags,
+      });
+      if (prebuilt === null) return run(command([process.cwd()]));
+
+      try {
+        return await run(
+          command([prebuilt.includeDir, process.cwd()], [prebuilt.objectPath])
+        );
+      } catch {
+        // Either the source has an error or the split is wrong for it;
+        // compiling against the original header tells which, and reports
+        // the error exactly as a normal compile would.
+      }
+      const result = await run(command([process.cwd()]));
+      markPrebuiltTestlibUnsupported(prebuilt);
+      return result;
+    }
   );
 }
 

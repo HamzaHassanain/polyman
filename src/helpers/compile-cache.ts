@@ -261,8 +261,13 @@ export function scanDependencies(
  * Identifies the compiler by its `--version` output, so upgrading or
  * switching compilers invalidates every entry. Probed once per compiler per
  * process.
+ *
+ * @param {string} compiler - Compiler executable, e.g. `g++`
+ * @returns {Promise<string>} The `--version` output
+ *
+ * @throws {Error} If the compiler cannot be run or prints nothing
  */
-function getCompilerIdentity(compiler: string): Promise<string> {
+export function getCompilerIdentity(compiler: string): Promise<string> {
   let identity = compilerIdentities.get(compiler);
   if (!identity) {
     identity = executor
@@ -368,8 +373,14 @@ function restoreFromCache(
 /**
  * Writes a file atomically: concurrent compiles of the same source may race
  * to store the same entry, and a reader must never see a partial file.
+ *
+ * @param {string} target - Final path of the file
+ * @param {(tmp: string) => void} write - Writes the contents to `tmp`
  */
-function writeAtomically(target: string, write: (tmp: string) => void): void {
+export function writeAtomically(
+  target: string,
+  write: (tmp: string) => void
+): void {
   const tmp = `${target}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
   try {
     write(tmp);

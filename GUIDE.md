@@ -1738,6 +1738,8 @@ If any of these change, the source is recompiled; otherwise the cached binary is
   ⚡ Compile cache: 6 hits, 1 miss · saved ~38.2s
 ```
 
+**testlib is compiled once.** Most of a generator's, validator's or checker's compile time is spent on `testlib.h` itself. The first compile that needs it splits a copy of the problem's `testlib.h` into declarations and definitions, compiles the definitions once into `.polyman/cache/testlib/<key>/testlib.o`, and every testlib program then only parses the declarations and links that object (about 1s instead of 5s per program). The problem's `testlib.h` is never modified. A source compiles against the original header as before when it defines a macro or uses a pragma before `#include "testlib.h"` (testlib reads settings such as `EJUDGE` that way), keeps its own `testlib.h` next to it, is compiled with `--no-cache`, or fails to build against the split while it builds against the original.
+
 **Managing the cache.**
 
 ```bash

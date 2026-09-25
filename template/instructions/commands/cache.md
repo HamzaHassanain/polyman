@@ -18,6 +18,10 @@ A cached binary is reused only when all of these are unchanged:
 
 Editing any of them triggers a recompile automatically. You don't need to clear the cache after editing sources.
 
+## testlib is compiled once
+
+testlib's definitions are compiled once into `.polyman/cache/testlib/` and linked into every generator, validator and checker, so each compiles in about a second. `testlib.h` itself is never modified. Keep `#include "testlib.h"` before any `#define` or `#pragma` in a source; a source that defines something first still works, but compiles against the full header (slower).
+
 ## When to bypass it
 
 - `--no-cache` on any compiling command recompiles everything for that run and leaves the cache untouched.
