@@ -58,7 +58,7 @@
     "@types/ora": "^3.1.0",
     "@typescript-eslint/eslint-plugin": "~8.48.0",
     "@typescript-eslint/parser": "~8.48.0",
-    "@vitest/coverage-v8": "^4.1.12",
+    "@vitest/coverage-v8": "^5.0.5",
     "eslint": "^9.39.1",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.4",
