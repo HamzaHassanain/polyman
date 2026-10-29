@@ -107,6 +107,14 @@ export class ModelCatalog {
     this.timeoutMs = opts.timeoutMs ?? CATALOG_TIMEOUT_MS;
   }
 
+  /**
+   * A catalog next to `ai.json`: `<.polyman folder>/agent/models`, so a
+   * KeyStore with another home also gets its own cache.
+   */
+  static nextTo(polymanDir: string): ModelCatalog {
+    return new ModelCatalog({ dir: join(polymanDir, 'agent', 'models') });
+  }
+
   /** Whether the provider has a live model list. */
   supports(providerId: string): boolean {
     return LIVE_MODEL_PROVIDERS.includes(providerId);

@@ -70,6 +70,8 @@ export interface Preset {
   keyRequired: boolean;
   /** The provider docs the base URL was checked against. */
   docsUrl: string;
+  /** The page where users make an API key, shown when there is no key. */
+  keysUrl?: string;
   /** Changes from the default quirks of the adapter. */
   quirks?: PresetQuirks;
   /** More headers for every request to this provider. */
@@ -280,6 +282,7 @@ export const PRESETS: readonly Preset[] = [
     envVar: 'OPENROUTER_API_KEY',
     keyRequired: true,
     docsUrl: 'https://openrouter.ai/docs/quickstart',
+    keysUrl: 'https://openrouter.ai/keys',
     // https://openrouter.ai/docs/api-reference/overview: these two headers
     // name the app on openrouter.ai.
     headers: {
@@ -434,6 +437,9 @@ export function validatePreset(preset: Preset): string[] {
   }
   if (!isHttpUrl(preset.docsUrl)) {
     problems.push(`${where}: docsUrl is not an http(s) URL`);
+  }
+  if (preset.keysUrl !== undefined && !isHttpUrl(preset.keysUrl)) {
+    problems.push(`${where}: keysUrl is not an http(s) URL`);
   }
   const seen = new Set<string>();
   for (const model of preset.models) {

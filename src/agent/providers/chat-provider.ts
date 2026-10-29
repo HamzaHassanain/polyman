@@ -6,11 +6,18 @@
 
 import { PolymanError } from '../../errors';
 import { AnthropicProvider } from './anthropic';
-import type { BudgetOverride, ModelCapabilities } from './capabilities';
+import {
+  Capabilities,
+  modelKey,
+  type BudgetOverride,
+  type CapabilityOverrides,
+  type ModelCapabilities,
+} from './capabilities';
 import { KeyStore } from './key-store';
 import { OpenAICompatibleProvider } from './openai-compatible';
-import { getPreset, type Preset } from './presets';
-import type { Provider } from './types';
+import { ModelCatalog } from './model-catalog';
+import { getPreset, presetIds, type Preset } from './presets';
+import type { ModelInfo, Provider } from './types';
 
 /** The model `polyman chat` uses when `ai.json` has no default. */
 export const DEFAULT_CHAT_MODEL = 'google/gemma-4-31b-it';
@@ -117,7 +124,12 @@ const BUDGET_FIELDS = [
 
 /** Options of {@link createChatProvider}. */
 export interface ChatProviderOptions {
-  /** Model id. Overrides the model of the `ai.json` default. */
+  /**
+   * Preset id, like `openrouter` (`chat --provider`). Overrides the provider
+   * of the `ai.json` default.
+   */
+  provider?: string;
+  /** Model id (`chat --model`). Overrides the model of the `ai.json` default. */
   model?: string;
   /** Where keys live. Defaults to `~/.polyman/ai.json`. */
   keyStore?: KeyStore;
@@ -127,16 +139,30 @@ export interface ChatProviderOptions {
 
 /** A provider ready for a chat, or why there is none. */
 export type ChatProviderResult =
-  { provider: Provider; model: string; secrets: string[] } | { error: string };
+  | {
+      provider: Provider;
+      /** The preset id of the provider, like `openrouter`. */
+      providerId: string;
+      /** The name of the provider, like `OpenRouter`. */
+      providerLabel: string;
+      model: string;
+      secrets: string[];
+    }
+  | { error: string };
 
 /**
- * Builds the provider for a chat. The provider and model come from the
- * `ai.json` default when it is set (any provider the user picked), else
- * OpenRouter with {@link DEFAULT_CHAT_MODEL}. `model` replaces only the
- * model id. `secrets` holds every known key, for `redact`.
+ * Builds the provider for a chat. The provider and model are, first one
+ * wins:
  *
- * It never throws for a missing key or a broken `ai.json`: it returns
- * `{ error }` with a message to show the user.
+ * - provider: `provider`, then the `ai.json` default, then OpenRouter.
+ * - model: `model`; then the `ai.json` default model when it is for the same
+ *   provider; then {@link DEFAULT_CHAT_MODEL} for OpenRouter, the first
+ *   saved model for `custom`, or the first preset model of the provider.
+ *
+ * `secrets` holds every known key, for `redact`.
+ *
+ * It never throws for a missing key, an unknown provider or a broken
+ * `ai.json`: it returns `{ error }` with a message to show the user.
  */
 export function createChatProvider(
   opts: ChatProviderOptions = {}
@@ -145,7 +171,7 @@ export function createChatProvider(
     opts.keyStore ??
     new KeyStore(opts.env !== undefined ? { env: opts.env } : {});
   try {
-    return Promise.resolve(build(store, opts.model));
+    return Promise.resolve(build(store, opts));
   } catch (error) {
     // KeyStore errors never hold a key or file content.
     if (error instanceof PolymanError) {
@@ -156,15 +182,26 @@ export function createChatProvider(
   }
 }
 
-function build(store: KeyStore, model: string | undefined): ChatProviderResult {
+function build(store: KeyStore, opts: ChatProviderOptions): ChatProviderResult {
   const def = store.read().default;
-  const providerId = def?.provider ?? DEFAULT_CHAT_PROVIDER;
-  const modelId = model ?? def?.model ?? DEFAULT_CHAT_MODEL;
+  const fromFlag = opts.provider !== undefined;
+  const providerId = opts.provider ?? def?.provider ?? DEFAULT_CHAT_PROVIDER;
 
   const preset = getPreset(providerId);
   if (!preset) {
+    const where = fromFlag
+      ? ''
+      : ` in ${store.path}. Run "polyman ai use <provider>/<model>"`;
     return {
-      error: `Unknown provider "${providerId}" in ${store.path}. Run "polyman ai use <provider>/<model>".`,
+      error: `Unknown provider "${providerId}"${where}. Known providers: ${presetIds().join(', ')}.`,
+    };
+  }
+  const modelId =
+    opts.model ??
+    (def?.provider === preset.id ? def.model : defaultModel(store, preset));
+  if (modelId === undefined) {
+    return {
+      error: `No model for ${preset.id}. Pick one with --model <id>, see "polyman ai models ${preset.id}".`,
     };
   }
   const baseUrl = store.baseUrlFor(preset.id);
@@ -179,13 +216,90 @@ function build(store: KeyStore, model: string | undefined): ChatProviderResult {
 
   return {
     provider: providerFor(preset, baseUrl, apiKey),
+    providerId: preset.id,
+    providerLabel: preset.label,
     model: modelId,
     secrets: store.knownKeys(),
   };
 }
 
-function noKeyMessage(preset: Preset): string {
-  return `No ${preset.label} key. Run "polyman ai login ${preset.id}" or set ${preset.envVar}.`;
+/** The model of a provider when no model is given. */
+function defaultModel(store: KeyStore, preset: Preset): string | undefined {
+  if (preset.id === DEFAULT_CHAT_PROVIDER) return DEFAULT_CHAT_MODEL;
+  if (preset.id === 'custom') {
+    return store.read().providers['custom']?.models?.[0];
+  }
+  return preset.models[0]?.id;
+}
+
+/**
+ * The message for a missing key: how to save one, the env var, and where
+ * to get a key when the preset knows the page.
+ */
+export function noKeyMessage(preset: Preset): string {
+  const where =
+    preset.keysUrl !== undefined ? ` Get a key at ${preset.keysUrl}` : '';
+  return `No ${preset.label} key. Run "polyman ai login ${preset.id}" or set ${preset.envVar}.${where}`;
+}
+
+/** What {@link modelSetup} found for one chat model. */
+export interface ModelSetup {
+  /** The capability table of the session, with the live info in it. */
+  capabilities: Capabilities;
+  /** What the model can do, as looked up now. */
+  caps: ModelCapabilities;
+  /** The chat budgets for the model. */
+  budgets: ChatBudgets;
+  /** The live info of the model, when the live list has it. */
+  live?: ModelInfo;
+}
+
+/** Options of {@link modelSetup}. */
+export interface ModelSetupOptions {
+  /** Where `ai.json` lives, for the overrides. */
+  keyStore?: KeyStore;
+  /** The live model lists. Defaults to a {@link ModelCatalog}. */
+  catalog?: ModelCatalog;
+  /** Stops the live fetch. */
+  signal?: AbortSignal;
+}
+
+/**
+ * Looks up what a chat model can do and makes its budgets: defaults, the
+ * preset, the live list (cached, OpenRouter only), then the `ai.json`
+ * overrides. It never throws: offline or with a broken `ai.json`, it uses
+ * what it has.
+ */
+export async function modelSetup(
+  providerId: string,
+  modelId: string,
+  opts: ModelSetupOptions = {}
+): Promise<ModelSetup> {
+  const store = opts.keyStore ?? new KeyStore();
+  let overrides: CapabilityOverrides = {};
+  try {
+    overrides = store.read().overrides;
+  } catch {
+    // createChatProvider already told the user about a broken ai.json.
+  }
+  const catalog = opts.catalog ?? ModelCatalog.nextTo(store.dir);
+  const found = await catalog.find(
+    providerId,
+    modelId,
+    opts.signal ? { signal: opts.signal } : {}
+  );
+  const live = found.listed ? found.model : undefined;
+  const capabilities = new Capabilities(
+    overrides,
+    live ? { [modelKey(providerId, modelId)]: live } : {}
+  );
+  const caps = capabilities.lookup(providerId, modelId);
+  return {
+    capabilities,
+    caps,
+    budgets: budgetsFor(caps, capabilities.override(providerId, modelId)),
+    ...(live ? { live } : {}),
+  };
 }
 
 function providerFor(

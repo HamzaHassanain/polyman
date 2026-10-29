@@ -62,6 +62,13 @@ describe('ModelCatalog', () => {
     );
   });
 
+  it('lives next to ai.json with nextTo', () => {
+    const polyman = join(home, '.polyman');
+    expect(ModelCatalog.nextTo(polyman).dir).toBe(
+      join(polyman, 'agent', 'models')
+    );
+  });
+
   it('takes another cache folder', () => {
     const dir = join(home, 'elsewhere');
     expect(catalog(liveFetch(), { dir }).dir).toBe(dir);
