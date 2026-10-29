@@ -68,7 +68,13 @@ export function ApprovalPrompt({
   maxPreviewLines?: number;
 }) {
   const options = optionsOf(approval.toolName);
-  const [selected, setSelected] = useState(0);
+  const [selected, setSelectedState] = useState(0);
+  // Keys can come faster than React renders: enter must see the newest arrow.
+  const selectedRef = useRef(0);
+  const setSelected = (next: number) => {
+    selectedRef.current = next;
+    setSelectedState(next);
+  };
   const [reason, setReasonState] = useState<EditorState | null>(null);
   // Keys can come faster than React renders: keep the newest reason here.
   const reasonRef = useRef<EditorState | null>(null);
@@ -121,11 +127,13 @@ export function ApprovalPrompt({
       if (key.escape) {
         onCancel?.();
       } else if (key.upArrow) {
-        setSelected(s => (s + options.length - 1) % options.length);
+        setSelected(
+          (selectedRef.current + options.length - 1) % options.length
+        );
       } else if (key.downArrow || (key.tab && !key.shift)) {
-        setSelected(s => (s + 1) % options.length);
+        setSelected((selectedRef.current + 1) % options.length);
       } else if (key.return) {
-        choose(selected);
+        choose(selectedRef.current);
       } else if (/^[1-9]$/.test(input)) {
         choose(Number(input) - 1);
       }

@@ -124,6 +124,20 @@ describe('ApprovalPrompt', () => {
     });
   });
 
+  it('enter right after arrow down, before React draws, uses the arrow', async () => {
+    const resolveApproval = vi.fn();
+    const { stdin } = render(
+      <ApprovalPrompt approval={approval} resolveApproval={resolveApproval} />
+    );
+    await tick();
+    stdin.write('\u001B[B');
+    stdin.write('\r');
+    await tick();
+    expect(resolveApproval).toHaveBeenCalledWith('a1', {
+      kind: 'allow_session',
+    });
+  });
+
   it('option 3 asks for a reason and denies with it', async () => {
     const resolveApproval = vi.fn();
     const { stdin, lastFrame } = render(
