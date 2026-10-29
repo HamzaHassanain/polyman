@@ -1,6 +1,6 @@
 # 09: Polyman cloud (M6, later idea)
 
-Some users will not want to get a key. The idea: we run a server, and they log in to it from polyman. This is only an initial idea. We build it after the evals show which model is good enough and what a problem costs.
+Some users will not want to get an OpenRouter key. The idea: we run a server, and they log in to it from polyman. This is only an initial idea. We build it after the evals show what a problem costs on Gemma 4.
 
 ## Main point
 
@@ -11,7 +11,7 @@ For the chat, the server is just one more provider (decision D6). It speaks the 
 flowchart LR
   subgraph user["User machine"]
     chat["polyman chat"]
-    oa["OpenAICompatibleProvider (preset: polyman)"]
+    oa["Provider: same adapter, our base URL"]
   end
   subgraph cloud["Polyman cloud"]
     gw["API gateway: auth, rate limits"]
@@ -19,7 +19,7 @@ flowchart LR
     quota["Quotas and billing"]
     proxy["Proxy to the upstream model"]
   end
-  up[("Upstream LLM APIs (our keys)")]
+  up[("Gemma 4: OpenRouter with our key, or our own GPU later")]
 
   chat --> oa
   oa -->|"Bearer user token"| gw
@@ -54,7 +54,7 @@ sequenceDiagram
 | Topic | Question |
 | --- | --- |
 | Cost | A full problem may take hundreds of thousands of tokens. Price per problem? Free quota? |
-| Model | Which upstream model, from the eval numbers. |
+| Model | Gemma 4 31B or 26B-A4B, from the eval numbers. Since the weights are open, we could also host it ourselves. |
 | Privacy | Unreleased contest problems go through our server. We must not store or log content. Write a clear policy. |
 | Abuse | Rate limits per user, block non-polyman use (only the tools and prompt we send?). |
 | Terms | Check the upstream provider terms for this kind of use. |
@@ -66,4 +66,4 @@ sequenceDiagram
 2. Accounts and device login.
 3. Metering, quotas, billing.
 4. Privacy policy and terms.
-5. `polyman` preset in the CLI.
+5. A `--cloud` option in the CLI that points the adapter to our server.

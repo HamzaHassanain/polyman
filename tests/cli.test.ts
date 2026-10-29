@@ -13,6 +13,8 @@ vi.mock('../src/helpers/compile-cache');
 vi.mock('../src/help', () => ({
   printComprehensiveHelp: vi.fn(),
 }));
+const chat = vi.hoisted(() => ({ startChat: vi.fn() }));
+vi.mock('../src/agent/index', () => chat);
 vi.mock('../src/theme', async importOriginal => {
   const original = await importOriginal<typeof import('../src/theme')>();
   const { Chalk } = await import('chalk');
@@ -261,6 +263,19 @@ describe('cli.ts', () => {
     await loadCli(['verify', '--json']);
     expect(actions.fullVerificationAction).toHaveBeenCalledWith({
       json: true,
+    });
+  });
+
+  it('should register chat command', async () => {
+    await loadCli(['chat']);
+    expect(chat.startChat).toHaveBeenCalledWith({});
+  });
+
+  it('should pass the folder and --model to chat', async () => {
+    await loadCli(['chat', 'prob', '--model', 'google/gemma-4-31b-it']);
+    expect(chat.startChat).toHaveBeenCalledWith({
+      dir: 'prob',
+      model: 'google/gemma-4-31b-it',
     });
   });
 

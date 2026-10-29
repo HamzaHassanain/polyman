@@ -158,7 +158,13 @@ describe('quirks', () => {
     ['gemini', undefined],
     ['groq', undefined],
     ['mistral', undefined],
-    ['openrouter', { reasoningFields: ['reasoning'] }],
+    [
+      'openrouter',
+      {
+        reasoningFields: ['reasoning'],
+        extraBody: expect.any(Function) as never,
+      },
+    ],
     ['ollama', { repairToolArgs: true }],
     ['custom', undefined],
   ])('%s has the quirks %j', (id, quirks) => {
@@ -299,5 +305,49 @@ describe('validatePreset', () => {
   ])('reports %s', (_why, change, problem) => {
     const problems = validatePreset({ ...good, ...change });
     expect(problems.join('\n')).toMatch(problem);
+  });
+});
+
+describe('OpenRouter preset', () => {
+  const openrouter = getPreset('openrouter');
+  const GEMMA: Array<[string, number, number]> = [
+    ['google/gemma-4-31b-it', 0.2, 0.4],
+    ['google/gemma-4-26b-a4b-it', 0.07, 0.23],
+    ['google/gemma-4-31b-it:free', 0, 0],
+    ['google/gemma-4-26b-a4b-it:free', 0, 0],
+  ];
+
+  it('keeps openrouter/auto first', () => {
+    expect(openrouter?.models[0]).toEqual({ id: 'openrouter/auto' });
+  });
+
+  it.each(GEMMA)('lists %s with tools, context and prices', (id, inP, outP) => {
+    const model = openrouter?.models.find(m => m.id === id);
+    expect(model).toBeDefined();
+    expect(model?.supportsTools).toBe(true);
+    expect(model?.contextWindow).toBe(262_144);
+    expect(model?.pricePerMTokIn).toBe(inP);
+    expect(model?.pricePerMTokOut).toBe(outP);
+    expect(model?.priceSource).toMatch(/openrouter\.ai/);
+  });
+
+  it('sends the app headers', () => {
+    expect(openrouter?.headers).toEqual({
+      'HTTP-Referer': 'https://github.com/HamzaHassanain/polyman',
+      'X-Title': 'polyman',
+    });
+  });
+
+  it('keeps OpenRouter reasoning and adds extraBody', () => {
+    expect(openrouter?.quirks?.reasoningFields).toEqual(['reasoning']);
+    expect(typeof openrouter?.quirks?.extraBody).toBe('function');
+  });
+
+  it('gives no other preset headers or Gemma models', () => {
+    for (const preset of PRESETS) {
+      if (preset.id === 'openrouter') continue;
+      expect(preset.headers).toBeUndefined();
+      expect(preset.models.some(m => m.id.includes('gemma'))).toBe(false);
+    }
   });
 });

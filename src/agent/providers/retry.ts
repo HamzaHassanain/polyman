@@ -292,15 +292,23 @@ function stripStatus(message: string, status: number | undefined): string {
  * of a wrong key in 401 messages.
  */
 export function redact(message: string, secrets: readonly string[]): string {
-  let out = message;
-  for (const secret of secrets) {
-    if (secret.length >= 4) out = out.split(secret).join('***');
-  }
-  return out
+  return redactKnown(message, secrets)
     .replace(/\b(?:sk|pk|rk|gsk|xai|key)[-_][\w*-]{4,}/gi, '***')
     .replace(/\bAIza[\w-]{10,}/g, '***')
     .replace(/[\w-]{0,64}\*{3,}[\w*-]*/g, '***')
     .replace(/\b[A-Za-z0-9_-]{40,}\b/g, '***');
+}
+
+/**
+ * Hides only the given secrets. For tool output, where the key-like patterns
+ * of {@link redact} would also hide code (`key_count`) and long test tokens.
+ */
+export function redactKnown(text: string, secrets: readonly string[]): string {
+  let out = text;
+  for (const secret of secrets) {
+    if (secret.length >= 4) out = out.split(secret).join('***');
+  }
+  return out;
 }
 
 function seconds(ms: number): string {

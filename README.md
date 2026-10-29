@@ -16,7 +16,7 @@
 
 ---
 
-**Quick Links** | [What is new](#what-is-new-in-31) • [Why?](#why-polyman) • [Who uses it](#who-uses-it) • [Installation](#installation) • [Quick Start](#quick-start) • [Commands](#commands) • [Tags](#solution-tags) • [Checkers](#standard-checkers) • [Structure](#project-structure) • [Config](#configuration) • [Docs](#documentation) • [Workflow](#workflow-summary) • [Issues](#common-issues) • [Support](#support) • [Contributing](#contributing) • [License](#license)
+**Quick Links** | [What is new](#what-is-new-in-31) • [Why?](#why-polyman) • [Who uses it](#who-uses-it) • [Installation](#installation) • [Quick Start](#quick-start) • [Chat](#chat-preview) • [Commands](#commands) • [Tags](#solution-tags) • [Checkers](#standard-checkers) • [Structure](#project-structure) • [Config](#configuration) • [Docs](#documentation) • [Workflow](#workflow-summary) • [Issues](#common-issues) • [Support](#support) • [Contributing](#contributing) • [License](#license)
 
 </div>
 
@@ -160,6 +160,53 @@ polyman remote push .
 polyman remote commit . "Updated solutions"
 ```
 
+## Chat (preview)
+
+`polyman chat` brings an interactive problem-setting AI agent into your terminal. Powered by open-weights Gemma 4 models (via OpenRouter), it pairs with problem setters to turn ideas into fully generated and verified problems.
+
+### How the workflow works
+
+1. **spec**: Interactive discussion of problem idea, limits, and sample cases, saved to `.polyman/agent/notes.md`.
+2. **plan**: Gemma manager creates a structured plan of small tasks with explicit dependencies.
+3. **gemma workers**: Independent, focused Gemma workers execute individual tasks in parallel.
+4. **polyman checks**: The CLI automatically checks every worker's output at strict checkpoints.
+5. **verify**: Full `polyman verify` validates all solutions on all tests; fixer workers resolve any failures.
+
+### Setup
+
+```bash
+# 1. Build from source
+npm run build
+
+# 2. Log in with OpenRouter
+polyman ai login openrouter
+# or provide via environment variable
+export OPENROUTER_API_KEY="sk-or-..."
+```
+
+### Usage
+
+```bash
+# Start interactive terminal chat for a problem folder (or create a new one)
+polyman chat <dir>
+
+# Choose a specific model (defaults to google/gemma-4-31b-it)
+polyman chat <dir> --model google/gemma-4-31b-it
+
+# Run in plain line mode without the full TUI
+polyman chat <dir> --plain
+```
+
+### Keybindings
+
+| Key | Action |
+| --- | --- |
+| `enter` | Send message |
+| `esc` | Interrupt the current turn or cancel running work |
+| `shift+tab` | Switch permission modes (`ask` / `auto-edit`) |
+| `ctrl+o` | Expand / collapse task details and tool output |
+| `ctrl+c` twice | Clear input; press twice to exit |
+
 ## Commands
 
 ### Essential Commands
@@ -167,6 +214,7 @@ polyman remote commit . "Updated solutions"
 | Command                        | Purpose                         |
 | ------------------------------ | ------------------------------- |
 | `polyman new <dir>`            | Create new problem template     |
+| `polyman chat <dir>`           | Interactive terminal chat agent |
 | `polyman download-testlib`     | Download testlib.h header       |
 | `polyman generate --all`       | Generate all test cases         |
 | `polyman validate --all`       | Validate test inputs            |

@@ -38,6 +38,11 @@ export interface Quirks {
    * fails with `tools_not_supported` before it is sent.
    */
   tools: boolean;
+  /**
+   * More fields for the request body, merged after the standard ones.
+   * OpenRouter uses it for `usage.include` and `provider` routing.
+   */
+  extraBody?: (req: ChatRequest) => Record<string, unknown>;
 }
 
 /** Quirks that fit OpenAI and most servers that copy it. */
@@ -199,6 +204,7 @@ export function requestBody(
   if (req.reasoningEffort !== undefined) {
     body['reasoning_effort'] = req.reasoningEffort;
   }
+  if (quirks.extraBody) Object.assign(body, quirks.extraBody(req));
   return body;
 }
 
@@ -278,6 +284,10 @@ function toWireTool(tool: ToolSpec): Record<string, unknown> {
 // ---------------------------------------------------------------------------
 // Errors
 
+/** The message of an HTTP 402 (no credits). */
+export const NO_CREDITS =
+  'OpenRouter says there are no credits left. Add credits at https://openrouter.ai/settings/credits';
+
 /** Turns a failed HTTP response into a {@link ProviderError}. */
 export async function errorFromResponse(
   response: Response
@@ -286,6 +296,13 @@ export async function errorFromResponse(
   const message = errorMessage(await response.text().catch(() => ''));
   const text = message === '' ? `HTTP ${status}` : `HTTP ${status}: ${message}`;
 
+  if (status === 402) {
+    // OpenRouter answers 402 when the account has no credits left.
+    return new ProviderError('bad_request', `${NO_CREDITS} (${text})`, {
+      status,
+      retryable: false,
+    });
+  }
   if (status === 401 || status === 403) {
     return new ProviderError('auth', text, { status });
   }
@@ -392,6 +409,8 @@ interface Chunk {
   usage?: {
     prompt_tokens?: number;
     completion_tokens?: number;
+    /** USD, sent by OpenRouter. */
+    cost?: number;
     prompt_tokens_details?: { cached_tokens?: number } | null;
   } | null;
   error?: unknown;
@@ -590,6 +609,9 @@ function toUsage(usage: NonNullable<Chunk['usage']>): Usage {
     inputTokens: usage.prompt_tokens ?? 0,
     outputTokens: usage.completion_tokens ?? 0,
     ...(typeof cached === 'number' ? { cachedTokens: cached } : {}),
+    ...(typeof usage.cost === 'number' && Number.isFinite(usage.cost)
+      ? { costUsd: usage.cost }
+      : {}),
   };
 }
 

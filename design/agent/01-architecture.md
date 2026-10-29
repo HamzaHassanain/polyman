@@ -22,9 +22,7 @@ flowchart TB
   end
 
   subgraph providers["src/agent/providers"]
-    registry["ProviderRegistry"]
-    oa["OpenAICompatibleProvider"]
-    an["AnthropicProvider"]
+    oa["OpenAICompatibleProvider + OpenRouter preset (Gemma 4)"]
     mock["MockProvider"]
     keys["KeyStore"]
   end
@@ -46,19 +44,21 @@ flowchart TB
 
   cli["polyman CLI (child process)"]
 
+  wf["Workflow manager: scheduler, manager, workers"]
   tui <--> session
+  session -->|"start_workflow"| wf
+  wf -->|"workers are small sessions"| session
+  wf --> clit
   ask --> session
   evals --> ask
   session --> ctx
   session --> prompt
   session --> store
-  session --> registry
+  session --> oa
   session --> treg
   prompt --> notes
-  registry --> oa
-  registry --> an
-  registry --> mock
-  registry --> keys
+  session --> mock
+  oa --> keys
   treg --> perm
   treg --> fst
   treg --> cfgt
@@ -96,27 +96,29 @@ Rules:
 ## Source layout
 
 ```
-src/agent/                 ESM: has its own package.json with "type": "module"
-  index.ts                 startChat(), runAsk(), aiCommands()
+src/agent/                 CommonJS like the rest of polyman (only tui/ is ESM)
+  index.ts                 startChat(), createChatRuntime()
+  ai-commands.ts           polyman ai login/logout/list/models/use (exists)
+  secret-input.ts          hidden key prompt (exists)
   core/
     session.ts             AgentSession: the loop, turns, steps, cancel
     events.ts              AgentEvent union + EventBus
-    messages.ts            Message, ContentPart (provider-neutral)
+    messages.ts            Message, ContentPart (provider-neutral, exists)
     context.ts             ContextManager: budget, truncation, compaction
     prompt.ts              PromptBuilder: system prompt from parts
     session-store.ts       JSONL sessions on disk
     notes.ts               NotesStore: read/update notes.md
   providers/
-    types.ts               Provider, ChatRequest, StreamEvent, ModelInfo
-    openai-compatible.ts
-    anthropic.ts
-    presets.ts             known providers: base URL, env var, models, prices
-    capabilities.ts        ModelCapabilities lookup + overrides
-    registry.ts            resolve provider + model from settings
-    key-store.ts           ~/.polyman/ai.json (0600) + env vars
-    retry.ts               backoff, retry-after, error mapping
-    sse-parser.ts          parse text/event-stream from fetch()
-    mock.ts                scripted provider for tests and evals
+    types.ts               Provider, ChatRequest, StreamEvent, ModelInfo (exists)
+    openai-compatible.ts   OpenAI-compatible adapter, used for OpenRouter (exists)
+    anthropic.ts           Anthropic adapter (exists, not tuned)
+    presets.ts             providers and models; OpenRouter gets the Gemma 4 models (exists)
+    capabilities.ts        context window, tools, chat-only fallback (exists)
+    key-store.ts           ~/.polyman/ai.json (0600), env vars, redact (exists)
+    retry.ts               backoff, retry-after (exists)
+    sse-parser.ts          parse text/event-stream (exists)
+    mock.ts                scripted provider for tests and evals (exists)
+    gemma.ts               Gemma budgets and the chat provider factory (new)
   tools/
     types.ts               Tool, ToolContext, ToolOutput, Risk
     registry.ts            register, list specs, validate args, dispatch
@@ -129,10 +131,18 @@ src/agent/                 ESM: has its own package.json with "type": "module"
     remote-tools.ts        remote_pull, remote_push, remote_commit, remote_view, remote_package
     skill-tools.ts         list_skills, load_skill
     notes-tools.ts         read_notes, update_notes
+  workflow/                the Gemma workflow manager (see 10-workflow-manager.md)
+    types.ts               Plan, PlanTask, TaskResult, TaskKind
+    recipes.ts             build_problem, fix_verify, strengthen_tests
+    manager.ts             submit_plan, decide
+    worker.ts              one task = one small AgentSession
+    checkpoints.ts         CLI checks per task kind
+    scheduler.ts           DAG, parallel limit, retries, escalation, config patches
+    prompts.ts             manager and worker prompts
   runner/
-    cli-runner.ts          spawn polyman, collect output, timeout, cancel
+    cli-runner.ts          spawn polyman, collect output, timeout, cancel, one lock for CLI runs
     kill-tree.ts           kill a process tree on POSIX and Windows
-  tui/                     terminal UI with Ink (see 05-chat-ui.md)
+  tui/                     terminal UI with Ink, ESM: has its own package.json with "type": "module" (see 05-chat-ui.md)
     index.tsx              startTui(session)
     App.tsx, store.ts, keybindings.ts
     components/            Transcript, ToolBlock, ApprovalPrompt, Composer, StatusLine, ...
@@ -224,7 +234,7 @@ The session stays alive after a cancel. Only the current turn stops.
 | Path | What | Who writes it |
 | --- | --- | --- |
 | `~/.polyman/credentials.json` | Polygon key and secret (exists today) | `polyman remote register` |
-| `~/.polyman/ai.json` | Provider keys, default provider and model, overrides. Mode `0600`. | `polyman ai login`, settings in the UI |
+| `~/.polyman/ai.json` | The OpenRouter key and the Gemma 4 model to use. Mode `0600`. | `polyman ai login`, `polyman ai use` |
 | `~/.polyman/agent/sessions/` | Sessions that started before a problem folder existed | SessionStore |
 | `<problem>/.polyman/agent/notes.md` | Long-term memory of the problem | NotesStore, `update_notes` tool |
 | `<problem>/.polyman/agent/sessions/<id>.jsonl` | One file per chat, append-only | SessionStore |
@@ -253,12 +263,12 @@ The rule: a failed tool is information for the model, not a crash. Only provider
 
 | Risk | What we do |
 | --- | --- |
-| The model writes outside the problem | All file tools go through `sandbox.ts`: resolve the real path and refuse anything outside the problem folder, and refuse `.polyman/cache`. |
+| The model writes outside the problem | All file tools go through `sandbox.ts`: resolve the real path and refuse anything outside the problem folder, and refuse `.polyman/cache`. The check compares with the folder path plus a trailing separator, so `/x/pairs-evil` is not inside `/x/pairs`. |
 | The model changes Polygon by mistake | Remote tools are risk `remote` and always need approval. The UI shows the exact command. |
 | Prompt injection from pulled statements or files | Content from files is data. Dangerous actions still need approval, so injected text cannot push or commit. |
-| API keys leak | Keys stay in `ai.json`, are sent only to their own base URL, and are removed from logs, errors and session files. |
-| Unreleased problems leak to a provider | Clear notice the first time a provider is used. Ollama works fully offline. |
-| Code written by the model runs on the machine | Same as today: polyman already compiles and runs user code. The agent only runs it through the CLI, with the CLI time and memory limits. |
+| The API key leaks | The OpenRouter key stays in `ai.json`, is sent only to `openrouter.ai`, and is removed from logs, errors and session files. |
+| Unreleased problems leak | Everything the agent reads goes to OpenRouter and the host that runs Gemma. Clear notice on the first use. Running Gemma locally with Ollama is the later fix for private problems. |
+| Code written by the model runs on the machine | This is the real risk. The model writes solutions, generators, validators and checkers, and the CLI compiles and runs them. Time and memory limits do not stop a generator that calls `system("rm -rf ~")`. So "no free shell" is only true while writes need approval. In `ask` mode (the default) the user sees every file before it is written. Switching to `auto-edit` shows a clear warning that the model can then run any code it writes. |
 
 ## Testing strategy
 
@@ -269,5 +279,5 @@ The rule: a failed tool is information for the model, not a crash. Only provider
 | Tools | Temp problem folders made from `template/`, with the runner mocked or real. |
 | AgentSession | `MockProvider` with a script of replies and tool calls. Check the events and the saved session. |
 | Terminal UI | The reducer over `AgentEvent` alone in Vitest, components with `ink-testing-library`. |
-| End to end | `polyman ask --provider mock` on a temp copy of the template problem. |
-| Quality of the agent | The eval suite with real models, not in CI (see [08-evals-release.md](08-evals-release.md)). |
+| End to end | `polyman ask` with the `MockProvider` on a temp copy of the template problem. |
+| Quality of the agent | The eval suite with Gemma 4 through OpenRouter, not in CI (see [08-evals-release.md](08-evals-release.md)). |

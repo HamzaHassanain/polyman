@@ -8,7 +8,7 @@
  * price names the page it comes from in `priceSource`.
  */
 
-import type { ModelInfo } from './types';
+import type { ChatRequest, ModelInfo } from './types';
 
 /**
  * Changes from the default OpenAI-compatible quirks for one server.
@@ -28,6 +28,8 @@ export interface PresetQuirks {
   repairToolArgs?: boolean;
   /** Whether the server supports tools at all. */
   tools?: boolean;
+  /** More fields for the request body, merged after the standard ones. */
+  extraBody?: (req: ChatRequest) => Record<string, unknown>;
 }
 
 /** A model we know about, with what the provider docs say about it. */
@@ -70,11 +72,14 @@ export interface Preset {
   docsUrl: string;
   /** Changes from the default quirks of the adapter. */
   quirks?: PresetQuirks;
+  /** More headers for every request to this provider. */
+  headers?: Readonly<Record<string, string>>;
   /** Known models. `listModels()` can find more. */
   models: PresetModel[];
 }
 
 const CHECKED = 'checked 2026-10-24';
+const OPENROUTER_CHECKED = 'checked 2026-10-25';
 
 /** Every preset, in the order we show them. */
 export const PRESETS: readonly Preset[] = [
@@ -275,8 +280,60 @@ export const PRESETS: readonly Preset[] = [
     envVar: 'OPENROUTER_API_KEY',
     keyRequired: true,
     docsUrl: 'https://openrouter.ai/docs/quickstart',
-    quirks: { reasoningFields: ['reasoning'] },
-    models: [{ id: 'openrouter/auto' }],
+    // https://openrouter.ai/docs/api-reference/overview: these two headers
+    // name the app on openrouter.ai.
+    headers: {
+      'HTTP-Referer': 'https://github.com/HamzaHassanain/polyman',
+      'X-Title': 'polyman',
+    },
+    quirks: {
+      reasoningFields: ['reasoning'],
+      // `usage.include` puts the real cost on the last chunk. With tools,
+      // `require_parameters` only routes to hosts that support them; without
+      // it a request can land on a host that ignores the tools.
+      extraBody: req => ({
+        usage: { include: true },
+        ...(req.tools.length > 0
+          ? { provider: { require_parameters: true } }
+          : {}),
+      }),
+    },
+    models: [
+      { id: 'openrouter/auto' },
+      {
+        id: 'google/gemma-4-31b-it',
+        contextWindow: 262_144,
+        supportsTools: true,
+        pricePerMTokIn: 0.2,
+        pricePerMTokOut: 0.4,
+        priceSource: `https://openrouter.ai/models, ${OPENROUTER_CHECKED}`,
+      },
+      {
+        id: 'google/gemma-4-26b-a4b-it',
+        contextWindow: 262_144,
+        supportsTools: true,
+        pricePerMTokIn: 0.07,
+        pricePerMTokOut: 0.23,
+        priceSource: `https://openrouter.ai/models, ${OPENROUTER_CHECKED}`,
+      },
+      {
+        // Free variants are rate limited: for development only.
+        id: 'google/gemma-4-31b-it:free',
+        contextWindow: 262_144,
+        supportsTools: true,
+        pricePerMTokIn: 0,
+        pricePerMTokOut: 0,
+        priceSource: `https://openrouter.ai/models, ${OPENROUTER_CHECKED}`,
+      },
+      {
+        id: 'google/gemma-4-26b-a4b-it:free',
+        contextWindow: 262_144,
+        supportsTools: true,
+        pricePerMTokIn: 0,
+        pricePerMTokOut: 0,
+        priceSource: `https://openrouter.ai/models, ${OPENROUTER_CHECKED}`,
+      },
+    ],
   },
   {
     id: 'ollama',

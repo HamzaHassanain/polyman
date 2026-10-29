@@ -48,7 +48,7 @@ The turn, in short:
 ```ts
 async runTurn(userText: string, signal: AbortSignal) {
   this.append(userMessage(userText));
-  for (let step = 0; step < this.maxSteps; step++) {      // default 40
+  for (let step = 0; step < this.maxSteps; step++) {      // default 20 for Gemma
     const req = await this.context.build(this.prompt, this.messages, this.tools.specs());
     const reply = await this.streamStep(req, signal);       // emits deltas
     this.append(reply.message);
@@ -62,7 +62,9 @@ async runTurn(userText: string, signal: AbortSignal) {
 }
 ```
 
-Tool calls run one at a time, even if the model asks for several in one step. Running two CLI commands on the same folder at the same time is not safe (both write `testsets/`, both measure time).
+Tool calls run one at a time inside one session, even if the model asks for several in one step. Workflow workers are separate sessions and run in parallel, but all CLI runs go through one lock in `CliRunner`. Running two CLI commands on the same folder at the same time is not safe (both write `testsets/`, both measure time).
+
+Repeat guard: the session remembers the last tool calls. If the model makes the same call with the same args 3 times in a turn, the call is not run again. The result says "you already did this, the result was: ... Try something else or ask the user." Smaller models like Gemma get stuck this way, and it costs money.
 
 ## Events
 
@@ -133,7 +135,7 @@ flowchart TD
   prob -->|"no"| gate["PermissionGate.check()"]
   gate -->|"deny"| e4["result: the user denied, with their reason"]
   gate -->|"allow"| run["tool.run() with timeout"]
-  run --> cap["cap content size (16 KB), keep data for the UI"]
+  run --> cap["cap content size (8 KB), keep data for the UI"]
   cap --> out["ToolOutput"]
 ```
 
@@ -172,9 +174,11 @@ flowchart TD
 ```
 
 - Modes: `ask` (default), `auto-edit` (writes inside the problem are allowed), `--yes` in headless mode (everything except `remote` unless `--allow-remote`).
+- Switching to `auto-edit` shows a warning: the model can now write code and run it through `generate`, `run` or `verify` without asking. See the security model in [01-architecture.md](01-architecture.md).
 - "Allow for this session" adds a rule like `{ tool: 'write_file' }` that lives until the session ends.
 - The approval waits on a promise that `resolveApproval()` resolves. A cancel rejects it.
 - For `write_file` and `edit_file`, the approval shows a diff.
+- Inside a workflow, the user approves the whole plan once. Each worker then gets a sandbox limited to its task's `ownsFiles`, and writes there without asking. See [10-workflow-manager.md](10-workflow-manager.md).
 
 ## Sandbox
 
@@ -185,7 +189,7 @@ class Sandbox {
 }
 ```
 
-- Resolve with `fs.realpath` (also for the parent folder of a new file), then check that it starts with the real problem folder.
+- Resolve with `fs.realpath` (also for the parent folder of a new file), then check that it is the real problem folder or starts with the real problem folder plus `path.sep`. Without the separator, `/x/pairs-evil` would pass as inside `/x/pairs`.
 - Refuse writing to `.polyman/cache/`, `.polyman/agent/sessions/` and `testlib.h`.
 - `read_file` returns at most 2000 lines and supports `offset` and `limit`. Test files are cut to the first and last lines.
 
@@ -244,7 +248,7 @@ sequenceDiagram
 One JSONL file per session. Each line is one record, appended right away, so a crash loses at most one line.
 
 ```jsonl
-{"type":"meta","id":"s_01","createdAt":"...","provider":"deepseek","model":"deepseek-chat","problemDir":null}
+{"type":"meta","id":"s_01","createdAt":"...","model":"google/gemma-4-31b-it","problemDir":null}
 {"type":"message","message":{"id":"m1","role":"user","parts":[{"type":"text","text":"I have an idea about ..."}]}}
 {"type":"message","message":{"id":"m2","role":"assistant","parts":[...]}}
 {"type":"approval","callId":"c3","decision":"allow"}
@@ -260,16 +264,16 @@ One JSONL file per session. Each line is one record, appended right away, so a c
 
 ## ContextManager
 
-Problem setting makes long sessions: many files and many verify reports. The context must stay under the model limit.
+Problem setting makes long sessions: many files and many verify reports. Gemma 4 has a 262k window, but we keep a much smaller budget (32k tokens to start), because a smaller model follows the rules worse in a long context, and every step re-sends the whole context.
 
 ```mermaid
 %%{init: {"flowchart": {"htmlLabels": false}} }%%
 flowchart TD
   start["build(request)"] --> est["estimate tokens: provider usage when known, else chars / 4"]
-  est --> fit{"under 70% of the context window?"}
+  est --> fit{"under the budget (32k for Gemma)?"}
   fit -->|"yes"| send["send as is"]
   fit -->|"no"| shrink["1. replace old tool results with one line: e.g. verify failed at step validate, log at ..."]
-  shrink --> fit2{"under 70%?"}
+  shrink --> fit2{"under the budget?"}
   fit2 -->|"yes"| send
   fit2 -->|"no"| compact["2. compaction: ask the model to update notes.md and write a summary of the old turns"]
   compact --> replace["replace old turns with the summary message"]
@@ -295,8 +299,8 @@ Details of parts 1, 3 and 5 are in [06-problem-agent.md](06-problem-agent.md).
 ## `polyman ask` (headless)
 
 ```
-polyman ask "write a validator for the constraints in the statement" [--dir <problem>] [--provider p --model m]
-           [--yes] [--allow-remote] [--json] [--resume <sessionId>] [--max-steps 40]
+polyman ask "write a validator for the constraints in the statement" [--dir <problem>] [--model <gemma-4 id>]
+           [--yes] [--allow-remote] [--json] [--resume <sessionId>] [--max-steps 20]
 ```
 
 - Same `AgentSession`, with a plain text renderer instead of the Ink UI.

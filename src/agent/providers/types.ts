@@ -76,6 +76,7 @@ export type StreamEvent =
       inputTokens: number;
       outputTokens: number;
       cachedTokens?: number;
+      costUsd?: number;
     }
   /** The turn is over, and why. */
   | {

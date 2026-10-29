@@ -161,7 +161,11 @@ describe('agent fixtures', () => {
         const evs = events(readFixture('openai', name).body);
         expect(evs.at(-1)?.data).toBe('[DONE]');
         const usage = JSON.parse(evs.at(-2)?.data ?? '') as OpenAIChunk;
-        expect(usage.choices).toEqual([]);
+        // OpenAI sends usage in its own chunk with no choices. OpenRouter
+        // puts it on the chunk with the finish reason.
+        if (usage.choices.length > 0) {
+          expect(usage.choices[0]?.finish_reason).toBeTruthy();
+        }
         expect(usage.usage).toBeTruthy();
       }
     );

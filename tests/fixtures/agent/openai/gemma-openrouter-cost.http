@@ -1,0 +1,32 @@
+# source: https://openrouter.ai/docs/api-reference/streaming
+# request: OpenRouter, model google/gemma-4-31b-it, stream: true
+# Recorded from OpenRouter on 2026-10-26 (#79).
+HTTP/2 200 
+content-type: text/event-stream
+access-control-allow-origin: *
+cache-control: no-cache
+x-generation-id: gen-1793015223-cntpi4A0eFB5GSRQC0yR
+access-control-expose-headers: X-Generation-Id,X-Provider-Name,request-id,cf-ray
+permissions-policy: payment=(self "https://checkout.stripe.com" "https://connect-js.stripe.com" "https://js.stripe.com" "https://*.js.stripe.com" "https://hooks.stripe.com")
+referrer-policy: no-referrer, strict-origin-when-cross-origin
+x-content-type-options: nosniff
+cf-ray: a50939588bfa536a-CAI
+
+: OPENROUTER PROCESSING
+
+: OPENROUTER PROCESSING
+
+: OPENROUTER PROCESSING
+
+: OPENROUTER PROCESSING
+
+: OPENROUTER PROCESSING
+
+data: {"id":"gen-1793015223-cntpi4A0eFB5GSRQC0yR","object":"chat.completion.chunk","created":1793015223,"model":"google/gemma-4-31b-it","provider":"DeepInfra","choices":[{"index":0,"delta":{"content":"ok","role":"assistant"},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1793015223-cntpi4A0eFB5GSRQC0yR","object":"chat.completion.chunk","created":1793015223,"model":"google/gemma-4-31b-it","provider":"DeepInfra","choices":[{"index":0,"delta":{"content":"","role":"assistant"},"finish_reason":"stop","native_finish_reason":"stop"}]}
+
+data: {"id":"gen-1793015223-cntpi4A0eFB5GSRQC0yR","object":"chat.completion.chunk","created":1793015223,"model":"google/gemma-4-31b-it","provider":"DeepInfra","service_tier":"priority","choices":[{"index":0,"delta":{"content":"","role":"assistant"},"finish_reason":"stop","native_finish_reason":"stop"}],"usage":{"prompt_tokens":16,"completion_tokens":2,"total_tokens":18,"cost":0.000006,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"cache_write_tokens":0,"audio_tokens":0,"video_tokens":0},"cost_details":{"upstream_inference_cost":0.000006,"upstream_inference_prompt_cost":0.0000048,"upstream_inference_completions_cost":0.0000012},"completion_tokens_details":{"reasoning_tokens":0,"image_tokens":0,"audio_tokens":0}}}
+
+data: [DONE]
+

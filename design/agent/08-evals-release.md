@@ -2,7 +2,7 @@
 
 ## Why evals
 
-Models are very different at long tool work. We cannot say "DeepSeek works" because one chat went well. We need numbers, for each model, on the same tasks. The evals also catch regressions when we change the prompt or the tools.
+We cannot say "Gemma 4 works" because one chat went well. We need numbers on the same tasks every time. The evals also catch regressions when we change the prompt, the tools or the budgets, and they tell us if the cheaper 26B-A4B model is good enough.
 
 ## Eval cases
 
@@ -45,7 +45,7 @@ Kinds:
 %%{init: {"flowchart": {"htmlLabels": false}} }%%
 flowchart LR
   c["case"] --> tmp["temp folder (+ fixture)"]
-  tmp --> ask["polyman ask --json --yes --provider p --model m"]
+  tmp --> ask["polyman ask --json --yes --model gemma-4-id"]
   ask -->|"auto replies when the agent asks"| ask
   ask --> ev["events JSONL"]
   ev --> score["score.ts"]
@@ -63,22 +63,21 @@ flowchart LR
 | `steps`, `toolErrors` | from events |
 | `tokens`, `costUsd`, `timeSec` | from `usage` events |
 
-A model is "supported" if it passes most `full` cases under the cost limit. The README lists supported models with their numbers.
+We run every case on `google/gemma-4-31b-it` and `google/gemma-4-26b-a4b-it`. The README shows both with their numbers, and the default is the cheaper one only if it passes about as many cases.
 
 ## Cost display
 
-- `usage` events have tokens. If the model has prices in the presets, we compute `costUsd`.
+- `usage` events have tokens and the real cost, since OpenRouter returns the cost of each request.
 - The status line shows this turn and the session total, and `/cost` shows the details.
-- Unknown prices show tokens only. Users can add prices in `ai.json` overrides.
 
 ## Docs
 
-- `GUIDE.md`: a new "Chat" section (start, providers, permissions, workflow, notes, resume).
-- `README.md`: a short section and the supported models table.
-- A privacy note: what is sent to the provider (statement, code, test samples, reports), that unreleased problems should go to a provider you trust or to Ollama, and that keys stay on the machine.
+- `GUIDE.md`: a new "Chat" section (start, the OpenRouter key, permissions, workflow, notes, resume).
+- `README.md`: a short section, how to get an OpenRouter key, and the eval numbers for both Gemma 4 models.
+- A privacy note: what is sent to OpenRouter and the host that runs Gemma (statement, code, test samples, reports), and that the key stays on the machine.
 - `template/CLAUDE.md` and `AGENTS.md`: mention `.polyman/agent/`.
 
 ## Release
 
 - Version `4.0.0`: new commands and new exit codes are visible changes.
-- Before release: run the evals on at least 3 providers, test `polyman chat` on Linux, macOS and Windows, check the install size with `ink` and `react`.
+- Before release: run the evals on both Gemma 4 models, test `polyman chat` on Linux, macOS and Windows, check the install size with `ink` and `react`.

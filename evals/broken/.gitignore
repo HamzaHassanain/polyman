@@ -1,0 +1,14 @@
+# polyman writes these while it runs; never commit them.
+testlib.h
+.polyman/
+testsets/
+solutions-outputs/
+*.exe
+**/solutions/*
+!**/solutions/*.cpp
+**/generators/*
+!**/generators/*.cpp
+!**/generators/gen-script.txt
+**/validator/*
+!**/validator/*.cpp
+!**/validator/validator_tests.json

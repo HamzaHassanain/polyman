@@ -2,7 +2,9 @@
   "extends": "./tsconfig.json",
   "include": [
     "src/**/*",
+    "src/**/*.tsx",
     "tests/**/*",
+    "tests/**/*.tsx",
     "vitest.config.ts",
     "eslint.config.cjs" 
   ],

@@ -115,6 +115,8 @@ flowchart LR
 
 ## System prompt (first idea)
 
+Written for Gemma 4: short rules, one rule per line, plain words, and the most important rules first. A smaller model follows a short prompt better than a long one.
+
 ```
 You are polyman, an assistant for competitive programming problem setters.
 You help the user think about a problem, then build it with polyman and push it to Polygon.
@@ -127,6 +129,8 @@ How to work:
 - When verify fails, find the reason first. Do not change a test to make a wrong solution pass.
 - Never change Polygon without the user. Remote tools will ask the user, explain why before calling them.
 - Prefer edit_file for small changes. Keep files short and in the style of the template.
+- Always call tools with the tool call format. Never write a tool call as text.
+- Do one step at a time. After each tool result, say in one line what you learned.
 
 Skills: <index>
 Environment: <os>, g++ <version>, java <version or missing>, python <version or missing>, polyman <version>
@@ -147,7 +151,7 @@ This is the part users will value most, and it needs no tools. The agent should:
 5. List edge cases. Each one becomes a test later.
 6. Write all of this into the notes and ask "should I create the problem?".
 
-A reasoning model is better for this step. The UI can let the user pick a model per step later (not in the first version).
+We use the same model (Gemma 4 31B) for this step. If Gemma 4 sends reasoning through OpenRouter, the UI shows it dimmed and it is never sent back.
 
 ## The verify-and-fix loop
 

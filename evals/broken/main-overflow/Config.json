@@ -1,0 +1,51 @@
+{
+  "name": "pairs-sum",
+  "description": "Count pairs i < j with a_i + a_j = k.",
+  "timeLimit": 1000,
+  "memoryLimit": 256,
+  "inputFile": "stdin",
+  "outputFile": "stdout",
+  "interactive": false,
+  "tags": ["implementation", "hashing"],
+  "statements": {
+    "english": {
+      "encoding": "UTF-8",
+      "name": "Pairs With Sum K",
+      "legend": "./statements/english/legend.tex",
+      "input": "./statements/english/input-format.tex",
+      "output": "./statements/english/output-format.tex",
+      "notes": "./statements/english/notes.tex"
+    }
+  },
+  "solutions": [
+    { "name": "main", "source": "./solutions/main.cpp", "tag": "MA", "sourceType": "cpp.g++17" },
+    { "name": "brute", "source": "./solutions/brute.cpp", "tag": "TO", "sourceType": "cpp.g++17" },
+    { "name": "wa-half-value", "source": "./solutions/wa-half-value.cpp", "tag": "WA", "sourceType": "cpp.g++17" },
+    { "name": "wa-int-overflow", "source": "./solutions/wa-int-overflow.cpp", "tag": "WA", "sourceType": "cpp.g++17" },
+    { "name": "wa-quadratic", "source": "./solutions/wa-quadratic.cpp", "tag": "TL", "sourceType": "cpp.g++17" }
+  ],
+  "generators": [{ "name": "gen", "source": "./generators/gen.cpp" }],
+  "checker": { "name": "ncmp", "source": "ncmp.cpp", "isStandard": true },
+  "validator": {
+    "name": "validator",
+    "source": "./validator/val.cpp",
+    "testsFilePath": "./validator/validator_tests.json"
+  },
+  "testsets": [
+    {
+      "name": "tests",
+      "generatorScript": { "scriptFile": "./generators/gen-script.txt" },
+      "manualTests": [
+        { "input": "./manual/tests/m-01-sample.in", "index": 1, "group": "samples", "useInStatements": true },
+        { "input": "./manual/tests/m-02.in", "index": 2, "group": "main" },
+        { "input": "./manual/tests/m-03.in", "index": 3, "group": "main" },
+        { "input": "./manual/tests/m-04.in", "index": 4, "group": "main" },
+        { "input": "./manual/tests/m-05.in", "index": 5, "group": "main" },
+        { "input": "./manual/tests/m-06.in", "index": 6, "group": "main" },
+        { "input": "./manual/tests/m-07.in", "index": 7, "group": "main" }
+      ],
+      "groupsEnabled": true,
+      "groups": [{ "name": "samples" }, { "name": "main" }]
+    }
+  ]
+}

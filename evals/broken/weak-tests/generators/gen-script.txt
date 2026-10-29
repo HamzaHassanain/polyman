@@ -1,0 +1,4 @@
+<#-- Tests 1 to 5 are manual (manual/tests/). -->
+<#-- @group main -->
+<#-- n = 200000, random from 5 values, k = 1e9: a big answer -->
+gen 200000 1000000000 1 1000000000 7 999999993 999999999 > 6

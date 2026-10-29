@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   DEFAULT_QUIRKS,
+  NO_CREDITS,
   OpenAICompatibleProvider,
   parseToolArgs,
   requestBody,
@@ -15,6 +16,8 @@ import {
   type StreamEvent,
 } from '../../../src/agent/providers/types';
 import type { Message } from '../../../src/agent/core/messages';
+import { getPreset } from '../../../src/agent/providers/presets';
+import { withRetries } from '../../../src/agent/providers/retry';
 import { fixtureResponse, readFixture } from '../../fixtures/agent';
 
 const AT = '2026-10-24T00:00:00.000Z';
@@ -176,7 +179,13 @@ describe('OpenAICompatibleProvider: streaming fixtures', () => {
         'Use rnd.next(1, n) for each value.'
       );
       expect(events.slice(-2)).toEqual([
-        { type: 'usage', inputTokens: 280, outputTokens: 14, cachedTokens: 0 },
+        {
+          type: 'usage',
+          inputTokens: 280,
+          outputTokens: 14,
+          cachedTokens: 0,
+          costUsd: 0.0001792,
+        },
         { type: 'done', stopReason: 'end' },
       ]);
     }
@@ -958,5 +967,131 @@ describe('retryAfter', () => {
     expect(
       retryAfter(new Headers({ 'retry-after': 'soon' }), now)
     ).toBeUndefined();
+  });
+});
+
+describe('OpenAICompatibleProvider: extraBody quirk', () => {
+  const tool = {
+    name: 'verify',
+    description: 'Runs polyman verify.',
+    parameters: { type: 'object', properties: {} },
+  };
+
+  function presetQuirks(id: string) {
+    return { ...DEFAULT_QUIRKS, ...getPreset(id)?.quirks };
+  }
+
+  it('adds usage.include and provider.require_parameters for OpenRouter with tools', () => {
+    const body = requestBody(
+      request({ tools: [tool] }),
+      presetQuirks('openrouter')
+    );
+    expect(body['usage']).toEqual({ include: true });
+    expect(body['provider']).toEqual({ require_parameters: true });
+    expect(body['model']).toBe('gpt-4.1-mini');
+    expect(body['stream']).toBe(true);
+  });
+
+  it('adds only usage.include for OpenRouter without tools', () => {
+    const body = requestBody(request(), presetQuirks('openrouter'));
+    expect(body['usage']).toEqual({ include: true });
+    expect(body).not.toHaveProperty('provider');
+  });
+
+  it('adds nothing for other presets', () => {
+    for (const id of ['deepseek', 'openai', 'groq', 'ollama']) {
+      const body = requestBody(request({ tools: [tool] }), presetQuirks(id));
+      expect(body).not.toHaveProperty('usage');
+      expect(body).not.toHaveProperty('provider');
+    }
+    expect(DEFAULT_QUIRKS.extraBody).toBeUndefined();
+  });
+
+  it('merges extraBody after the standard fields', () => {
+    const body = requestBody(request({ temperature: 0.2 }), {
+      ...DEFAULT_QUIRKS,
+      extraBody: req => ({ temperature: 0.9, seen: req.model }),
+    });
+    expect(body['temperature']).toBe(0.9);
+    expect(body['seen']).toBe('gpt-4.1-mini');
+  });
+
+  it('sends extraBody in the posted request', async () => {
+    const fetchFn = fakeFetch(fixture('text'));
+    await collect(
+      provider(fetchFn, { quirks: getPreset('openrouter')?.quirks ?? {} })
+    );
+    expect(sentBody(fetchFn)['usage']).toEqual({ include: true });
+  });
+});
+
+describe('OpenAICompatibleProvider: cost', () => {
+  it('reads usage.cost into costUsd', async () => {
+    const fetchFn = fakeFetch(
+      sse([
+        {
+          ...delta({ content: 'ok' }, 'stop'),
+          usage: { prompt_tokens: 5, completion_tokens: 1, cost: 0.000012 },
+        },
+      ])
+    );
+    const events = await collect(provider(fetchFn));
+    expect(events.find(e => e.type === 'usage')).toEqual({
+      type: 'usage',
+      inputTokens: 5,
+      outputTokens: 1,
+      costUsd: 0.000012,
+    });
+  });
+
+  it('leaves costUsd out when the server sends no cost', async () => {
+    const fetchFn = fakeFetch(
+      sse([
+        {
+          ...delta({ content: 'ok' }, 'stop'),
+          usage: { prompt_tokens: 5, completion_tokens: 1, cost: 'free' },
+        },
+      ])
+    );
+    const usage = (await collect(provider(fetchFn))).find(
+      e => e.type === 'usage'
+    );
+    expect(usage).toEqual({ type: 'usage', inputTokens: 5, outputTokens: 1 });
+  });
+});
+
+describe('OpenAICompatibleProvider: 402 no credits', () => {
+  const KEY = 'sk-or-v1-test-key-for-402-redaction-000000';
+  const body = {
+    error: { message: `Insufficient credits for key ${KEY}`, code: 402 },
+  };
+
+  it('maps 402 to a bad_request that is not retryable', async () => {
+    const err = await failure(collect(provider(fakeFetch(json(402, body)))));
+    expect(err.kind).toBe('bad_request');
+    expect(err.status).toBe(402);
+    expect(err.retryable).toBe(false);
+    expect(err.message.startsWith(NO_CREDITS)).toBe(true);
+    expect(err.message).toContain('https://openrouter.ai/settings/credits');
+    expect(err.message).toContain('Insufficient credits');
+  });
+
+  it('is not retried, and the key is redacted', async () => {
+    const fetchFn = fakeFetch(json(402, body), fixture('text'));
+    const p = withRetries(provider(fetchFn, { apiKey: KEY }), {
+      secrets: [KEY],
+      baseDelayMs: 0,
+    });
+    const err = await failure(collect(p));
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(err.kind).toBe('bad_request');
+    expect(err.message).toContain(NO_CREDITS);
+    expect(err.message).not.toContain(KEY);
+  });
+
+  it('keeps the clear message when the body is empty', async () => {
+    const fetchFn = fakeFetch(() => new Response('', { status: 402 }));
+    const err = await failure(collect(provider(fetchFn)));
+    expect(err.message).toBe(`${NO_CREDITS} (HTTP 402)`);
   });
 });

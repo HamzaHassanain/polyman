@@ -1,265 +1,92 @@
-# 03: Providers and keys (M1)
+# 03: The model: Gemma 4 through OpenRouter (M1)
 
-## The problem
+## Status
 
-Users want to use the key they already have: OpenAI, DeepSeek, Qwen, Gemini, Anthropic, Groq, OpenRouter, a local Ollama, or a company server. We cannot write one client per provider.
+The provider layer is **already built** (M1, merged in v3.1.0, see `src/agent/providers/`):
 
-The good part: almost all of them accept the OpenAI Chat Completions format. So we need:
-
-- One `OpenAICompatibleProvider`, configured by a base URL. It covers almost everything.
-- One `AnthropicProvider` for Claude models (native API, better tool use).
-- A list of presets, so users only type a key.
-- A "custom" option: any base URL + model + key.
-
-## Classes
-
-```mermaid
-classDiagram
-  class Provider {
-    <<interface>>
-    +id: string
-    +stream(req: ChatRequest, signal: AbortSignal) AsyncIterable~StreamEvent~
-    +listModels() Promise~ModelInfo[]~
-  }
-  class OpenAICompatibleProvider {
-    -baseUrl: string
-    -apiKey: string
-    -quirks: Quirks
-    +stream()
-    +listModels()
-  }
-  class AnthropicProvider {
-    -apiKey: string
-    +stream()
-    +listModels()
-  }
-  class MockProvider {
-    -script: MockStep[]
-    +stream()
-  }
-  class ProviderRegistry {
-    +resolve(settings) ResolvedModel
-    +presets: Preset[]
-  }
-  class KeyStore {
-    +get(providerId) string
-    +set(providerId, key)
-    +remove(providerId)
-  }
-  class Capabilities {
-    +lookup(provider, model) ModelCapabilities
-  }
-  class RetryPolicy {
-    +run(fn, signal)
-  }
-  Provider <|.. OpenAICompatibleProvider
-  Provider <|.. AnthropicProvider
-  Provider <|.. MockProvider
-  ProviderRegistry --> KeyStore
-  ProviderRegistry --> Capabilities
-  ProviderRegistry --> Provider
-  OpenAICompatibleProvider --> RetryPolicy
-  AnthropicProvider --> RetryPolicy
-```
-
-## Types
-
-These types are provider-neutral. The core only knows them.
-
-```ts
-// src/agent/core/messages.ts
-type ContentPart =
-  | { type: 'text'; text: string }
-  | { type: 'reasoning'; text: string } // shown in the UI, not sent back
-  | { type: 'tool_call'; id: string; name: string; args: unknown }
-  | { type: 'tool_result'; callId: string; content: string; isError: boolean };
-
-interface Message {
-  id: string;
-  role: 'user' | 'assistant' | 'tool';
-  parts: ContentPart[];
-  createdAt: string;
-}
-
-// src/agent/providers/types.ts
-interface ChatRequest {
-  model: string;
-  system: string;
-  messages: Message[];
-  tools: ToolSpec[]; // { name, description, parameters: JSONSchema }
-  maxOutputTokens?: number;
-  temperature?: number;
-  reasoningEffort?: 'low' | 'medium' | 'high';
-}
-
-type StreamEvent =
-  | { type: 'text_delta'; text: string }
-  | { type: 'reasoning_delta'; text: string }
-  | { type: 'tool_call'; id: string; name: string; args: unknown } // emitted when complete
-  | { type: 'usage'; inputTokens: number; outputTokens: number; cachedTokens?: number }
-  | { type: 'done'; stopReason: 'end' | 'tool_calls' | 'max_tokens' | 'content_filter' };
-
-interface Provider {
-  id: string;
-  stream(req: ChatRequest, signal: AbortSignal): AsyncIterable<StreamEvent>;
-  listModels?(signal: AbortSignal): Promise<ModelInfo[]>;
-}
-
-class ProviderError extends Error {
-  kind: 'auth' | 'rate_limit' | 'context_too_long' | 'bad_request'
-      | 'server' | 'network' | 'tools_not_supported';
-  status?: number;
-  retryAfterMs?: number;
-  retryable: boolean;
-}
-```
-
-Why a tool call is emitted only when complete: providers stream the arguments in pieces, and each one does it a bit differently. The adapter collects the pieces and parses the JSON once. The core never sees half arguments. The UI still shows "calling verify..." from the first piece through a separate `tool_call_started` event if we want it later.
-
-## OpenAI-compatible adapter
-
-```mermaid
-%%{init: {"flowchart": {"htmlLabels": false}} }%%
-flowchart TD
-  req["ChatRequest"] --> map["map messages: tool_call parts to assistant.tool_calls, tool_result parts to role tool"]
-  map --> body["body: model, messages, tools, stream: true, stream_options.include_usage"]
-  body --> fetch["fetch POST baseUrl/chat/completions (signal)"]
-  fetch --> status{"HTTP status"}
-  status -->|"200"| parse["SSE parser: data: {...} lines until [DONE]"]
-  status -->|"401/403"| auth["ProviderError auth"]
-  status -->|"429"| rl["ProviderError rate_limit + retry-after"]
-  status -->|"400 + context length"| ctx["ProviderError context_too_long"]
-  status -->|"400 + tools"| nt["ProviderError tools_not_supported"]
-  status -->|"5xx / network"| srv["ProviderError server, retryable"]
-  parse --> delta{"choice.delta"}
-  delta -->|"content"| t["text_delta"]
-  delta -->|"reasoning_content or reasoning"| r["reasoning_delta"]
-  delta -->|"tool_calls[i]"| acc["accumulate by index: id, name, arguments string"]
-  acc -->|"finish_reason"| emit["parse JSON, emit tool_call"]
-  parse -->|"usage chunk"| u["usage"]
-  parse -->|"finish_reason"| d["done"]
-```
-
-Quirks we already know about, kept in a `Quirks` object per preset:
-
-| Quirk | Example | Handling |
-| --- | --- | --- |
-| `stream_options` not accepted | some older servers | retry once without it, remember for the session |
-| Reasoning text field | DeepSeek `reasoning_content`, OpenRouter `reasoning` | map to `reasoning_delta`, never send it back |
-| Tool arguments not valid JSON | small local models | try to fix common problems (trailing text), else send an error tool result so the model tries again |
-| No tool support | some local models | `tools_not_supported`, then chat-only mode for this model |
-| Max tokens field name | `max_tokens` vs `max_completion_tokens` | per preset |
-
-## Anthropic adapter
-
-Same events, different mapping:
-
-- `system` goes in the top-level `system` field.
-- Tool calls are `tool_use` content blocks. The arguments come as `input_json_delta` pieces.
-- Tool results are `tool_result` blocks inside a `user` message.
-- `thinking` blocks map to `reasoning_delta`.
-- Prompt caching: mark the system prompt and the tool list with `cache_control`, since they are the same in every step.
-
-## Presets
-
-```ts
-interface Preset {
-  id: string;            // 'deepseek'
-  label: string;         // 'DeepSeek'
-  adapter: 'openai' | 'anthropic';
-  baseUrl: string;
-  envVar: string;        // 'DEEPSEEK_API_KEY'
-  keyRequired: boolean;  // false for ollama
-  quirks?: Partial<Quirks>;
-  models: ModelInfo[];   // known models, with capabilities and prices
-}
-```
-
-First list (base URLs must be checked again before release):
-
-| id | adapter | base URL | env var |
-| --- | --- | --- | --- |
-| `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
-| `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
-| `deepseek` | openai | `https://api.deepseek.com/v1` | `DEEPSEEK_API_KEY` |
-| `qwen` | openai | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
-| `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
-| `groq` | openai | `https://api.groq.com/openai/v1` | `GROQ_API_KEY` |
-| `mistral` | openai | `https://api.mistral.ai/v1` | `MISTRAL_API_KEY` |
-| `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
-| `ollama` | openai | `http://localhost:11434/v1` | none |
-| `custom` | openai | from the user | from the user |
-| `polyman` (M6) | openai | our server | from `polyman ai login polyman` |
-
-## Model capabilities
-
-```ts
-interface ModelCapabilities {
-  tools: boolean;
-  parallelToolCalls: boolean;
-  reasoning: boolean;
-  contextWindow: number;   // tokens
-  maxOutput: number;
-  pricePerMTokIn?: number; // USD, for the cost display
-  pricePerMTokOut?: number;
-}
-```
-
-Lookup order: user override in `ai.json`, then the preset model list, then safe defaults (`tools: true`, `contextWindow: 32000`). If a call fails with `tools_not_supported`, we set `tools: false` for that model and tell the user that this model can only chat, not build the problem.
-
-## Keys and settings
-
-`~/.polyman/ai.json`, file mode `0600`, folder mode `0700`:
-
-```json
-{
-  "version": 1,
-  "default": { "provider": "deepseek", "model": "deepseek-chat" },
-  "providers": {
-    "deepseek": { "apiKey": "sk-..." },
-    "custom": { "baseUrl": "https://my-server/v1", "apiKey": "...", "models": ["my-model"] }
-  },
-  "overrides": { "deepseek/deepseek-chat": { "contextWindow": 64000 } },
-  "acceptedPrivacyNotice": ["deepseek"]
-}
-```
-
-Key lookup order: the env var, then `ai.json`. Rules:
-
-- `polyman ai login <provider>` reads the key with a hidden prompt (or `--key-stdin`), never from argv, so it does not end up in shell history.
-- A key is only ever sent to the base URL of its own preset.
-- The `redact()` helper removes known keys from every log line, error message and saved session.
-
-Commands:
-
-| Command | What it does |
+| File | What it has |
 | --- | --- |
-| `polyman ai login <provider>` | save a key, then test it |
-| `polyman ai logout <provider>` | remove a key |
-| `polyman ai list` | providers, which have keys (masked), the default |
-| `polyman ai models [provider]` | known models + `listModels()` from the API |
-| `polyman ai use <provider>/<model>` | set the default |
-| `polyman ai test [provider/model]` | one tiny request with one tool, to check keys and tool support |
+| `types.ts` | `Provider`, `ChatRequest`, `StreamEvent` (tool calls carry `argsError` when the JSON is broken), `ProviderError` |
+| `openai-compatible.ts` | `OpenAICompatibleProvider`: streaming, tool call collection, `parseToolArgs` with repair (code fences, text after the JSON), error mapping, `Quirks` |
+| `anthropic.ts` | `AnthropicProvider` |
+| `presets.ts` | presets for OpenAI, Anthropic, DeepSeek, Qwen, Gemini, Groq, Mistral, **OpenRouter**, Ollama, custom |
+| `capabilities.ts` | context window, tool support, chat-only fallback |
+| `key-store.ts` | `~/.polyman/ai.json` (`KeyStore`: `getKey`, `setDefault`, `knownKeys`), `redact(text, keys)` |
+| `retry.ts` | `withRetries`, `retry-after`, backoff |
+| `sse-parser.ts` | `parseSse` |
+| `mock.ts` | `MockProvider` with scripted steps |
+| `../ai-commands.ts` | `polyman ai login / logout / list / models / use` |
 
-## Retries
+## The decision
 
-```mermaid
-%%{init: {"flowchart": {"htmlLabels": false}} }%%
-flowchart LR
-  callp["call provider"] --> ok{"ok?"}
-  ok -->|"yes"| done["return stream"]
-  ok -->|"rate_limit"| wait["wait retry-after or backoff 1s, 2s, 4s (max 3 tries)"]
-  ok -->|"server / network"| wait
-  ok -->|"auth / bad_request / tools_not_supported"| fail["throw, no retry"]
-  ok -->|"context_too_long"| compact["ContextManager compacts, then one more try"]
-  wait --> callp
-  compact --> callp
+We keep this layer as it is, and **build and tune the agent for one model: Gemma 4 through OpenRouter.** It is the default model, the one in the prompts, the budgets, the evals and the demo. Other providers keep working through the same `Provider` interface, but we do not tune or test the agent on them in this plan.
+
+| Model id (OpenRouter) | Use | Price per 1M tokens (in / out) | Context | Tools |
+| --- | --- | --- | --- | --- |
+| `google/gemma-4-31b-it` | default, the main model | $0.20 / $0.40 | 262k | yes |
+| `google/gemma-4-26b-a4b-it` | cheaper and faster (MoE, 4B active) | $0.07 / $0.23 | 262k | yes |
+| `google/gemma-4-31b-it:free` | development only, rate limited | $0 | 262k | yes |
+| `google/gemma-4-26b-a4b-it:free` | development only, rate limited | $0 | 262k | yes |
+
+Prices and tool support are from the OpenRouter models list on 2026-10-25. A real tool call test passed on 2026-10-25: Gemma 4 31B answered `verify({"dir":"."})` for $0.00001.
+
+Why Gemma 4:
+
+- It is an open-weights model. The whole stack is open: our harness plus an open model.
+- It supports tool calling and has a big context window.
+- It is cheap. A long session (about 6M tokens) costs around $1.20 on the 31B model.
+- The same weights can run locally later (the Ollama preset already exists), so private problems do not have to leave the machine.
+
+## What we add for Gemma (hack day task W1)
+
+Small changes to the existing layer, no new provider class:
+
+1. **Presets**: the OpenRouter preset gets the four Gemma 4 models (with `supportsTools: true`, context 262144, prices), and `google/gemma-4-31b-it` becomes the model `polyman chat` uses when `ai.json` has no default.
+2. **OpenRouter request options**, through a new `Quirks` field `extraBody` (merged into the request body):
+   - `provider: { require_parameters: true }` when the request has tools, so OpenRouter only routes to hosts that support tools. Without it, a request can land on a host that ignores the tools.
+   - `usage: { include: true }`, so the last chunk has the real cost.
+3. **Cost**: `StreamEvent` `usage` gets an optional `costUsd`, filled from OpenRouter's `usage.cost`.
+4. **Headers** for the OpenRouter preset: `HTTP-Referer: https://github.com/HamzaHassanain/polyman`, `X-Title: polyman`.
+5. **Errors**: HTTP 402 (no credits) maps to a clear, non-retryable error that says to add credits.
+6. **Budgets** for Gemma in `src/agent/providers/gemma.ts` (below).
+
+## Gemma quirks
+
+Gemma 4 is smaller than the frontier models. The harness must expect mistakes and turn them into tool results the model can fix, never into crashes.
+
+| Quirk | Handling |
+| --- | --- |
+| Tool arguments that are not valid JSON | Already handled: `parseToolArgs` repairs, else the tool call has `argsError`. The tool registry sends that error back so the model calls again. |
+| A tool call written as text in `content` instead of `tool_calls` | The session detects a known tool name in the text. It does not run it, it sends a user note: "use the tool call, not text". |
+| Wrong argument names or types | The schema check in the tool registry returns the exact problem (see [04-harness.md](04-harness.md)). |
+| Loops (the same tool with the same args again and again) | The session counts repeats. After 3 the same call returns: "you already did this, the result was: ... Try something else or ask the user." |
+| Long contexts make it worse at following the rules | We use a much smaller budget than the 262k window (see below). |
+| Free variants hit rate limits fast | Use them only while developing. The demo and real use go to the paid model. |
+
+## Budgets for Gemma
+
+| Setting | Value | Why |
+| --- | --- | --- |
+| Max steps per turn | 20 | A small model that is stuck rarely recovers after 20 steps. |
+| Context budget | 32k tokens, trim old tool results above that | Quality drops with long contexts. Old files can always be read again. |
+| Tool result cap | 8 KB | Short, exact results work better than full logs. The full log stays on disk. |
+| Max output tokens per step | 8k | Enough for a full solution or generator file. |
+| Temperature | 0.3 to start | Tool work needs stable output. Not sure yet, the evals decide. |
+| Tools exposed at once | about 10 | Fewer tools, fewer wrong picks. |
+
+## Key and settings
+
+The existing `~/.polyman/ai.json` and `polyman ai` commands are used as they are:
+
+```bash
+polyman ai login openrouter                          # hidden prompt, saves the key
+polyman ai use openrouter/google/gemma-4-31b-it      # default model
 ```
 
-We only retry before the first streamed byte. If the stream breaks in the middle, we stop the step and show an error, since we cannot know what the model already did.
+or just `export OPENROUTER_API_KEY=...` (the env var wins over the file). The key is only sent to the OpenRouter base URL, and `redact` removes it from logs, errors and session files.
 
 ## Tests
 
-- SSE fixtures recorded once from each provider (text only, tool call, two tool calls, reasoning, error) and replayed in Vitest.
+- The existing provider tests stay green.
+- W1 adds: the Gemma models in the preset, `extraBody` in the request body (with and without tools), `costUsd` from a recorded OpenRouter stream, the 402 mapping, the headers.
 - `MockProvider` takes a script: `[{ text: 'ok' }, { toolCall: { name: 'verify', args: {} } }, ...]`.
-- `polyman ai test` is the manual check with real keys.

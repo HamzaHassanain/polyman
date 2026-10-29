@@ -7,7 +7,7 @@
 ```
 $ polyman chat ./pairs-sum
 
- polyman chat  ·  pairs-sum  ·  deepseek/deepseek-chat  ·  /help for commands
+ polyman chat  ·  pairs-sum  ·  gemma-4-31b (OpenRouter)  ·  /help for commands
 
 > I have an idea: count pairs with sum k, n up to 2e5
 
@@ -39,7 +39,7 @@ $ polyman chat ./pairs-sum
 ────────────────────────────────────────────────────────────────────────
 > _
 ────────────────────────────────────────────────────────────────────────
- pairs-sum · deepseek-chat · ask mode (shift+tab) · 12.3k tok · $0.02 · esc to interrupt
+ pairs-sum · gemma-4-31b · ask mode (shift+tab) · 12.3k tok · $0.01 · esc to interrupt
 ```
 
 ## Main ideas
@@ -65,9 +65,9 @@ This changes our "3 runtime deps" rule, so it is a conscious decision: `ink` and
 
 `require('ink')` fails with `ERR_REQUIRE_ASYNC_MODULE` (Ink uses top-level await), and `import('ink')` works. So:
 
-- `src/agent/` has its own `package.json` with `{ "type": "module" }`. TypeScript (`module: nodenext`) then compiles everything under it to ESM, also `.tsx` files.
-- The build copies `src/agent/package.json` to `dist/agent/package.json`.
-- `cli.ts` (CommonJS) loads the agent with `await import('./agent/index.js')`, which works from CommonJS.
+- The agent code stays CommonJS like the rest of polyman. Only `src/agent/tui/` has its own `package.json` with `{ "type": "module" }`. TypeScript (`module: nodenext`) then compiles that folder to ESM, also the `.tsx` files. Relative imports inside it end in `.js`.
+- The build copies `src/agent/tui/package.json` to `dist/agent/tui/package.json`, and `package.json` `files` lists it (today only `dist/**/*.js` is shipped).
+- `src/agent/index.ts` (CommonJS) loads the UI with `await import('./tui/index.js')`, which works from CommonJS. The ESM UI imports the CommonJS agent modules normally (Node gives named exports for TypeScript's CommonJS output).
 - `tsconfig.json` gets `"jsx": "react-jsx"`, and ESLint gets the `.tsx` files.
 
 ## Components
@@ -109,8 +109,9 @@ src/agent/tui/
     Composer.tsx         multi-line input, history, paste
     SlashMenu.tsx
     StatusLine.tsx
+    PlanView.tsx         live workflow task tree + plan approval (see 10-workflow-manager.md)
     views/
-      PlanView.tsx       /plan: notes.md checklist
+      NotesView.tsx      /plan: notes.md checklist
       VerifyView.tsx     /verify: last verify report as a table
       FilesView.tsx      /files: files changed in this session
 ```
@@ -137,7 +138,7 @@ Markdown: we parse with the `marked` lexer (small, no dependencies) and draw the
 | Command | What it does | Milestone |
 | --- | --- | --- |
 | `/help` | keys and commands | M2 |
-| `/model [provider/model]` | pick the model (a list when no argument) | M2 |
+| `/model [id]` | pick one of the Gemma 4 models (31B, 26B-A4B, or their `:free` versions) | M2 |
 | `/mode [ask, auto-edit]` | permission mode | M2 |
 | `/clear` | start a new session in the same folder | M5 |
 | `/resume` | list sessions and pick one | M5 |
@@ -159,7 +160,7 @@ sequenceDiagram
   U->>C: polyman chat ./my-problem
   C->>C: stdin and stdout are a TTY? else say: use polyman ask
   C->>C: import agent (ESM), load settings
-  C->>C: no key? explain polyman ai login and exit with code 2
+  C->>C: no OpenRouter key? explain polyman ai login and exit with code 2
   C->>A: create session (or --resume id)
   C->>T: render App with the session
   U->>T: types messages
@@ -171,7 +172,7 @@ sequenceDiagram
 ```
 
 ```
-polyman chat [dir] [--provider p --model m] [--resume <id>] [--mode ask|auto-edit]
+polyman chat [dir] [--model <gemma-4 id>] [--resume <id>] [--mode ask|auto-edit]
 ```
 
 - If the folder has no `Config.json`, the chat starts in "no problem yet" mode. This is normal for the think step.
@@ -192,6 +193,7 @@ polyman chat [dir] [--provider p --model m] [--resume <id>] [--mode ask|auto-edi
 | Header, transcript in scrollback, streamed markdown | Slash commands with a menu: `/clear`, `/resume`, `/plan`, `/verify`, `/files`, `/cost`, `/compact` |
 | Tool blocks (one line + result), progress lines while running | Colored diff view for `write_file` / `edit_file` in approvals and results |
 | Inline approval prompt with the exact command | `/verify` table and `/plan` checklist views |
+| Live workflow task tree and plan approval (hack day) | `ctrl+o` on a task to see its tool calls |
 | `esc` to interrupt, `ctrl+c` twice to exit | Tokens and cost in the status line, per turn and total |
 | Status line: problem, model, mode | `@` file completion, `esc esc` to edit the last message, `ctrl+o` expand |
 | `/help`, `/model`, `/mode`, `shift+tab` | ASCII fallback for old terminals |

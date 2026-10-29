@@ -369,6 +369,7 @@ function restoreFromCache(
   if (
     meta === null ||
     meta.key !== key ||
+    meta.binarySize === 0 ||
     !fs.existsSync(bin) ||
     hashFile(bin) !== meta.binaryHash
   ) {
@@ -378,8 +379,14 @@ function restoreFromCache(
 
   if (!fs.existsSync(binaryPath) || hashFile(binaryPath) !== meta.binaryHash) {
     fs.mkdirSync(path.dirname(binaryPath), { recursive: true });
-    fs.copyFileSync(bin, binaryPath);
-    fs.chmodSync(binaryPath, 0o755);
+    // Atomic: a standard checker's binary sits in the package folder and
+    // other polyman processes may run it while this one restores it. A
+    // plain copy truncates it first, and an empty file "runs" with exit 0,
+    // so the checker accepted every answer.
+    writeAtomically(binaryPath, tmp => {
+      fs.copyFileSync(bin, tmp);
+      fs.chmodSync(tmp, 0o755);
+    });
   }
 
   const now = new Date();
@@ -416,6 +423,9 @@ function storeInCache(
   fs.mkdirSync(path.dirname(bin), { recursive: true });
 
   const binary = fs.readFileSync(request.binaryPath);
+  // A compiler never writes an empty program: the file was truncated by a
+  // concurrent writer while it was read. Do not keep it.
+  if (binary.length === 0) return;
   const meta: CacheEntryMeta = {
     formatVersion: CACHE_FORMAT_VERSION,
     key: cacheKey.key,

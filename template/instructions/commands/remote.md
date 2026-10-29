@@ -4,6 +4,17 @@ All Polygon-side operations. Authentication is via API key + secret stored once 
 
 Subcommands: `register`, `list`, `pull`, `push`, `view`, `commit`, `package`.
 
+## In `polyman chat`
+
+Do not run these commands as shell commands. Use the tools:
+
+- `remote_push`: push the problem. For a problem that is not on Polygon yet, ask the user for a name and pass it as `newProblemName`.
+- `remote_commit`: commit after every push, with a short message.
+- `remote_package`: build a package after the commit (`standard` by default).
+- `remote_view`: see the problem as it is on Polygon.
+
+There is no register tool. Never ask for, write or repeat the API key or secret. If a tool says Polygon is not set up, tell the user to run `polyman remote register <api-key> <secret>` in their own terminal, not in the chat.
+
 ---
 
 ## `polyman remote register <api-key> <secret>`
@@ -17,6 +28,7 @@ Stores credentials at `~/.polyman/api_key` and `~/.polyman/secret_key`. Run **on
 **What NOT to do:**
 - Don't paste credentials into shared shells / screen sessions — they go to `~/.polyman/` in plaintext but should still be treated as secrets.
 - Don't commit `~/.polyman/`. It's outside the repo by design; don't pull it in.
+- Don't paste credentials into an AI chat. They go to the model provider.
 
 ---
 

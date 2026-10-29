@@ -149,6 +149,32 @@ describe('compile-cache.ts', () => {
       expect(cache.getCacheStats()).toMatchObject({ hits: 1, misses: 1 });
     });
 
+    it('never caches an empty binary', async () => {
+      // A concurrent writer truncated the output while it was stored.
+      const empty = vi.fn(() => {
+        fs.writeFileSync(request().binaryPath, '');
+        return Promise.resolve();
+      });
+      await cache.cachedCompile(request(), empty);
+      await cache.cachedCompile(request(), empty);
+
+      expect(empty).toHaveBeenCalledTimes(2);
+      expect(cachedFiles()).toEqual([]);
+    });
+
+    it('restores a binary that was emptied after it was cached', async () => {
+      const compile = fakeCompiler();
+      await cache.cachedCompile(request(), compile);
+      const built = fs.readFileSync(request().binaryPath, 'utf-8');
+      fs.writeFileSync(request().binaryPath, '');
+
+      await cache.cachedCompile(request(), compile);
+
+      expect(compile).toHaveBeenCalledTimes(1);
+      expect(fs.readFileSync(request().binaryPath, 'utf-8')).toBe(built);
+      expect(fs.statSync(request().binaryPath).mode & 0o111).not.toBe(0);
+    });
+
     it('probes the compiler version once per process', async () => {
       await cache.cachedCompile(request(), fakeCompiler());
       await cache.cachedCompile(request(), fakeCompiler());

@@ -1,0 +1,10 @@
+<#-- Tests 1 to 7 are manual (manual/tests/). -->
+<#-- @group main -->
+<#-- n = 70000, all a_i = k/2: the answer 2449965000 is above 2^31, and the -->
+<#-- brute force still fits in the time limit, so it checks main here. -->
+<#-- Keep it before the n = 200000 tests: polyman stops a solution at its first failure. -->
+gen 70000 1000000000 500000000 > 8
+<#-- n = 200000, all a_i = 1, k = 2: the max answer, 19999900000 -->
+gen 200000 2 1 > 9
+<#-- n = 200000, random from 6 values, k = 1e9: a big answer -->
+gen 200000 1000000000 1 1000000000 500000000 7 999999993 999999999 > 10

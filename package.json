@@ -23,6 +23,7 @@
     "dist/**/*.js",
     "dist/**/*.d.ts",
     "dist/**/*.js.map",
+    "dist/agent/tui/package.json",
     "!dist/**/*.test.*",
     "!dist/demo-logger.*",
     "!dist/actions-old.*",
@@ -34,7 +35,7 @@
     "LICENCE"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node -e \"const fs=require('fs');fs.mkdirSync('dist/agent/tui',{recursive:true});fs.copyFileSync('src/agent/tui/package.json','dist/agent/tui/package.json')\"",
     "start": "node dist/cli.js",
     "dev": "ts-node src/cli.ts",
     "watch": "tsc --watch",
@@ -56,12 +57,14 @@
     "@types/commander": "^2.12.0",
     "@types/node": "^24.10.0",
     "@types/ora": "^3.1.0",
+    "@types/react": "^19.3.0",
     "@typescript-eslint/eslint-plugin": "~8.72.0",
     "@typescript-eslint/parser": "~8.72.0",
     "@vitest/coverage-v8": "^4.1.12",
     "eslint": "^10.13.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.4",
+    "ink-testing-library": "^4.0.0",
     "prettier": "^3.6.2",
     "ts-node": "^10.9.2",
     "typedoc": "^0.28.14",
@@ -72,7 +75,10 @@
   "dependencies": {
     "chalk": "^5.6.2",
     "commander": "^14.0.2",
-    "execa": "^5.1.1"
+    "execa": "^5.1.1",
+    "ink": "6.8.0",
+    "marked": "^18.1.1",
+    "react": "^19.3.1"
   },
   "overrides": {
     "typedoc": {

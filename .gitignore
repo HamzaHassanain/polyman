@@ -9,3 +9,6 @@ coverage/
 
 # worktrees created by AI agents (git worktree add under .claude/)
 .claude/worktrees/
+
+# probe and eval raw results, the tables go in the READMEs
+evals/**/results/

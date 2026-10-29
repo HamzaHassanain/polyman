@@ -1,0 +1,34 @@
+# source: https://openrouter.ai/docs/api-reference/streaming
+# request: OpenRouter, model google/gemma-4-31b-it, stream: true
+# Recorded from OpenRouter on 2026-10-26 (#79).
+HTTP/2 200 
+content-type: text/event-stream
+access-control-allow-origin: *
+cache-control: no-cache
+x-generation-id: gen-1793015220-f1kOI9zXEgrl6a72xGMY
+access-control-expose-headers: X-Generation-Id,X-Provider-Name,request-id,cf-ray
+permissions-policy: payment=(self "https://checkout.stripe.com" "https://connect-js.stripe.com" "https://js.stripe.com" "https://*.js.stripe.com" "https://hooks.stripe.com")
+referrer-policy: no-referrer, strict-origin-when-cross-origin
+x-content-type-options: nosniff
+cf-ray: a5093946bbd25368-CAI
+
+: OPENROUTER PROCESSING
+
+: OPENROUTER PROCESSING
+
+: OPENROUTER PROCESSING
+
+: OPENROUTER PROCESSING
+
+: OPENROUTER PROCESSING
+
+data: {"id":"gen-1793015220-f1kOI9zXEgrl6a72xGMY","object":"chat.completion.chunk","created":1793015220,"model":"google/gemma-4-31b-it","provider":"CoreWeave","choices":[{"index":0,"delta":{"content":null,"role":"assistant","tool_calls":[{"index":0,"id":"call-967015ee-fb03-41d4-a0b8-d7ee05dc2281","type":"function","function":{"name":"verify","arguments":""}}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1793015220-f1kOI9zXEgrl6a72xGMY","object":"chat.completion.chunk","created":1793015220,"model":"google/gemma-4-31b-it","provider":"CoreWeave","choices":[{"index":0,"delta":{"content":null,"role":"assistant","tool_calls":[{"index":0,"function":{"arguments":"{\"dir\":\".\"}"}}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1793015220-f1kOI9zXEgrl6a72xGMY","object":"chat.completion.chunk","created":1793015220,"model":"google/gemma-4-31b-it","provider":"CoreWeave","choices":[{"index":0,"delta":{"content":"","role":"assistant"},"finish_reason":"tool_calls","native_finish_reason":"tool_calls"}]}
+
+data: {"id":"gen-1793015220-f1kOI9zXEgrl6a72xGMY","object":"chat.completion.chunk","created":1793015220,"model":"google/gemma-4-31b-it","provider":"CoreWeave","service_tier":null,"choices":[{"index":0,"delta":{"content":"","role":"assistant"},"finish_reason":"tool_calls","native_finish_reason":"tool_calls"}],"usage":{"prompt_tokens":63,"completion_tokens":13,"total_tokens":76,"cost":0.00001072,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"cache_write_tokens":0,"audio_tokens":0,"video_tokens":0},"cost_details":{"upstream_inference_cost":0.00001072,"upstream_inference_prompt_cost":0.0000063,"upstream_inference_completions_cost":0.00000442},"completion_tokens_details":{"reasoning_tokens":0,"image_tokens":0,"audio_tokens":0}}}
+
+data: [DONE]
+
