@@ -107,7 +107,7 @@ polyman generates tests locally from its expansion and Polygon from its own, so 
 the setter verified other tests than the ones Polygon publishes.
 
 ```bash
-POLYGON_API_KEY=... POLYGON_API_SECRET=... node corpus/polygon-roundtrip.mjs --problem-id 605330
+POLYGON_API_KEY=... POLYGON_API_SECRET=... node corpus/polygon-roundtrip.mjs --problem-id 618552
 POLYGON_API_KEY=... POLYGON_API_SECRET=... node corpus/polygon-roundtrip.mjs --all
 ```
 
@@ -116,7 +116,7 @@ branch only and only when the repository has the `POLYGON_API_KEY` and `POLYGON_
 secrets of a test Polygon account; without them the job is skipped. It runs with `--all`: every problem listed in `polygon.json` with its Polygon problem, one JUnit report each.
 Each problem needs a Polygon problem of its own, and creating one is a person's decision, so a
 problem that isn't listed is reported as skipped (by name, in the log and as skipped test cases)
-instead of silently left out. Today only `sum-parity` (605330) is listed.
+instead of silently left out. Today only `sum-parity` (618552) is listed.
 
 ## Mutation testing
 

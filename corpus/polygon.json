@@ -1,6 +1,6 @@
 {
   "$comment": "Polygon problems the round trip (polygon-roundtrip.mjs --all) pushes each corpus problem to. A problem that is not listed is reported as skipped. Each one needs its own Polygon problem, writable by the CI account, created by a person.",
   "problems": {
-    "sum-parity": 605330
+    "sum-parity": 618552
   }
 }
