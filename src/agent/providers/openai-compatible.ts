@@ -9,6 +9,7 @@ import { parseSse, type SseEvent } from './sse-parser';
 import {
   ProviderError,
   type ChatRequest,
+  type ModelInfo,
   type Provider,
   type StreamEvent,
   type ToolSpec,
@@ -77,6 +78,7 @@ export class OpenAICompatibleProvider implements Provider {
   /** The quirks in use. `streamOptions` may turn off after a rejection. */
   readonly quirks: Quirks;
 
+  private readonly baseUrl: string;
   private readonly url: string;
   private readonly headers: Record<string, string>;
   private readonly fetchFn: typeof fetch;
@@ -85,7 +87,8 @@ export class OpenAICompatibleProvider implements Provider {
   constructor(opts: OpenAICompatibleOptions) {
     this.id = opts.id ?? 'openai-compatible';
     this.quirks = { ...DEFAULT_QUIRKS, ...opts.quirks };
-    this.url = `${opts.baseUrl.replace(/\/+$/, '')}/chat/completions`;
+    this.baseUrl = opts.baseUrl.replace(/\/+$/, '');
+    this.url = `${this.baseUrl}/chat/completions`;
     this.headers = {
       'content-type': 'application/json',
       accept: 'text/event-stream',
@@ -146,6 +149,40 @@ export class OpenAICompatibleProvider implements Provider {
     for (const event of turn.end()) yield event;
   }
 
+  /**
+   * Lists the models of the server: `GET {baseUrl}/models`. Every server
+   * gives the ids. OpenRouter also gives the context window, the max output,
+   * the supported parameters and the prices, and {@link parseModelList}
+   * reads them. The key (when there is one) only goes to the base URL.
+   */
+  async listModels(signal: AbortSignal): Promise<ModelInfo[]> {
+    signal.throwIfAborted();
+    const url = `${this.baseUrl}/models`;
+    const headers: Record<string, string> = { ...this.headers };
+    delete headers['content-type'];
+    headers['accept'] = 'application/json';
+    let response: Response;
+    try {
+      response = await this.fetchFn(url, { method: 'GET', headers, signal });
+    } catch (err) {
+      signal.throwIfAborted();
+      throw new ProviderError(
+        'network',
+        `cannot reach ${url}: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+    if (!response.ok) throw await errorFromResponse(response);
+    let json: unknown;
+    try {
+      json = await response.json();
+    } catch {
+      throw new ProviderError('server', `${url} did not answer with JSON`, {
+        status: response.status,
+      });
+    }
+    return parseModelList(json);
+  }
+
   /** Sends one request. Network failures become `network` errors. */
   private async post(req: ChatRequest, signal: AbortSignal): Promise<Response> {
     try {
@@ -163,6 +200,75 @@ export class OpenAICompatibleProvider implements Provider {
       );
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Model list
+
+/**
+ * Reads the body of `GET /models`: `{ data: [{ id, ... }] }`. Entries
+ * without a string id are skipped. The OpenRouter fields are read when they
+ * are there (https://openrouter.ai/docs/api-reference/list-available-models):
+ *
+ * - `context_length`, and `top_provider.context_length` when it is smaller
+ * - `top_provider.max_completion_tokens`
+ * - `supported_parameters`: `tools` and `reasoning`
+ * - `pricing.prompt` and `pricing.completion`, USD per token, as strings.
+ *   A negative price (like `-1` for `openrouter/auto`) means unknown.
+ */
+export function parseModelList(json: unknown): ModelInfo[] {
+  if (!isRecord(json) || !Array.isArray(json['data'])) {
+    throw new ProviderError('server', 'the model list has no data array');
+  }
+  const out: ModelInfo[] = [];
+  for (const entry of json['data'] as unknown[]) {
+    if (!isRecord(entry) || typeof entry['id'] !== 'string') continue;
+    if (entry['id'] === '') continue;
+    out.push(modelInfo(entry['id'], entry));
+  }
+  return out;
+}
+
+function modelInfo(id: string, entry: Record<string, unknown>): ModelInfo {
+  const info: ModelInfo = { id };
+  const top = isRecord(entry['top_provider']) ? entry['top_provider'] : {};
+  const windows = [entry['context_length'], top['context_length']].filter(
+    isPositiveInt
+  );
+  if (windows.length > 0) info.contextWindow = Math.min(...windows);
+  if (isPositiveInt(top['max_completion_tokens'])) {
+    info.maxOutput = top['max_completion_tokens'];
+  }
+  const params = entry['supported_parameters'];
+  if (Array.isArray(params)) {
+    info.supportsTools = params.includes('tools');
+    if (params.includes('reasoning')) info.reasoning = true;
+  }
+  const pricing = isRecord(entry['pricing']) ? entry['pricing'] : {};
+  const inPrice = perMTok(pricing['prompt']);
+  const outPrice = perMTok(pricing['completion']);
+  if (inPrice !== undefined && outPrice !== undefined) {
+    info.pricePerMTokIn = inPrice;
+    info.pricePerMTokOut = outPrice;
+  }
+  return info;
+}
+
+function isPositiveInt(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0;
+}
+
+/** USD per token (a string or a number) to USD per million tokens. */
+function perMTok(value: unknown): number | undefined {
+  const n =
+    typeof value === 'string' && value.trim() !== ''
+      ? Number(value)
+      : typeof value === 'number'
+        ? value
+        : NaN;
+  if (!Number.isFinite(n) || n < 0) return undefined;
+  // Round away the float noise of the multiplication (0.0000002 * 1e6).
+  return Math.round(n * 1e6 * 1e6) / 1e6;
 }
 
 // ---------------------------------------------------------------------------
@@ -317,6 +423,14 @@ export async function errorFromResponse(
     return new ProviderError('context_too_long', text, { status });
   }
   if (status === 400 && isToolsError(message)) {
+    return new ProviderError('tools_not_supported', text, { status });
+  }
+  if (
+    status === 404 &&
+    /no endpoints found that support tool use/i.test(message)
+  ) {
+    // OpenRouter, with `require_parameters`, when no host of the model can
+    // call tools.
     return new ProviderError('tools_not_supported', text, { status });
   }
   if (status >= 500) return new ProviderError('server', text, { status });

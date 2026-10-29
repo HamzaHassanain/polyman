@@ -92,6 +92,14 @@ export interface ModelInfo {
   contextWindow?: number;
   /** Whether the model supports tool calls, when the provider reports it. */
   supportsTools?: boolean;
+  /** Upper bound on generated tokens, when the provider reports it. */
+  maxOutput?: number;
+  /** Whether the model can think before it answers, when reported. */
+  reasoning?: boolean;
+  /** USD per million input tokens, when the provider reports it. */
+  pricePerMTokIn?: number;
+  /** USD per million output tokens, when the provider reports it. */
+  pricePerMTokOut?: number;
 }
 
 /** A model provider, such as an OpenAI-compatible or Anthropic endpoint. */
