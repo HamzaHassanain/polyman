@@ -9,6 +9,10 @@
 - Solutions run with the problem's `inputFile` and `outputFile`. When one of them is a file name (not empty, `stdin` or `stdout`), each test runs in a new temp folder: the test is copied there as `inputFile`, and the output is read from `outputFile`. A value that is a path stops the run with exit code 2 (GitLab #122, !355).
 - The standard checker example in GUIDE.md uses the plain name (`wcmp.cpp`), like `remote pull` writes it (GitLab !356).
 - The npm `bugs` URL and the guide links point to GitHub (GitLab !347).
+- `polyman chat` (preview): an AI agent in the terminal. It talks with you about a problem idea, writes the spec to `.polyman/agent/notes.md`, and builds, fixes or strengthens the problem with workflows (`prove_idea`, `build_problem`, `fix_verify`, `strengthen_tests`, plus `find_ideas` for ideas). Small workers write only their own files, and the polyman CLI checks every task. File writes and every Polygon change ask first, the agent works only inside the problem folder, and `--plain` gives a line mode for pipes. See [GUIDE.md](GUIDE.md#chat-ai-agent) (GitHub PR 119).
+- The `polyman ai` commands (`login`, `logout`, `list`, `models`, `use`) now set up the keys and the default model for `polyman chat` (GitHub PR 119).
+- The compile cache never stores or restores an empty binary. Two runs at the same time could leave a shared standard checker as an empty file, which accepts every answer. A restore now copies to a temp file and renames it.
+- In the chat approval box, `enter` right after an arrow key chooses the new option, not the old one.
 
 ## 3.1.0
 
