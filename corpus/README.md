@@ -111,9 +111,9 @@ POLYGON_API_KEY=... POLYGON_API_SECRET=... node corpus/polygon-roundtrip.mjs --p
 POLYGON_API_KEY=... POLYGON_API_SECRET=... node corpus/polygon-roundtrip.mjs --all
 ```
 
-In CI it runs nightly as the `polygon` job of `.github/workflows/nightly.yml`, on the default
-branch only and only when the repository has the `POLYGON_API_KEY` and `POLYGON_API_SECRET`
-secrets of a test Polygon account; without them the job is skipped. It runs with `--all`: every problem listed in `polygon.json` with its Polygon problem, one JUnit report each.
+In CI it runs only in `release.yml`, on the `next` version, as evidence (not a gate), and only
+when the repository has the `POLYGON_API_KEY` and `POLYGON_API_SECRET` secrets of a test Polygon
+account. It runs with `--all`: every problem listed in `polygon.json` with its Polygon problem, one JUnit report each.
 Each problem needs a Polygon problem of its own, and creating one is a person's decision, so a
 problem that isn't listed is reported as skipped (by name, in the log and as skipped test cases)
 instead of silently left out. Today only `sum-parity` (618552) is listed.
@@ -163,13 +163,6 @@ something it reads (polyman's source, tests, `template/`, `assets/`, the corpus,
 `tsconfig*.json`, `vitest.config.ts`, the workflow). Pull requests run the `mutation` job only; to
 judge a pull request's survivors, run the workflow by hand on its branch. The summary lists every mutant both the unit tests and the judges miss.
 
-## Upstream drift
-
-polyman depends on two things it doesn't control: Polygon's API (documented in
-`codeforces/polygon-misc`) and `testlib.h`. `upstream.mjs` compares their latest commits with the
-ones pinned in `upstream.json` and fails, listing what changed, when either moved (the `upstream` job of
-`.github/workflows/nightly.yml`). After checking polyman against the change, `node corpus/upstream.mjs --update` moves the pins.
-
 ## In CI
 
 | Workflow                          | Jobs                                                                                       |
@@ -177,5 +170,4 @@ ones pinned in `upstream.json` and fails, listing what changed, when either move
 | `corpus.yml` (push, pull request) | `corpus`, `toolchain` (node-20.19, no-python-alias), `pch`, `truth`                        |
 | `ci.yml`                          | `macos`: the corpus with Homebrew GNU g++, on the default branch and by hand               |
 | `mutation.yml`                    | `mutation`, `survivors` (8 shards), `survivors-report`                                     |
-| `nightly.yml`                     | `production` (the corpus on `polyman-cli@latest`), `upstream`, `polygon`                   |
 | `release.yml` (`v*` tags)         | `publish` to npm `next`, `next-check` (no regression against `latest`), `promote`, Release |

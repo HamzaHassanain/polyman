@@ -14,7 +14,7 @@ import {
   type Workflow,
 } from './workflow-yaml';
 
-// Pins the release, nightly and security workflows, and checks every workflow
+// Pins the release and security workflows, and checks every workflow
 // for what GitHub only reports when it runs: a `needs` to a missing job, an
 // action on another major version, no least-privilege permissions.
 const DIR = resolve(__dirname, '../../.github/workflows');
@@ -139,62 +139,6 @@ describe('release.yml', () => {
     for (const [id, job] of Object.entries(jobs(wf)))
       if (!['publish', 'github-release'].includes(id))
         expect(asMap(job)['permissions'], id).toBeUndefined();
-  });
-});
-
-describe('nightly.yml', () => {
-  const wf = readWorkflow('nightly.yml');
-
-  it('runs on a schedule and by hand', () => {
-    expect(Object.keys(asMap(wf['on']))).toEqual([
-      'schedule',
-      'workflow_dispatch',
-    ]);
-  });
-
-  it('judges the polyman users install from npm', () => {
-    const job = jobOf(wf, 'production');
-    expect(asMap(job['env'])['POLYMAN_VERSION']).toBe('latest');
-    expect(runsOf(job).join('\n')).toContain('polyman-cli@"$POLYMAN_VERSION"');
-  });
-
-  it('runs the Polygon round trip on the default branch, with the secrets', () => {
-    const gate = jobOf(wf, 'polygon-gate');
-    const polygon = jobOf(wf, 'polygon');
-    expect(gate['if']).toBe(
-      "github.ref == format('refs/heads/{0}', github.event.repository.default_branch)"
-    );
-    const check = stepsOf(gate)[0];
-    expect(asMap(check['env'])).toEqual({
-      HAS_KEY: "${{ secrets.POLYGON_API_KEY != '' }}",
-      HAS_SECRET: "${{ secrets.POLYGON_API_SECRET != '' }}",
-    });
-    expect(needsOf(polygon)).toEqual(['polygon-gate']);
-    expect(polygon['if']).toBe("needs.polygon-gate.outputs.ready == 'true'");
-    expect(runsOf(polygon)).toContain(
-      'node corpus/polygon-roundtrip.mjs --all'
-    );
-    // polygon-roundtrip.mjs reads these two variables
-    expect(asMap(polygon['env'])).toEqual({
-      POLYGON_API_KEY: '${{ secrets.POLYGON_API_KEY }}',
-      POLYGON_API_SECRET: '${{ secrets.POLYGON_API_SECRET }}',
-    });
-  });
-
-  it('writes to Polygon from one job at a time', () => {
-    for (const id of ['production', 'polygon'])
-      expect(asMap(jobOf(wf, id)['concurrency'])).toEqual({
-        group: 'polygon',
-        'cancel-in-progress': 'false',
-      });
-  });
-
-  it('checks upstream drift with the run token', () => {
-    const job = jobOf(wf, 'upstream');
-    const step = stepsOf(job).find(
-      s => s['run'] === 'node corpus/upstream.mjs'
-    );
-    expect(asMap(step?.['env'])['GITHUB_TOKEN']).toBe('${{ github.token }}');
   });
 });
 
