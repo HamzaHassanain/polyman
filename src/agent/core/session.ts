@@ -42,6 +42,7 @@ export class AgentSession implements AgentSessionApi {
   private readonly deps: AgentSessionDeps;
   private readonly history: Message[] = [];
   private controller: AbortController | null = null;
+  private chatOnlyNoticeShown = false;
 
   constructor(deps: AgentSessionDeps) {
     this.deps = deps;
@@ -108,7 +109,9 @@ export class AgentSession implements AgentSessionApi {
     for (let step = 0; step < deps.maxSteps; step++) {
       const system = await deps.buildSystemPrompt();
       signal.throwIfAborted();
-      const tools = deps.tools.specs();
+      const chatOnly = deps.chatOnly?.active() === true;
+      if (chatOnly) this.showChatOnlyNotice();
+      const tools = chatOnly ? [] : deps.tools.specs();
       const req: ChatRequest = {
         model: deps.model,
         system,
@@ -121,7 +124,20 @@ export class AgentSession implements AgentSessionApi {
         maxOutputTokens: deps.maxOutputTokens,
         temperature: deps.temperature,
       };
-      const reply = await this.streamStep(req, signal);
+      let reply: StepReply;
+      try {
+        reply = await this.streamStep(req, signal);
+      } catch (err) {
+        // A model with no tool support: show why, then ask again without
+        // tools. Nothing of the failed call was kept.
+        const noTools =
+          tools.length > 0 &&
+          !signal.aborted &&
+          deps.chatOnly?.noteError(err) === true;
+        if (!noTools) throw err;
+        this.showChatOnlyNotice();
+        continue;
+      }
       signal.throwIfAborted();
 
       if (reply.calls.length === 0) {
@@ -166,6 +182,18 @@ export class AgentSession implements AgentSessionApi {
       },
     ]);
     return 'max_steps';
+  }
+
+  /** Shows the chat-only notice once per session. */
+  private showChatOnlyNotice(): void {
+    const chatOnly = this.deps.chatOnly;
+    if (this.chatOnlyNoticeShown || !chatOnly) return;
+    this.chatOnlyNoticeShown = true;
+    this.deps.bus.emit({
+      type: 'notice',
+      level: 'warn',
+      text: chatOnly.notice(),
+    });
   }
 
   /** Streams one model call, forwards its deltas and collects the reply. */

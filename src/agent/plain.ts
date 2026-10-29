@@ -233,6 +233,9 @@ export function runPlain(
       case 'compacted':
         line(`[compacted ${e.removedMessages} old messages]`);
         break;
+      case 'notice':
+        line(`[${e.level === undefined ? '' : `${e.level}: `}${e.text}]`);
+        break;
       case 'turn_end':
         if (e.reason === 'cancelled') line('[cancelled]');
         else if (e.reason === 'max_steps') line('[stopped at the step limit]');

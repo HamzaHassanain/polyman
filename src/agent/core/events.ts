@@ -78,6 +78,11 @@ export type AgentEvent =
   | { type: 'problem_dir_changed'; problemDir: string }
   /** Old messages were cut to stay under the context budget. */
   | { type: 'compacted'; removedMessages: number }
+  /**
+   * A line for the user from the session, not from the model, like "this
+   * model can only chat". It is never sent to the model.
+   */
+  | { type: 'notice'; text: string; level?: 'info' | 'warn' | 'error' }
   /** The turn is over, and why. */
   | {
       type: 'turn_end';
