@@ -1088,16 +1088,16 @@ async function buildPackageAndWait(
   await sdk.buildPackage(problemId, full, verify);
   fmt.info(`  ${fmt.infoIcon()} Build job queued, waiting for completion...`);
 
-  // Poll every 30 seconds to check if new package is created
+  // Poll once a minute, 30 times: 30 minutes max wait time
   let latestPackage = null;
   let attempts = 0;
-  const maxAttempts = 30; // 30 minutes max wait time
+  const maxAttempts = 30;
 
   while (attempts < maxAttempts) {
     attempts++;
 
     // Wait 60 seconds before checking
-    await new Promise(resolve => setTimeout(resolve, 30000));
+    await new Promise(resolve => setTimeout(resolve, 60000));
 
     // Check packages
     const currentPackages = await sdk.listPackages(problemId);
