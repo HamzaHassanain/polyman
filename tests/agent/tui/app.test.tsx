@@ -70,7 +70,7 @@ describe('App with the fake session', () => {
     const { lastFrame } = setup();
     const frame = lastFrame() ?? '';
     expect(frame).toContain('✦ polyman chat · powered by gemma-4-31b');
-    expect(frame).toMatch(/folder .*pairs-sum/);
+    expect(frame).toMatch(/folder.*pairs-sum/);
     expect(frame).toContain('model  gemma-4-31b (OpenRouter)');
     expect(frame).toContain('Type a message');
     expect(frame).toContain(' ask  shift+tab ');
