@@ -62,7 +62,13 @@ export function PlanApproval({
   /** Most task rows, less than 20 when the terminal is short. */
   maxRows?: number;
 }) {
-  const [selected, setSelected] = useState(0);
+  const [selected, setSelectedState] = useState(0);
+  // Keys can come faster than React renders: enter must see the newest arrow.
+  const selectedRef = useRef(0);
+  const setSelected = (next: number) => {
+    selectedRef.current = next;
+    setSelectedState(next);
+  };
   const [answered, setAnswered] = useState(false);
   // Keys can come before React draws the answered box again, so a ref (not
   // the state) makes sure the plan is answered only once.
@@ -83,11 +89,11 @@ export function PlanApproval({
       if (key.escape) {
         choose(count - 1);
       } else if (key.leftArrow || key.upArrow || (key.tab && key.shift)) {
-        setSelected(s => (s + count - 1) % count);
+        setSelected((selectedRef.current + count - 1) % count);
       } else if (key.rightArrow || key.downArrow || key.tab) {
-        setSelected(s => (s + 1) % count);
+        setSelected((selectedRef.current + 1) % count);
       } else if (key.return) {
-        choose(selected);
+        choose(selectedRef.current);
       } else if (/^[1-9]$/.test(input)) {
         choose(Number(input) - 1);
       }

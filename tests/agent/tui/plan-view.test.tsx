@@ -461,6 +461,25 @@ describe('PlanApproval', () => {
       expect(resolve).toHaveBeenCalledWith('p1', { kind: 'deny' })
     );
   });
+
+  it('enter right after the arrows, before React draws, uses them', async () => {
+    const resolve = vi.fn();
+    const { stdin } = render(
+      <PlanApproval
+        approvalId="p1"
+        plan={PLAN}
+        problem={null}
+        resolveApproval={resolve}
+      />
+    );
+    await tick();
+    stdin.write('\u001B[C');
+    stdin.write('\u001B[C');
+    stdin.write('\r');
+    await vi.waitFor(() =>
+      expect(resolve).toHaveBeenCalledWith('p1', { kind: 'deny' })
+    );
+  });
 });
 
 describe('PlanView', () => {

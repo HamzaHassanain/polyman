@@ -1012,7 +1012,7 @@ describe('steps.ts', () => {
         buildPackage: vi.fn().mockResolvedValue(undefined),
       } as any;
       const promise = steps.stepBuildPackage(1, sdk, 7, 'standard');
-      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(60000);
       const result = await promise;
       expect(result.state).toBe('READY');
       expect(result.id).toBe(5);
@@ -1036,7 +1036,7 @@ describe('steps.ts', () => {
           buildPackage: vi.fn().mockResolvedValue(undefined),
         } as any;
         const promise = steps.stepBuildPackage(1, sdk, 7, type);
-        await vi.advanceTimersByTimeAsync(30000);
+        await vi.advanceTimersByTimeAsync(60000);
         await promise;
         expect(sdk.buildPackage).toHaveBeenCalledWith(7, full, verify);
         vi.useRealTimers();
@@ -1054,7 +1054,7 @@ describe('steps.ts', () => {
       } as any;
       const promise = steps.stepBuildPackage(1, sdk, 7, 'full');
       promise.catch(() => undefined);
-      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(60000);
       await expect(promise).rejects.toThrow('Package build failed: oops');
       // Polygon answered: the problem itself did not build, so code 1
       await expect(promise).rejects.not.toBeInstanceOf(PolymanError);
@@ -1069,7 +1069,15 @@ describe('steps.ts', () => {
       } as any;
       const promise = steps.stepBuildPackage(1, sdk, 7, 'standard');
       promise.catch(() => undefined);
-      await vi.advanceTimersByTimeAsync(30 * 30000);
+      // Still waiting after 15 minutes: the message says 30.
+      let settled = false;
+      promise.then(
+        () => (settled = true),
+        () => (settled = true)
+      );
+      await vi.advanceTimersByTimeAsync(15 * 60000);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(15 * 60000);
       await expect(promise).rejects.toThrow(
         'Package build timed out after 30 minutes'
       );

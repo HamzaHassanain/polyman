@@ -1134,7 +1134,7 @@ describe('remote commands with --json', () => {
         const run = failure(
           actions.remotePackageProblemAction('7', 'standard', { json: true })
         );
-        await vi.advanceTimersByTimeAsync(31 * 30000);
+        await vi.advanceTimersByTimeAsync(31 * 60000);
         error = await run;
       } finally {
         vi.useRealTimers();
@@ -1171,7 +1171,7 @@ describe('remote commands with --json', () => {
         const run = failure(
           actions.remotePackageProblemAction('7', 'standard', { json: true })
         );
-        await vi.advanceTimersByTimeAsync(30000);
+        await vi.advanceTimersByTimeAsync(60000);
         error = await run;
       } finally {
         vi.useRealTimers();
@@ -1202,7 +1202,7 @@ describe('remote commands with --json', () => {
         const run = actions.remotePackageProblemAction('7', 'full', {
           json: true,
         });
-        await vi.advanceTimersByTimeAsync(30000);
+        await vi.advanceTimersByTimeAsync(60000);
         await run;
       } finally {
         vi.useRealTimers();
