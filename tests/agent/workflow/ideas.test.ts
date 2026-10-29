@@ -11,6 +11,8 @@ import type {
 } from '../../../src/agent/providers/types';
 import { ideasTool } from '../../../src/agent/tools/ideas-tool';
 import {
+  CRITIC_OUTPUT_TOKENS,
+  IDEATOR_OUTPUT_TOKENS,
   IDEA_ANGLES,
   IdeaWorkflow,
   complexityCheck,
@@ -212,6 +214,31 @@ describe('ideasPlan', () => {
 });
 
 describe('IdeaWorkflow', () => {
+  it('asks 3000 tokens for ideas and 2000 for reviews, capped by the model', async () => {
+    const make = () =>
+      new FakeModel(
+        () => ({ name: 'submit_idea', args: idea({ title: 'One' }) }),
+        () => review(4)
+      );
+    const calls = async (maxOutputTokens?: number) => {
+      const model = make();
+      await new IdeaWorkflow({
+        provider: model,
+        model: 'm',
+        bus: new Bus(),
+        count: 1,
+        ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+      }).run({ topic: 'x' }, new AbortController().signal);
+      return model.requests.map(r => [r.tools[0]?.name, r.maxOutputTokens]);
+    };
+    const free = await calls();
+    expect(free).toContainEqual(['submit_idea', IDEATOR_OUTPUT_TOKENS]);
+    expect(free).toContainEqual(['submit_review', CRITIC_OUTPUT_TOKENS]);
+    const small = await calls(1500);
+    expect(small).toContainEqual(['submit_idea', 1500]);
+    expect(small).toContainEqual(['submit_review', 1500]);
+  });
+
   it('writes, checks, reviews and ranks the ideas, with a retry for a slow one', async () => {
     const [a, b, c] = IDEA_ANGLES;
     const model = new FakeModel(

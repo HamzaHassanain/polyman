@@ -118,6 +118,11 @@ export interface ModelWorkerOptions {
   secrets?(): string[];
   /** Upper bound on generated tokens per call, 8000 by default. */
   maxOutputTokens?: number;
+  /**
+   * Context budget of a worker, {@link WORKER_CONTEXT_TOKENS} by default.
+   * The chat gives a smaller one for a model with a small window.
+   */
+  contextBudgetTokens?: number;
   /** Sampling temperature, 0.3 by default. */
   temperature?: number;
   /**
@@ -468,7 +473,7 @@ export class ModelWorker implements Worker {
       }),
       secrets: () => o.secrets?.() ?? [],
       maxSteps: workerMaxSteps(task.kind),
-      contextBudgetTokens: WORKER_CONTEXT_TOKENS,
+      contextBudgetTokens: o.contextBudgetTokens ?? WORKER_CONTEXT_TOKENS,
       maxOutputTokens: o.maxOutputTokens ?? 8000,
       temperature: o.temperature ?? 0.3,
     };

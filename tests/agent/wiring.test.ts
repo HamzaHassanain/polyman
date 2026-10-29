@@ -11,6 +11,15 @@ import {
 } from '../../src/agent/index';
 import { parseAnswer, planLines, runPlain } from '../../src/agent/plain';
 import { MockProvider, type MockStep } from '../../src/agent/providers/mock';
+import {
+  Capabilities,
+  chatOnlyNotice,
+} from '../../src/agent/providers/capabilities';
+import {
+  DEFAULT_BUDGETS,
+  budgetsFor,
+} from '../../src/agent/providers/chat-provider';
+import { ProviderError } from '../../src/agent/providers/types';
 import type { CliRunner, RunResult } from '../../src/agent/runner/types';
 import {
   NO_SPEC_ERROR,
@@ -622,6 +631,58 @@ describe('Polygon tools in the chat', () => {
     expect(text).toContain('Polygon problem 12345');
     expect(text).not.toContain(key);
     expect(text).not.toContain(secret);
+  });
+});
+
+describe('the chat with model-aware budgets and capabilities', () => {
+  it('sends the budgets it was given', async () => {
+    const { rt, provider } = build([{ text: 'hi' }], {
+      budgets: budgetsFor({ contextWindow: 8192, maxOutput: 8192 }),
+    });
+    expect(await rt.session.send('hi')).toBe('done');
+    expect(provider.requests[0]?.maxOutputTokens).toBe(2048);
+  });
+
+  it('uses the default budgets without any', async () => {
+    const { rt, provider } = build([{ text: 'hi' }]);
+    await rt.session.send('hi');
+    expect(provider.requests[0]?.maxOutputTokens).toBe(
+      DEFAULT_BUDGETS.maxOutputTokens
+    );
+    expect(provider.requests[0]?.temperature).toBe(DEFAULT_BUDGETS.temperature);
+  });
+
+  it('runs a model with no tools in chat-only mode and prints the notice', async () => {
+    const capabilities = new Capabilities(
+      {},
+      {
+        'openrouter/google/gemma-3-4b-it': {
+          id: 'google/gemma-3-4b-it',
+          supportsTools: false,
+        },
+      }
+    );
+    const { rt, provider } = build([{ text: 'I can only chat.' }], {
+      providerId: 'openrouter',
+      model: 'google/gemma-3-4b-it',
+      capabilities,
+    });
+    const out = await plain(rt, ['build pairs sum']);
+    expect(provider.requests[0]?.tools).toEqual([]);
+    expect(out).toContain(
+      `[warn: ${chatOnlyNotice('openrouter', 'google/gemma-3-4b-it')}]`
+    );
+    expect(out).toContain('I can only chat.');
+  });
+
+  it('goes chat-only after tools_not_supported instead of failing', async () => {
+    const { rt, provider, events } = build([
+      { error: new ProviderError('tools_not_supported', 'no tool use') },
+      { text: 'Talking only.' },
+    ]);
+    expect(await rt.session.send('hi')).toBe('done');
+    expect(provider.requests[1]?.tools).toEqual([]);
+    expect(events.filter(e => e.type === 'notice')).toHaveLength(1);
   });
 });
 

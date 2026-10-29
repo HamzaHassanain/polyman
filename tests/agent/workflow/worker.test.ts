@@ -375,6 +375,25 @@ describe('ModelWorker', () => {
     expect(ctx.problemDir).toBe('/x/pairs');
   });
 
+  it('takes a smaller context budget and max output from the chat', async () => {
+    const t = setup([finish('done')], {
+      contextBudgetTokens: 4000,
+      maxOutputTokens: 2000,
+    });
+    await t.worker.run(
+      {
+        task: task('main_solution', ['solutions/main.cpp']),
+        spec: SPEC,
+        attempt: 1,
+        fresh: true,
+      },
+      signal()
+    );
+    const deps = t.sessions[0].deps;
+    expect(deps.contextBudgetTokens).toBe(4000);
+    expect(deps.maxOutputTokens).toBe(2000);
+  });
+
   it('uses the small budget and the critic tools for simple kinds', async () => {
     const t = setup([
       {

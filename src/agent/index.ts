@@ -15,7 +15,12 @@ import { ChatPromptBuilder } from './core/prompt';
 import { AgentSession } from './core/session';
 import type { AgentSessionApi } from './core/session-types';
 import { runPlain } from './plain';
-import { DEFAULT_BUDGETS, createChatProvider } from './providers/chat-provider';
+import { Capabilities, chatOnlyNotice } from './providers/capabilities';
+import {
+  DEFAULT_BUDGETS,
+  createChatProvider,
+  type ChatBudgets,
+} from './providers/chat-provider';
 import { withRetries } from './providers/retry';
 import type { Provider } from './providers/types';
 import { NodeCliRunner } from './runner/cli-runner';
@@ -85,6 +90,19 @@ export interface ChatRuntimeOptions {
   dir?: string;
   provider: Provider;
   model: string;
+  /**
+   * The preset id of the provider, for the capability table. Defaults to
+   * `provider.id`.
+   */
+  providerId?: string;
+  /**
+   * What the models can do, with the live info and the `ai.json`
+   * overrides. A model without tools runs in chat-only mode. Defaults to an
+   * empty table, which still turns tools off after `tools_not_supported`.
+   */
+  capabilities?: Capabilities;
+  /** Budgets of the chat, from `budgetsFor()`. Defaults to DEFAULT_BUDGETS. */
+  budgets?: ChatBudgets;
   /** Keys to redact from errors. */
   secrets?: string[];
   /** Runs polyman commands. Defaults to {@link NodeCliRunner}. */
@@ -128,6 +146,9 @@ export function createChatRuntime(opts: ChatRuntimeOptions): ChatRuntime {
       ...(polygon ? [polygon.apiKey, polygon.secret] : []),
     ];
   };
+  const budgets = opts.budgets ?? DEFAULT_BUDGETS;
+  const providerId = opts.providerId ?? opts.provider.id;
+  const capabilities = opts.capabilities ?? new Capabilities();
   const bus = new SimpleEventBus();
   const gate = new DefaultPermissionGate(bus, 'ask');
   const runner = opts.runner ?? new NodeCliRunner();
@@ -149,11 +170,12 @@ export function createChatRuntime(opts: ChatRuntimeOptions): ChatRuntime {
       bus,
       gate,
       secrets,
+      budgets,
     });
 
   const tools = new DefaultToolRegistry({
     permissions: gate,
-    capBytes: DEFAULT_BUDGETS.toolResultCapBytes,
+    capBytes: budgets.toolResultCapBytes,
   });
   const all: Tool[] = [
     ...fsTools(),
@@ -172,6 +194,7 @@ export function createChatRuntime(opts: ChatRuntimeOptions): ChatRuntime {
             provider: opts.provider,
             model: opts.model,
             bus,
+            maxOutputTokens: budgets.maxOutputTokens,
           })),
     }),
   ];
@@ -210,10 +233,16 @@ export function createChatRuntime(opts: ChatRuntimeOptions): ChatRuntime {
       },
     }),
     secrets,
-    maxSteps: DEFAULT_BUDGETS.chatMaxSteps,
-    contextBudgetTokens: DEFAULT_BUDGETS.contextBudgetTokens,
-    maxOutputTokens: DEFAULT_BUDGETS.maxOutputTokens,
-    temperature: DEFAULT_BUDGETS.temperature,
+    maxSteps: budgets.chatMaxSteps,
+    contextBudgetTokens: budgets.contextBudgetTokens,
+    maxOutputTokens: budgets.maxOutputTokens,
+    temperature: budgets.temperature,
+    chatOnly: {
+      active: () => capabilities.isChatOnly(providerId, opts.model),
+      notice: () => chatOnlyNotice(providerId, opts.model),
+      noteError: error =>
+        capabilities.noteError(providerId, opts.model, error) !== undefined,
+    },
   });
 
   return { session, bus, gate, problemDir: () => problemDir, notes };

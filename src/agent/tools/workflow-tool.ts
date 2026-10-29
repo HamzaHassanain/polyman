@@ -18,7 +18,12 @@ import {
 } from '../workflow/scheduler';
 import { parseSpec } from '../workflow/spec';
 import type { Plan, Spec, TaskResult } from '../workflow/types';
-import { checkpointPrecheck, ModelWorker } from '../workflow/worker';
+import {
+  checkpointPrecheck,
+  ModelWorker,
+  WORKER_CONTEXT_TOKENS,
+} from '../workflow/worker';
+import type { ChatBudgets } from '../providers/chat-provider';
 import { cliTools } from './cli-tools';
 import { fsTools } from './fs-tools';
 import { specProblems } from './notes-tools';
@@ -209,6 +214,12 @@ export interface ModelSchedulerOptions {
   /** The chat gate: it asks the user to approve the plan. */
   gate: PermissionGate;
   secrets(): string[];
+  /**
+   * The chat budgets for this model. The manager and the workers get its
+   * max output; a worker gets its context budget when it is smaller than
+   * {@link WORKER_CONTEXT_TOKENS}. Without it they use their defaults.
+   */
+  budgets?: Pick<ChatBudgets, 'maxOutputTokens' | 'contextBudgetTokens'>;
 }
 
 /**
@@ -219,6 +230,7 @@ export interface ModelSchedulerOptions {
 export function modelSchedulerFactory(
   o: ModelSchedulerOptions
 ): WorkflowToolOptions['createScheduler'] {
+  const budgets = o.budgets;
   return (problemDir, runner) => {
     // finish_task runs the check in the session; the memo skips the same
     // check in the scheduler when nothing changed since.
@@ -228,10 +240,20 @@ export function modelSchedulerFactory(
         provider: o.provider,
         model: o.model,
         bus: o.bus,
+        ...(budgets ? { maxOutputTokens: budgets.maxOutputTokens } : {}),
       }),
       worker: new ModelWorker({
         provider: o.provider,
         model: o.model,
+        ...(budgets
+          ? {
+              maxOutputTokens: budgets.maxOutputTokens,
+              contextBudgetTokens: Math.min(
+                WORKER_CONTEXT_TOKENS,
+                budgets.contextBudgetTokens
+              ),
+            }
+          : {}),
         problemDir,
         runner,
         bus: o.bus,
