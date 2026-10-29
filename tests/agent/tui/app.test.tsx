@@ -69,8 +69,8 @@ describe('App with the fake session', () => {
   it('shows the welcome box, the input and the status line', () => {
     const { lastFrame } = setup();
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('✦ polyman chat · powered by Gemma 4');
-    expect(frame).toMatch(/folder .*pairs-sum/);
+    expect(frame).toContain('✦ polyman chat · powered by gemma-4-31b');
+    expect(frame).toMatch(/folder.*pairs-sum/);
     expect(frame).toContain('model  gemma-4-31b (OpenRouter)');
     expect(frame).toContain('Type a message');
     expect(frame).toContain(' ask  shift+tab ');
@@ -262,7 +262,7 @@ describe('App with the fake session', () => {
     const { stdout, lastFrame } = setup();
     await tick();
     const count = (f: string | undefined) =>
-      (f ?? '').split('powered by Gemma 4').length - 1;
+      (f ?? '').split('powered by gemma-4-31b').length - 1;
     expect(count(lastFrame())).toBe(1);
     const tty = stdout as unknown as { isTTY: boolean };
     tty.isTTY = true;

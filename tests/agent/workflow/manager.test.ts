@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { MockProvider } from '../../../src/agent/providers/mock';
 import {
-  GemmaManager,
+  ModelManager,
   parseDecision,
   parsePlan,
 } from '../../../src/agent/workflow/manager';
@@ -74,7 +74,7 @@ function bus(): EventBus & { events: AgentEvent[] } {
   };
 }
 
-describe('GemmaManager.makePlan', () => {
+describe('ModelManager.makePlan', () => {
   it('returns the plan from submit_plan', async () => {
     const provider = new MockProvider([
       {
@@ -83,7 +83,7 @@ describe('GemmaManager.makePlan', () => {
       },
     ]);
     const b = bus();
-    const manager = new GemmaManager({ provider, model: 'gemma', bus: b });
+    const manager = new ModelManager({ provider, model: 'gemma', bus: b });
     const plan = await manager.makePlan(SPEC, 'build_problem', signal());
     expect(plan).toEqual(PLAN);
 
@@ -110,7 +110,7 @@ describe('GemmaManager.makePlan', () => {
       { text: 'Here is my plan: ...' },
       { toolCall: { name: 'submit_plan', args: PLAN } },
     ]);
-    const manager = new GemmaManager({ provider, model: 'gemma' });
+    const manager = new ModelManager({ provider, model: 'gemma' });
     const plan = await manager.makePlan(SPEC, 'build_problem', signal());
     expect(plan.tasks).toHaveLength(3);
     expect(provider.requests).toHaveLength(2);
@@ -128,7 +128,7 @@ describe('GemmaManager.makePlan', () => {
       { toolCall: { id: 'c1', name: 'submit_plan', args: { plan: [] } } },
       { toolCall: { name: 'submit_plan', args: PLAN } },
     ]);
-    const manager = new GemmaManager({ provider, model: 'gemma' });
+    const manager = new ModelManager({ provider, model: 'gemma' });
     await expect(
       manager.makePlan(SPEC, 'build_problem', signal())
     ).resolves.toEqual(PLAN);
@@ -147,7 +147,7 @@ describe('GemmaManager.makePlan', () => {
       { text: 'two' },
       { text: 'three' },
     ]);
-    const manager = new GemmaManager({ provider, model: 'gemma' });
+    const manager = new ModelManager({ provider, model: 'gemma' });
     await expect(
       manager.makePlan(SPEC, 'build_problem', signal())
     ).rejects.toThrow(/did not call submit_plan .* after 3 tries/);
@@ -155,7 +155,7 @@ describe('GemmaManager.makePlan', () => {
   });
 });
 
-describe('GemmaManager.decide', () => {
+describe('ModelManager.decide', () => {
   it('returns the decision from the decide tool', async () => {
     const provider = new MockProvider([
       {
@@ -169,7 +169,7 @@ describe('GemmaManager.decide', () => {
         },
       },
     ]);
-    const manager = new GemmaManager({ provider, model: 'gemma' });
+    const manager = new ModelManager({ provider, model: 'gemma' });
     const d = await manager.decide(
       { spec: SPEC, plan: PLAN, failed: failed(), results: [failed()] },
       signal()
@@ -195,7 +195,7 @@ describe('GemmaManager.decide', () => {
       { toolCall: { name: 'decide', args: { action: 'retry_with_hint' } } },
       { text: 'still thinking' },
     ]);
-    const manager = new GemmaManager({ provider, model: 'gemma' });
+    const manager = new ModelManager({ provider, model: 'gemma' });
     const d = await manager.decide(
       { spec: SPEC, plan: PLAN, failed: failed(), results: [] },
       signal()
@@ -209,7 +209,7 @@ describe('GemmaManager.decide', () => {
 
   it('stops on abort', async () => {
     const provider = new MockProvider([{ text: 'x' }]);
-    const manager = new GemmaManager({ provider, model: 'gemma' });
+    const manager = new ModelManager({ provider, model: 'gemma' });
     const ac = new AbortController();
     ac.abort();
     await expect(

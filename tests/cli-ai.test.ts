@@ -120,8 +120,8 @@ describe('cli.ts ai commands', () => {
 
   it.each([
     [['ai', 'logout', 'groq'], 'aiLogoutAction', ['groq']],
-    [['ai', 'models'], 'aiModelsAction', [undefined]],
-    [['ai', 'models', 'groq'], 'aiModelsAction', ['groq']],
+    [['ai', 'models'], 'aiModelsAction', [undefined, {}]],
+    [['ai', 'models', 'groq'], 'aiModelsAction', ['groq', {}]],
     [
       ['ai', 'use', 'deepseek/deepseek-flash'],
       'aiUseAction',

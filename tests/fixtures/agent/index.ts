@@ -49,6 +49,15 @@ export function readFixture(format: FixtureFormat, name: string): Fixture {
   return parseFixture(readFileSync(file, 'utf8'), file);
 }
 
+/**
+ * Reads a recorded model list under `models/`, like
+ * `readModelsFixture('openrouter-models')`. Same file layout, JSON body.
+ */
+export function readModelsFixture(name: string): Fixture {
+  const file = join(ROOT, 'models', `${name}.http`);
+  return parseFixture(readFileSync(file, 'utf8'), file);
+}
+
 /** Parses the text of a fixture file. `file` is only used in errors. */
 export function parseFixture(text: string, file = 'fixture'): Fixture {
   const sources: string[] = [];

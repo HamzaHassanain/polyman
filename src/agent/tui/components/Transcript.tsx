@@ -14,12 +14,15 @@ export function Transcript({
   items,
   folder,
   model,
+  provider,
   columns,
 }: {
   items: Item[];
   /** The problem folder, or the folder the chat started in. */
   folder: string;
   model: string;
+  /** The provider name, like `OpenRouter`. */
+  provider?: string;
   /** The terminal width when the chat started. */
   columns: number;
 }) {
@@ -32,6 +35,7 @@ export function Transcript({
             key="welcome"
             folder={folder}
             model={model}
+            {...(provider !== undefined ? { provider } : {})}
             columns={columns}
           />
         ) : (

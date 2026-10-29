@@ -26,7 +26,7 @@ import {
 } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
-import type { ModelCapabilities } from './capabilities';
+import type { ModelOverride } from './capabilities';
 import { PRESETS, getPreset, urlBelongsTo } from './presets';
 import { PolymanError } from '../../errors';
 
@@ -50,8 +50,8 @@ export interface AiSettings {
   default?: { provider: string; model: string };
   /** Keys and settings per provider id. */
   providers: Record<string, ProviderSettings>;
-  /** Capability overrides, keyed by `provider/model`. */
-  overrides: Record<string, Partial<ModelCapabilities>>;
+  /** Capability and budget overrides, keyed by `provider/model`. */
+  overrides: Record<string, ModelOverride>;
   /** Providers whose privacy notice the user accepted. */
   acceptedPrivacyNotice: string[];
   /** Fields this version does not know, kept as they are. */

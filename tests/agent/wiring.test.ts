@@ -2,15 +2,29 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { PassThrough } from 'stream';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SeqEvent } from '../../src/agent/core/events';
 import {
   createChatRuntime,
+  prepareChat,
   resolveChatStart,
   type ChatRuntimeOptions,
 } from '../../src/agent/index';
+import { KeyStore } from '../../src/agent/providers/key-store';
+import { ModelCatalog } from '../../src/agent/providers/model-catalog';
+import { PolymanError } from '../../src/errors';
+import { fixtureResponse, readModelsFixture } from '../fixtures/agent';
 import { parseAnswer, planLines, runPlain } from '../../src/agent/plain';
 import { MockProvider, type MockStep } from '../../src/agent/providers/mock';
+import {
+  Capabilities,
+  chatOnlyNotice,
+} from '../../src/agent/providers/capabilities';
+import {
+  DEFAULT_BUDGETS,
+  budgetsFor,
+} from '../../src/agent/providers/chat-provider';
+import { ProviderError } from '../../src/agent/providers/types';
 import type { CliRunner, RunResult } from '../../src/agent/runner/types';
 import {
   NO_SPEC_ERROR,
@@ -622,6 +636,140 @@ describe('Polygon tools in the chat', () => {
     expect(text).toContain('Polygon problem 12345');
     expect(text).not.toContain(key);
     expect(text).not.toContain(secret);
+  });
+});
+
+describe('the chat with model-aware budgets and capabilities', () => {
+  it('sends the budgets it was given', async () => {
+    const { rt, provider } = build([{ text: 'hi' }], {
+      budgets: budgetsFor({ contextWindow: 8192, maxOutput: 8192 }),
+    });
+    expect(await rt.session.send('hi')).toBe('done');
+    expect(provider.requests[0]?.maxOutputTokens).toBe(2048);
+  });
+
+  it('uses the default budgets without any', async () => {
+    const { rt, provider } = build([{ text: 'hi' }]);
+    await rt.session.send('hi');
+    expect(provider.requests[0]?.maxOutputTokens).toBe(
+      DEFAULT_BUDGETS.maxOutputTokens
+    );
+    expect(provider.requests[0]?.temperature).toBe(DEFAULT_BUDGETS.temperature);
+  });
+
+  it('runs a model with no tools in chat-only mode and prints the notice', async () => {
+    const capabilities = new Capabilities(
+      {},
+      {
+        'openrouter/google/gemma-3-4b-it': {
+          id: 'google/gemma-3-4b-it',
+          supportsTools: false,
+        },
+      }
+    );
+    const { rt, provider } = build([{ text: 'I can only chat.' }], {
+      providerId: 'openrouter',
+      model: 'google/gemma-3-4b-it',
+      capabilities,
+    });
+    const out = await plain(rt, ['build pairs sum']);
+    expect(provider.requests[0]?.tools).toEqual([]);
+    expect(out).toContain(
+      `[warn: ${chatOnlyNotice('openrouter', 'google/gemma-3-4b-it')}]`
+    );
+    expect(out).toContain('I can only chat.');
+  });
+
+  it('goes chat-only after tools_not_supported instead of failing', async () => {
+    const { rt, provider, events } = build([
+      { error: new ProviderError('tools_not_supported', 'no tool use') },
+      { text: 'Talking only.' },
+    ]);
+    expect(await rt.session.send('hi')).toBe('done');
+    expect(provider.requests[1]?.tools).toEqual([]);
+    expect(events.filter(e => e.type === 'notice')).toHaveLength(1);
+  });
+});
+
+describe('prepareChat', () => {
+  const OR_KEY = 'sk-or-test-0000111122223333';
+  const live = () =>
+    vi.fn((..._args: Parameters<typeof fetch>) =>
+      Promise.resolve(fixtureResponse(readModelsFixture('openrouter-models')))
+    );
+  const offline = () =>
+    vi.fn((..._args: Parameters<typeof fetch>) =>
+      Promise.reject(new TypeError('fetch failed'))
+    );
+  const deps = (env: NodeJS.ProcessEnv, fetchFn: typeof fetch) => ({
+    keyStore: new KeyStore({ home: tmp, env }),
+    catalog: new ModelCatalog({ home: tmp, fetch: fetchFn }),
+  });
+  const failure = async (run: Promise<unknown>): Promise<PolymanError> => {
+    try {
+      await run;
+    } catch (error) {
+      return error as PolymanError;
+    }
+    throw new Error('expected prepareChat to fail');
+  };
+
+  it('starts Gemma on OpenRouter with the default budgets', async () => {
+    const chat = await prepareChat(
+      { dir: problem },
+      deps({ OPENROUTER_API_KEY: OR_KEY }, live())
+    );
+    expect(chat.providerId).toBe('openrouter');
+    expect(chat.providerLabel).toBe('OpenRouter');
+    expect(chat.model).toBe('google/gemma-4-31b-it');
+    expect(chat.budgets).toEqual(DEFAULT_BUDGETS);
+    expect(chat.chatOnly).toBe(false);
+    expect(chat.runtime.problemDir()).toBe(problem);
+  });
+
+  it('starts any OpenRouter model from --model, with its own budgets', async () => {
+    const chat = await prepareChat(
+      { dir: problem, model: 'google/gemma-2-27b-it' },
+      deps({ OPENROUTER_API_KEY: OR_KEY }, live())
+    );
+    expect(chat.model).toBe('google/gemma-2-27b-it');
+    expect(chat.budgets.maxOutputTokens).toBe(2048);
+    expect(chat.budgets.contextBudgetTokens).toBe(4608);
+  });
+
+  it('knows a model with no tools before the first message', async () => {
+    const chat = await prepareChat(
+      { provider: 'openrouter', model: 'google/gemma-3-4b-it' },
+      deps({ OPENROUTER_API_KEY: OR_KEY }, live())
+    );
+    expect(chat.chatOnly).toBe(true);
+  });
+
+  it('starts offline with the defaults', async () => {
+    const chat = await prepareChat(
+      { model: 'acme/unknown' },
+      deps({ OPENROUTER_API_KEY: OR_KEY }, offline())
+    );
+    expect(chat.chatOnly).toBe(false);
+    expect(chat.budgets.maxOutputTokens).toBe(8000);
+  });
+
+  it('fails with exit code 2 and the known providers for a bad --provider', async () => {
+    const err = await failure(
+      prepareChat({ provider: 'nope' }, deps({}, offline()))
+    );
+    expect(err).toBeInstanceOf(PolymanError);
+    expect(err.exitCode).toBe(2);
+    expect(err.message).toContain('Unknown provider "nope"');
+    expect(err.message).toContain('openrouter');
+  });
+
+  it('says how to add a key when there is none', async () => {
+    const err = await failure(prepareChat({}, deps({}, offline())));
+    expect(err.exitCode).toBe(2);
+    expect(err.message).toBe(
+      'No OpenRouter key. Run "polyman ai login openrouter" or set OPENROUTER_API_KEY. Get a key at https://openrouter.ai/keys'
+    );
   });
 });
 

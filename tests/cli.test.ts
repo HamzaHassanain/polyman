@@ -15,6 +15,11 @@ vi.mock('../src/help', () => ({
 }));
 const chat = vi.hoisted(() => ({ startChat: vi.fn() }));
 vi.mock('../src/agent/index', () => chat);
+const aiCommands = vi.hoisted(() => ({
+  aiModelsAction: vi.fn(),
+  aiUseAction: vi.fn(),
+}));
+vi.mock('../src/agent/ai-commands', () => aiCommands);
 vi.mock('../src/theme', async importOriginal => {
   const original = await importOriginal<typeof import('../src/theme')>();
   const { Chalk } = await import('chalk');
@@ -277,6 +282,47 @@ describe('cli.ts', () => {
       dir: 'prob',
       model: 'google/gemma-4-31b-it',
     });
+  });
+
+  it('should pass --provider and --model to chat', async () => {
+    await loadCli([
+      'chat',
+      '--provider',
+      'openrouter',
+      '--model',
+      'deepseek/deepseek-v3.2',
+    ]);
+    expect(chat.startChat).toHaveBeenCalledWith({
+      provider: 'openrouter',
+      model: 'deepseek/deepseek-v3.2',
+    });
+  });
+
+  it('should pass --search and --refresh to ai models', async () => {
+    await loadCli([
+      'ai',
+      'models',
+      'openrouter',
+      '--search',
+      'deepseek',
+      '--refresh',
+    ]);
+    expect(aiCommands.aiModelsAction).toHaveBeenCalledWith('openrouter', {
+      search: 'deepseek',
+      refresh: true,
+    });
+  });
+
+  it('should call ai models with no options', async () => {
+    await loadCli(['ai', 'models']);
+    expect(aiCommands.aiModelsAction).toHaveBeenCalledWith(undefined, {});
+  });
+
+  it('should pass the provider/model spec to ai use', async () => {
+    await loadCli(['ai', 'use', 'openrouter/qwen/qwen3-coder']);
+    expect(aiCommands.aiUseAction).toHaveBeenCalledWith(
+      'openrouter/qwen/qwen3-coder'
+    );
   });
 
   it('should register cache status command', async () => {

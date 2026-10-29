@@ -9,7 +9,7 @@
 
 import type { EventBus } from '../core/events';
 import type { Provider, ToolSpec } from '../providers/types';
-import { GemmaManager } from './manager';
+import { ModelManager } from './manager';
 import type { Checkpoint, Plan, PlanTask, TaskResult } from './types';
 
 /** One problem idea, as the ideate call gives it. */
@@ -418,6 +418,12 @@ function shortAngle(i: number): string {
   ];
 }
 
+/** Output tokens of one ideator call. */
+export const IDEATOR_OUTPUT_TOKENS = 3000;
+
+/** Output tokens of one critic call. */
+export const CRITIC_OUTPUT_TOKENS = 2000;
+
 /** What {@link IdeaWorkflow} needs. */
 export interface IdeaWorkflowOptions {
   provider: Provider;
@@ -426,6 +432,11 @@ export interface IdeaWorkflowOptions {
   bus: EventBus;
   /** Ideas per run, 3 by default. */
   count?: number;
+  /**
+   * The most output tokens the model may give in one call. The ideator asks
+   * for 3000 and the critic for 2000, never more than this.
+   */
+  maxOutputTokens?: number;
 }
 
 /** What one run looks for. */
@@ -441,24 +452,25 @@ export interface IdeaRequest {
 
 /** Finds ideas. One instance can run many times, one at a time. */
 export class IdeaWorkflow {
-  private readonly ideator: GemmaManager;
-  private readonly critic: GemmaManager;
+  private readonly ideator: ModelManager;
+  private readonly critic: ModelManager;
 
   constructor(private readonly opts: IdeaWorkflowOptions) {
     // A higher temperature for new ideas, a low one for honest reviews.
-    this.ideator = new GemmaManager({
+    const cap = opts.maxOutputTokens ?? Infinity;
+    this.ideator = new ModelManager({
       provider: opts.provider,
       model: opts.model,
       bus: opts.bus,
       temperature: 0.9,
-      maxOutputTokens: 3000,
+      maxOutputTokens: Math.min(IDEATOR_OUTPUT_TOKENS, cap),
     });
-    this.critic = new GemmaManager({
+    this.critic = new ModelManager({
       provider: opts.provider,
       model: opts.model,
       bus: opts.bus,
       temperature: 0.2,
-      maxOutputTokens: 2000,
+      maxOutputTokens: Math.min(CRITIC_OUTPUT_TOKENS, cap),
     });
   }
 

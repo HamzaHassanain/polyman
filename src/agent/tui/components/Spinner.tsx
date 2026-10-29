@@ -29,7 +29,7 @@ export function Spinner({ color = 'agent' }: { color?: ColorName }) {
   return <Text {...fg(color)}>{FRAMES[frame]}</Text>;
 }
 
-/** The Gemma spinner: a ✦ that grows and moves over the gradient. */
+/** The chat spinner: a ✦ that grows and moves over the gradient. */
 export function StarSpinner() {
   const frame = useFrame(STAR_FRAMES.length, 120);
   const color = STAR_COLORS[frame % STAR_COLORS.length];

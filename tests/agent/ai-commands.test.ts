@@ -21,6 +21,8 @@ import {
   type AiIo,
 } from '../../src/agent/ai-commands';
 import { KeyStore } from '../../src/agent/providers/key-store';
+import { ModelCatalog } from '../../src/agent/providers/model-catalog';
+import { fixtureResponse, readModelsFixture } from '../fixtures/agent';
 import { PolymanError } from '../../src/errors';
 
 const fsFault = vi.hoisted(() => ({ failRename: false }));
@@ -376,7 +378,7 @@ describe('ai list', () => {
   it.each([
     ['logout', (io: AiIo) => aiLogoutAction('deepseek', io)],
     ['use', (io: AiIo) => aiUseAction('deepseek/deepseek-flash', io)],
-    ['models', (io: AiIo) => aiModelsAction('custom', io)],
+    ['models', (io: AiIo) => aiModelsAction('custom', {}, io)],
     [
       'login',
       (io: AiIo) =>
@@ -405,7 +407,7 @@ describe('ai list', () => {
 
 describe('ai models', () => {
   it('lists the known models of one provider, with prices', async () => {
-    await aiModelsAction('groq', { store: makeStore() });
+    await aiModelsAction('groq', {}, { store: makeStore() });
     const text = printed();
     expect(text).toContain('Groq (groq)');
     expect(text).toMatch(
@@ -415,7 +417,7 @@ describe('ai models', () => {
   });
 
   it('lists every provider when none is given', async () => {
-    await aiModelsAction(undefined, { store: makeStore() });
+    await aiModelsAction(undefined, {}, { store: makeStore() });
     expect(printed()).toContain('OpenAI (openai)');
     expect(printed()).toContain('Ollama (local) (ollama)');
   });
@@ -426,12 +428,14 @@ describe('ai models', () => {
       baseUrl: 'https://my.server/v1',
       models: ['my-model'],
     });
-    await aiModelsAction('custom', { store });
+    await aiModelsAction('custom', {}, { store });
     expect(printed()).toMatch(/my-model\s+tools/);
   });
 
   it('refuses an unknown provider', async () => {
-    const err = await caught(aiModelsAction('nope', { store: makeStore() }));
+    const err = await caught(
+      aiModelsAction('nope', {}, { store: makeStore() })
+    );
     expect(err.exitCode).toBe(2);
   });
 });
@@ -484,5 +488,186 @@ describe('ai use', () => {
   it('refuses an unknown provider', async () => {
     const err = await caught(aiUseAction('nope/model', { store: makeStore() }));
     expect(err.message).toMatch(/Unknown provider/);
+  });
+});
+
+describe('ai models with the live OpenRouter list', () => {
+  const T0 = Date.UTC(2026, 9, 29, 10, 2);
+  const live = () =>
+    vi.fn((..._args: Parameters<typeof fetch>) =>
+      Promise.resolve(fixtureResponse(readModelsFixture('openrouter-models')))
+    );
+  const offline = () =>
+    vi.fn((..._args: Parameters<typeof fetch>) =>
+      Promise.reject(new TypeError('fetch failed'))
+    );
+  const catalog = (fetchFn: typeof fetch, now = T0) =>
+    new ModelCatalog({ home, fetch: fetchFn, now: () => now });
+
+  it('shows every live model as a table', async () => {
+    await aiModelsAction(
+      'openrouter',
+      {},
+      { store: makeStore(), catalog: catalog(live()) }
+    );
+    const text = printed();
+    expect(text).toContain('OpenRouter (openrouter): 5 models (live list)');
+    expect(text).toMatch(/model\s+tools\s+context\s+\$\/1M in\s+\$\/1M out/);
+    expect(text).toMatch(
+      /google\/gemma-4-31b-it\s+yes\s+262,144\s+\$0\.20\s+\$0\.40/
+    );
+    expect(text).toMatch(/google\/gemma-3-4b-it\s+no\s+131,072/);
+    expect(text).toMatch(/openrouter\/auto\s+yes\s+2,000,000\s+\?\s+\?/);
+  });
+
+  it('filters the ids with --search, case does not matter', async () => {
+    await aiModelsAction(
+      'openrouter',
+      { search: 'DeepSeek' },
+      { store: makeStore(), catalog: catalog(live()) }
+    );
+    const text = printed();
+    expect(text).toContain('1 of 5 models match "deepseek"');
+    expect(text).toMatch(
+      /deepseek\/deepseek-v3\.2\s+yes\s+131,072\s+\$0\.28\s+\$0\.42/
+    );
+    expect(text).not.toContain('gemma');
+  });
+
+  it('says when no model matches', async () => {
+    await aiModelsAction(
+      'openrouter',
+      { search: 'zzz' },
+      { store: makeStore(), catalog: catalog(live()) }
+    );
+    expect(printed()).toContain('0 of 5 models match "zzz"');
+  });
+
+  it('says when the list comes from the cache', async () => {
+    const store = makeStore();
+    await aiModelsAction('openrouter', {}, { store, catalog: catalog(live()) });
+    output = [];
+    const fetchFn = live();
+    await aiModelsAction(
+      'openrouter',
+      {},
+      { store, catalog: catalog(fetchFn, T0 + 60_000) }
+    );
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(printed()).toContain('(cached list from 2026-10-29T10:02 UTC)');
+  });
+
+  it('fetches again with --refresh', async () => {
+    const store = makeStore();
+    await aiModelsAction('openrouter', {}, { store, catalog: catalog(live()) });
+    const fetchFn = live();
+    await aiModelsAction(
+      'openrouter',
+      { refresh: true },
+      { store, catalog: catalog(fetchFn) }
+    );
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to the known models when offline', async () => {
+    await aiModelsAction(
+      'openrouter',
+      { search: 'gemma-4' },
+      { store: makeStore(), catalog: catalog(offline()) }
+    );
+    const text = printed();
+    expect(text).toContain('Cannot get the live OpenRouter model list');
+    expect(text).toContain('OpenRouter (openrouter)');
+    expect(text).toMatch(/google\/gemma-4-31b-it .*context 262,144/);
+    expect(text).not.toContain('openrouter/auto');
+  });
+
+  it('never fetches for "ai models" with no provider', async () => {
+    const fetchFn = live();
+    await aiModelsAction(
+      undefined,
+      { search: 'gemma' },
+      { store: makeStore(), catalog: catalog(fetchFn) }
+    );
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(printed()).toContain(
+      'Every OpenRouter model, live: polyman ai models openrouter --search <text>'
+    );
+  });
+
+  it('filters the preset models of other providers too', async () => {
+    await aiModelsAction(
+      'groq',
+      { search: 'nothing-like-this' },
+      { store: makeStore(), catalog: catalog(live()) }
+    );
+    expect(printed()).toContain('no model matches');
+  });
+});
+
+describe('ai use with the live OpenRouter list', () => {
+  const live = () =>
+    vi.fn((..._args: Parameters<typeof fetch>) =>
+      Promise.resolve(fixtureResponse(readModelsFixture('openrouter-models')))
+    );
+  const catalog = (fetchFn: typeof fetch) =>
+    new ModelCatalog({ home, fetch: fetchFn });
+
+  it('accepts any listed model, with no warning', async () => {
+    const store = makeStore({ OPENROUTER_API_KEY: 'sk-or-env-0123456789' });
+    await aiUseAction('openrouter/deepseek/deepseek-v3.2', {
+      store,
+      catalog: catalog(live()),
+    });
+    expect(store.read().default).toEqual({
+      provider: 'openrouter',
+      model: 'deepseek/deepseek-v3.2',
+    });
+    expect(printed()).not.toMatch(/not in the|no tool support|No OpenRouter/);
+  });
+
+  it('warns, and still saves, when the id is not in the live list', async () => {
+    const store = makeStore({ OPENROUTER_API_KEY: 'sk-or-env-0123456789' });
+    await aiUseAction('openrouter/acme/new-model', {
+      store,
+      catalog: catalog(live()),
+    });
+    expect(store.read().default?.model).toBe('acme/new-model');
+    expect(printed()).toContain(
+      'acme/new-model is not in the live OpenRouter model list. It is used as is.'
+    );
+    expect(printed()).toContain('polyman ai models openrouter --search <text>');
+  });
+
+  it('warns when the live list says the model has no tools', async () => {
+    await aiUseAction('openrouter/google/gemma-3-4b-it', {
+      store: makeStore({ OPENROUTER_API_KEY: 'sk-or-env-0123456789' }),
+      catalog: catalog(live()),
+    });
+    expect(printed()).toMatch(/can only chat, it cannot build the problem/);
+  });
+
+  it('uses the known models offline', async () => {
+    await aiUseAction('openrouter/acme/new-model', {
+      store: makeStore({ OPENROUTER_API_KEY: 'sk-or-env-0123456789' }),
+      catalog: catalog(
+        vi.fn((..._args: Parameters<typeof fetch>) =>
+          Promise.reject(new TypeError('fetch failed'))
+        )
+      ),
+    });
+    expect(printed()).toContain(
+      'acme/new-model is not in the known models of OpenRouter'
+    );
+  });
+
+  it('says where to get a key when there is none', async () => {
+    await aiUseAction('openrouter/google/gemma-4-31b-it', {
+      store: makeStore(),
+      catalog: catalog(live()),
+    });
+    expect(printed()).toContain(
+      'No OpenRouter key yet. Run: polyman ai login openrouter (get a key at https://openrouter.ai/keys)'
+    );
   });
 });

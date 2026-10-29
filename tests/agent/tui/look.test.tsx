@@ -97,7 +97,7 @@ describe('gradient', () => {
 });
 
 describe('Welcome', () => {
-  it('shows the wordmark, the Gemma line, the folder, the model and 3 tips', () => {
+  it('shows the wordmark, the title line, the folder, the model and 3 tips', () => {
     const { lastFrame } = render(
       <Welcome
         folder="/work/pairs-sum"
@@ -109,11 +109,25 @@ describe('Welcome', () => {
     expect(frame).toContain('╭');
     expect(frame).toContain(WORDMARK[0]);
     expect(frame).toContain(WORDMARK[1]);
-    expect(frame).toContain('✦ polyman chat · powered by Gemma 4');
+    expect(frame).toContain('✦ polyman chat · powered by gemma-4-31b');
     expect(frame).toContain('folder /work/pairs-sum');
     expect(frame).toContain('model  gemma-4-31b (OpenRouter)');
     expect(frame).toContain('1. Describe a problem');
     expect(frame).toContain('3. /help');
+  });
+
+  it('shows the model and the provider it was given', () => {
+    const { lastFrame } = render(
+      <Welcome
+        folder="/work/pairs-sum"
+        model="deepseek-flash"
+        provider="DeepSeek"
+        columns={100}
+      />
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('✦ polyman chat · powered by deepseek-flash');
+    expect(frame).toContain('model  deepseek-flash (DeepSeek)');
   });
 
   it('fits 80 columns', () => {

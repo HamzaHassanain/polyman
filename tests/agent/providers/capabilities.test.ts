@@ -3,6 +3,7 @@ import {
   Capabilities,
   DEFAULT_CAPABILITIES,
   chatOnlyNotice,
+  liveCapabilities,
   lookupCapabilities,
   modelKey,
   presetCapabilities,
@@ -18,7 +19,7 @@ describe('lookupCapabilities', () => {
       parallelToolCalls: false,
       reasoning: false,
       contextWindow: 32_000,
-      maxOutput: 4_096,
+      maxOutput: 8_000,
     });
   });
 
@@ -189,5 +190,93 @@ describe('modelKey', () => {
     expect(modelKey('deepseek', 'deepseek-flash')).toBe(
       'deepseek/deepseek-flash'
     );
+  });
+});
+
+describe('lookup order with live model info', () => {
+  const live = {
+    id: 'google/gemma-4-31b-it',
+    contextWindow: 200_000,
+    maxOutput: 16_384,
+    supportsTools: true,
+    reasoning: true,
+    pricePerMTokIn: 0.25,
+    pricePerMTokOut: 0.5,
+  };
+
+  it('goes defaults, then preset, then live, then the override', () => {
+    // The preset says 262144 and $0.2 / $0.4; live wins over it.
+    const caps = lookupCapabilities(
+      'openrouter',
+      'google/gemma-4-31b-it',
+      { 'openrouter/google/gemma-4-31b-it': { maxOutput: 4000 } },
+      live
+    );
+    expect(caps).toEqual({
+      tools: true,
+      parallelToolCalls: false,
+      reasoning: true,
+      contextWindow: 200_000,
+      maxOutput: 4000,
+      pricePerMTokIn: 0.25,
+      pricePerMTokOut: 0.5,
+    });
+  });
+
+  it('keeps the preset fields live does not give', () => {
+    const caps = lookupCapabilities(
+      'openrouter',
+      'google/gemma-4-31b-it',
+      {},
+      {
+        id: 'google/gemma-4-31b-it',
+      }
+    );
+    expect(caps.contextWindow).toBe(262_144);
+    expect(caps.pricePerMTokIn).toBe(0.2);
+  });
+
+  it('gives an unknown model its real data', () => {
+    const caps = lookupCapabilities(
+      'openrouter',
+      'google/gemma-3-4b-it',
+      {},
+      {
+        id: 'google/gemma-3-4b-it',
+        contextWindow: 131_072,
+        maxOutput: 16_384,
+        supportsTools: false,
+      }
+    );
+    expect(caps.tools).toBe(false);
+    expect(caps.contextWindow).toBe(131_072);
+  });
+
+  it('lets an override turn tools back on over live data', () => {
+    const caps = lookupCapabilities(
+      'openrouter',
+      'x/y',
+      { 'openrouter/x/y': { tools: true } },
+      { id: 'x/y', supportsTools: false }
+    );
+    expect(caps.tools).toBe(true);
+  });
+
+  it('maps live info with liveCapabilities', () => {
+    expect(liveCapabilities(undefined)).toEqual({});
+    expect(liveCapabilities({ id: 'a', supportsTools: false })).toEqual({
+      tools: false,
+    });
+  });
+
+  it('uses the live table of a Capabilities by model key', () => {
+    const table = new Capabilities(
+      { 'openrouter/x/y': { chatMaxSteps: 5 } },
+      { 'openrouter/x/y': { id: 'x/y', supportsTools: false } }
+    );
+    expect(table.isChatOnly('openrouter', 'x/y')).toBe(true);
+    expect(table.isChatOnly('openrouter', 'x/z')).toBe(false);
+    expect(table.override('openrouter', 'x/y')).toEqual({ chatMaxSteps: 5 });
+    expect(table.override('openrouter', 'x/z')).toBeUndefined();
   });
 });

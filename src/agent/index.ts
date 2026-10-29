@@ -15,7 +15,16 @@ import { ChatPromptBuilder } from './core/prompt';
 import { AgentSession } from './core/session';
 import type { AgentSessionApi } from './core/session-types';
 import { runPlain } from './plain';
-import { GEMMA_BUDGETS, createChatProvider } from './providers/gemma';
+import { Capabilities, chatOnlyNotice } from './providers/capabilities';
+import { PolymanError } from '../errors';
+import {
+  DEFAULT_BUDGETS,
+  createChatProvider,
+  modelSetup,
+  type ChatBudgets,
+} from './providers/chat-provider';
+import type { KeyStore } from './providers/key-store';
+import type { ModelCatalog } from './providers/model-catalog';
 import { withRetries } from './providers/retry';
 import type { Provider } from './providers/types';
 import { NodeCliRunner } from './runner/cli-runner';
@@ -35,7 +44,7 @@ import { DefaultToolRegistry } from './tools/registry';
 import { FolderSandbox } from './tools/sandbox';
 import type { PermissionMode, Sandbox, Tool } from './tools/types';
 import {
-  gemmaSchedulerFactory,
+  modelSchedulerFactory,
   workflowTool,
   type WorkflowToolOptions,
 } from './tools/workflow-tool';
@@ -85,13 +94,26 @@ export interface ChatRuntimeOptions {
   dir?: string;
   provider: Provider;
   model: string;
+  /**
+   * The preset id of the provider, for the capability table. Defaults to
+   * `provider.id`.
+   */
+  providerId?: string;
+  /**
+   * What the models can do, with the live info and the `ai.json`
+   * overrides. A model without tools runs in chat-only mode. Defaults to an
+   * empty table, which still turns tools off after `tools_not_supported`.
+   */
+  capabilities?: Capabilities;
+  /** Budgets of the chat, from `budgetsFor()`. Defaults to DEFAULT_BUDGETS. */
+  budgets?: ChatBudgets;
   /** Keys to redact from errors. */
   secrets?: string[];
   /** Runs polyman commands. Defaults to {@link NodeCliRunner}. */
   runner?: CliRunner;
-  /** Builds the workflow scheduler. Defaults to Gemma manager and workers. */
+  /** Builds the workflow scheduler. Defaults to a model manager and model workers. */
   createScheduler?: WorkflowToolOptions['createScheduler'];
-  /** Builds the idea workflow. Defaults to Gemma. */
+  /** Builds the idea workflow. Defaults to the chat model. */
   createIdeas?: () => IdeasRunner;
   /** Base folder for a relative `dir`. Defaults to `process.cwd()`. */
   cwd?: string;
@@ -128,6 +150,9 @@ export function createChatRuntime(opts: ChatRuntimeOptions): ChatRuntime {
       ...(polygon ? [polygon.apiKey, polygon.secret] : []),
     ];
   };
+  const budgets = opts.budgets ?? DEFAULT_BUDGETS;
+  const providerId = opts.providerId ?? opts.provider.id;
+  const capabilities = opts.capabilities ?? new Capabilities();
   const bus = new SimpleEventBus();
   const gate = new DefaultPermissionGate(bus, 'ask');
   const runner = opts.runner ?? new NodeCliRunner();
@@ -143,17 +168,18 @@ export function createChatRuntime(opts: ChatRuntimeOptions): ChatRuntime {
   const notes = new NotesStore(bus, () => problemDir);
   const createScheduler =
     opts.createScheduler ??
-    gemmaSchedulerFactory({
+    modelSchedulerFactory({
       provider: opts.provider,
       model: opts.model,
       bus,
       gate,
       secrets,
+      budgets,
     });
 
   const tools = new DefaultToolRegistry({
     permissions: gate,
-    capBytes: GEMMA_BUDGETS.toolResultCapBytes,
+    capBytes: budgets.toolResultCapBytes,
   });
   const all: Tool[] = [
     ...fsTools(),
@@ -172,6 +198,7 @@ export function createChatRuntime(opts: ChatRuntimeOptions): ChatRuntime {
             provider: opts.provider,
             model: opts.model,
             bus,
+            maxOutputTokens: budgets.maxOutputTokens,
           })),
     }),
   ];
@@ -210,10 +237,16 @@ export function createChatRuntime(opts: ChatRuntimeOptions): ChatRuntime {
       },
     }),
     secrets,
-    maxSteps: GEMMA_BUDGETS.chatMaxSteps,
-    contextBudgetTokens: GEMMA_BUDGETS.contextBudgetTokens,
-    maxOutputTokens: GEMMA_BUDGETS.maxOutputTokens,
-    temperature: GEMMA_BUDGETS.temperature,
+    maxSteps: budgets.chatMaxSteps,
+    contextBudgetTokens: budgets.contextBudgetTokens,
+    maxOutputTokens: budgets.maxOutputTokens,
+    temperature: budgets.temperature,
+    chatOnly: {
+      active: () => capabilities.isChatOnly(providerId, opts.model),
+      notice: () => chatOnlyNotice(providerId, opts.model),
+      noteError: error =>
+        capabilities.noteError(providerId, opts.model, error) !== undefined,
+    },
   });
 
   return { session, bus, gate, problemDir: () => problemDir, notes };
@@ -235,6 +268,7 @@ function inFolder(tool: Tool, folder: () => string): Tool {
 interface TuiInfo {
   problem: string | null;
   model: string;
+  provider?: string;
   mode?: PermissionMode;
   setMode?: (m: PermissionMode) => void;
 }
@@ -257,36 +291,81 @@ async function loadTui(): Promise<TuiModule> {
   return (await import(file)) as TuiModule;
 }
 
-/** Starts the chat in `opts.dir` with `opts.model`. */
-export async function startChat(opts: {
+/** What `polyman chat` was given. */
+export interface ChatOptions {
   dir?: string;
+  /** `--provider`: a preset id. Overrides the `ai.json` default. */
+  provider?: string;
+  /** `--model`: a model id. Overrides the `ai.json` default. */
   model?: string;
   plain?: boolean;
-}): Promise<void> {
+}
+
+/** A chat ready to start, and what the UI shows about it. */
+export interface PreparedChat {
+  runtime: ChatRuntime;
+  model: string;
+  /** The provider name, like `OpenRouter`. */
+  providerLabel: string;
+  /** The preset id of the provider, like `openrouter`. */
+  providerId: string;
+  /** The budgets the chat uses with this model. */
+  budgets: ChatBudgets;
+  /** True when the model has no tool support, as known at the start. */
+  chatOnly: boolean;
+}
+
+/**
+ * Builds everything before the UI: the provider (from `--provider`,
+ * `--model` and `ai.json`), what the model can do (with the live list,
+ * offline is fine), its budgets and the runtime. A missing key or an
+ * unknown provider throws a {@link PolymanError} with exit code 2.
+ */
+export async function prepareChat(
+  opts: ChatOptions,
+  deps: { keyStore?: KeyStore; catalog?: ModelCatalog } = {}
+): Promise<PreparedChat> {
+  const made = await createChatProvider({
+    ...(opts.provider !== undefined ? { provider: opts.provider } : {}),
+    ...(opts.model !== undefined ? { model: opts.model } : {}),
+    ...(deps.keyStore ? { keyStore: deps.keyStore } : {}),
+  });
+  if ('error' in made) throw new PolymanError(made.error, 2);
+
+  const setup = await modelSetup(made.providerId, made.model, {
+    ...(deps.keyStore ? { keyStore: deps.keyStore } : {}),
+    ...(deps.catalog ? { catalog: deps.catalog } : {}),
+  });
+  const runtime = createChatRuntime({
+    ...(opts.dir !== undefined ? { dir: opts.dir } : {}),
+    provider: withRetries(made.provider, { secrets: made.secrets }),
+    providerId: made.providerId,
+    model: made.model,
+    capabilities: setup.capabilities,
+    budgets: setup.budgets,
+    secrets: made.secrets,
+  });
+  return {
+    runtime,
+    model: made.model,
+    providerLabel: made.providerLabel,
+    providerId: made.providerId,
+    budgets: setup.budgets,
+    chatOnly: !setup.caps.tools,
+  };
+}
+
+/** Starts the chat in `opts.dir` with the provider and model it picks. */
+export async function startChat(opts: ChatOptions): Promise<void> {
   if (opts.plain !== true && !(process.stdin.isTTY && process.stdout.isTTY)) {
     console.error('polyman chat needs a terminal (or use --plain).');
     process.exitCode = 2;
     return;
   }
 
-  const made = await createChatProvider(
-    opts.model !== undefined ? { model: opts.model } : {}
-  );
-  if ('error' in made) {
-    console.error(made.error);
-    process.exitCode = 2;
-    return;
-  }
-
-  const runtime = createChatRuntime({
-    ...(opts.dir !== undefined ? { dir: opts.dir } : {}),
-    provider: withRetries(made.provider, { secrets: made.secrets }),
-    model: made.model,
-    secrets: made.secrets,
-  });
+  const { runtime, model, providerLabel } = await prepareChat(opts);
   const { session, bus, gate } = runtime;
   const problem = runtime.problemDir();
-  const model = made.model;
 
   let tui: TuiModule | null = null;
   if (opts.plain !== true) {
@@ -305,6 +384,7 @@ export async function startChat(opts: {
       await tui.startTui(session, bus, {
         problem,
         model,
+        provider: providerLabel,
         mode: gate.mode,
         setMode: m => gate.setMode(m),
       });
