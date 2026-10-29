@@ -1,7 +1,7 @@
 /**
- * Gemma 4 through OpenRouter: the default model of `polyman chat`, its
- * budgets, and {@link createChatProvider}, which builds the provider for a
- * chat from `ai.json` and the presets.
+ * The provider and model of `polyman chat`: the default (Gemma 4 through
+ * OpenRouter), the default budgets, and {@link createChatProvider}, which
+ * builds the provider for a chat from `ai.json` and the presets.
  */
 
 import { PolymanError } from '../../errors';
@@ -12,17 +12,17 @@ import { getPreset, type Preset } from './presets';
 import type { Provider } from './types';
 
 /** The model `polyman chat` uses when `ai.json` has no default. */
-export const GEMMA_DEFAULT_MODEL = 'google/gemma-4-31b-it';
+export const DEFAULT_CHAT_MODEL = 'google/gemma-4-31b-it';
 
-/** The provider of {@link GEMMA_DEFAULT_MODEL}. */
-export const GEMMA_DEFAULT_PROVIDER = 'openrouter';
+/** The provider of {@link DEFAULT_CHAT_MODEL}. */
+export const DEFAULT_CHAT_PROVIDER = 'openrouter';
 
 /**
- * Budgets for Gemma. It is smaller than the frontier models, so it gets
- * fewer steps and a much smaller context than its 262k window
- * (design/agent/03-providers.md).
+ * Budgets of a chat. They were made for Gemma 4, which is smaller than the
+ * frontier models, so it gets fewer steps and a much smaller context than
+ * its 262k window (design/agent/03-providers.md).
  */
-export const GEMMA_BUDGETS = {
+export const DEFAULT_BUDGETS = {
   chatMaxSteps: 20,
   contextBudgetTokens: 32000,
   toolResultCapBytes: 8192,
@@ -47,7 +47,7 @@ export type ChatProviderResult =
 /**
  * Builds the provider for a chat. The provider and model come from the
  * `ai.json` default when it is set (any provider the user picked), else
- * OpenRouter with {@link GEMMA_DEFAULT_MODEL}. `model` replaces only the
+ * OpenRouter with {@link DEFAULT_CHAT_MODEL}. `model` replaces only the
  * model id. `secrets` holds every known key, for `redact`.
  *
  * It never throws for a missing key or a broken `ai.json`: it returns
@@ -73,8 +73,8 @@ export function createChatProvider(
 
 function build(store: KeyStore, model: string | undefined): ChatProviderResult {
   const def = store.read().default;
-  const providerId = def?.provider ?? GEMMA_DEFAULT_PROVIDER;
-  const modelId = model ?? def?.model ?? GEMMA_DEFAULT_MODEL;
+  const providerId = def?.provider ?? DEFAULT_CHAT_PROVIDER;
+  const modelId = model ?? def?.model ?? DEFAULT_CHAT_MODEL;
 
   const preset = getPreset(providerId);
   if (!preset) {

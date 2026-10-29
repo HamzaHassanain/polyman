@@ -31,7 +31,7 @@ With more than one run on a side, verify and hidden checks are counted (`3/4`) a
 
 1. A temp folder, `polyman new <case>`, `corpus/vendor/testlib.h` copied in (no network), and the case `spec.md` copied to `.polyman/agent/notes.md`.
 2. One `AgentSession` built from the same parts as `createChatRuntime` in `src/agent/index.ts`: fs tools, cli tools, skills and notes, but no `start_workflow`. The chat prompt gets one more line: there is no `start_workflow`, do every step yourself.
-3. OpenRouter with the preset's quirks plus `reasoning: { enabled: false }`, and the retry wrapper. Context budget, output tokens and temperature are the chat's (`GEMMA_BUDGETS`). Only the step limit is bigger: 80 instead of 20, to give it a fair chance.
+3. OpenRouter with the preset's quirks plus `reasoning: { enabled: false }`, and the retry wrapper. Context budget, output tokens and temperature are the chat's (`DEFAULT_BUDGETS`). Only the step limit is bigger: 80 instead of 20, to give it a fair chance.
 4. The gate is in `auto-edit` mode and the runner approves every approval. Remote (Polygon) calls would be denied, an eval never touches Polygon.
 5. One message: `Build the whole problem from .polyman/agent/notes.md: statement, main solution, brute force, wrong solutions, validator, generators, checker, Config.json. Run verify at the end and fix it until it passes.`
 6. After the turn: `verify --json` run by the eval, then the hidden checks.

@@ -15,7 +15,7 @@ export const WORDMARK_MIN_COLUMNS = 60;
 const MAX_WIDTH = 72;
 
 export const TIPS = [
-  'Describe a problem, Gemma writes the files and the tests',
+  'Describe a problem, the agent writes the files and the tests',
   'shift+tab switches between ask and auto-edit',
   '/help for the keys and commands',
 ];
@@ -62,7 +62,7 @@ export function Welcome({
       )}
       <Text wrap="truncate-end">
         {gradient('✦')} <Text bold>polyman chat</Text>
-        <Text dimColor> · powered by Gemma 4</Text>
+        <Text dimColor> · powered by {modelShortName(model)}</Text>
       </Text>
       <Box flexDirection="column" marginTop={1}>
         <Box>

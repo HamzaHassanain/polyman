@@ -3,11 +3,11 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import {
-  GEMMA_BUDGETS,
-  GEMMA_DEFAULT_MODEL,
+  DEFAULT_BUDGETS,
+  DEFAULT_CHAT_MODEL,
   createChatProvider,
   type ChatProviderResult,
-} from '../../../src/agent/providers/gemma';
+} from '../../../src/agent/providers/chat-provider';
 import { KeyStore } from '../../../src/agent/providers/key-store';
 import { OpenAICompatibleProvider } from '../../../src/agent/providers/openai-compatible';
 import { AnthropicProvider } from '../../../src/agent/providers/anthropic';
@@ -24,7 +24,7 @@ const AT = '2026-10-26T00:00:00.000Z';
 let home: string;
 
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), 'polyman-gemma-'));
+  home = mkdtempSync(join(tmpdir(), 'polyman-chat-provider-'));
 });
 
 afterEach(() => {
@@ -45,7 +45,7 @@ function ok(
 
 function request(over: Partial<ChatRequest> = {}): ChatRequest {
   return {
-    model: GEMMA_DEFAULT_MODEL,
+    model: DEFAULT_CHAT_MODEL,
     system: 'You build problems.',
     messages: [
       {
@@ -68,7 +68,7 @@ async function collect(p: Provider, req = request()): Promise<StreamEvent[]> {
   return out;
 }
 
-/** Stubs the global fetch to play one Gemma fixture. */
+/** Stubs the global fetch to play one recorded OpenRouter fixture. */
 function stubFetch(name: string, chunkSize?: number) {
   const fn = vi.fn((..._args: Parameters<typeof fetch>) =>
     Promise.resolve(fixtureResponse(readFixture('openai', name), chunkSize))
@@ -85,10 +85,10 @@ async function gemma(): Promise<Provider> {
   ).provider;
 }
 
-describe('GEMMA constants', () => {
+describe('chat defaults', () => {
   it('has the default model and the budgets of the design', () => {
-    expect(GEMMA_DEFAULT_MODEL).toBe('google/gemma-4-31b-it');
-    expect(GEMMA_BUDGETS).toEqual({
+    expect(DEFAULT_CHAT_MODEL).toBe('google/gemma-4-31b-it');
+    expect(DEFAULT_BUDGETS).toEqual({
       chatMaxSteps: 20,
       contextBudgetTokens: 32000,
       toolResultCapBytes: 8192,
@@ -107,7 +107,7 @@ describe('createChatProvider', () => {
     );
     expect(result.provider).toBeInstanceOf(OpenAICompatibleProvider);
     expect(result.provider.id).toBe('openrouter');
-    expect(result.model).toBe(GEMMA_DEFAULT_MODEL);
+    expect(result.model).toBe(DEFAULT_CHAT_MODEL);
     expect(result.secrets).toContain(OR_KEY);
   });
 
@@ -220,7 +220,7 @@ describe('Gemma on OpenRouter: recorded streams', () => {
       'X-Title': 'polyman',
     });
     const body = JSON.parse(init?.body as string) as Record<string, unknown>;
-    expect(body['model']).toBe(GEMMA_DEFAULT_MODEL);
+    expect(body['model']).toBe(DEFAULT_CHAT_MODEL);
     expect(body['usage']).toEqual({ include: true });
     expect(body).not.toHaveProperty('provider');
   });

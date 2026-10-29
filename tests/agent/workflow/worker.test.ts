@@ -2,13 +2,13 @@ import { describe, it, expect } from 'vitest';
 import { randomUUID } from 'crypto';
 import { MockProvider, type MockStep } from '../../../src/agent/providers/mock';
 import {
-  GemmaWorker,
+  ModelWorker,
   MAX_PRECHECKS,
   STEP_LIMIT_SUMMARY,
   checkpointPrecheck,
   configPatchSchema,
   workerToolNames,
-  type GemmaWorkerOptions,
+  type ModelWorkerOptions,
   type WorkerPrecheck,
 } from '../../../src/agent/workflow/worker';
 import { workerPrompt } from '../../../src/agent/workflow/prompts';
@@ -243,14 +243,14 @@ function recordingBus(): EventBus & { events: AgentEvent[] } {
   };
 }
 
-function setup(script: MockStep[], extra: Partial<GemmaWorkerOptions> = {}) {
+function setup(script: MockStep[], extra: Partial<ModelWorkerOptions> = {}) {
   const provider = new MockProvider(script);
   const bus = recordingBus();
   const sessions: FakeSession[] = [];
   const registries: FakeRegistry[] = [];
   const sandboxes: { root: string; allowWrite: string[] }[] = [];
   const gates: PermissionGate[] = [];
-  const worker = new GemmaWorker({
+  const worker = new ModelWorker({
     provider,
     model: 'gemma',
     problemDir: '/x/pairs',
@@ -343,7 +343,7 @@ describe('workerToolNames', () => {
   });
 });
 
-describe('GemmaWorker', () => {
+describe('ModelWorker', () => {
   it('builds the session with the tools, sandbox, gate and budget of the kind', async () => {
     const t = setup([finish('done')]);
     await t.worker.run(

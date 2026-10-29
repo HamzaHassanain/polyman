@@ -29,7 +29,7 @@ import { makeScrub, renderReport, reportJson, summarize } from './report.mjs';
 import eventBusMod from '../../dist/agent/core/event-bus.js';
 import promptMod from '../../dist/agent/core/prompt.js';
 import sessionMod from '../../dist/agent/core/session.js';
-import gemmaMod from '../../dist/agent/providers/gemma.js';
+import chatProviderMod from '../../dist/agent/providers/chat-provider.js';
 import openaiMod from '../../dist/agent/providers/openai-compatible.js';
 import presetsMod from '../../dist/agent/providers/presets.js';
 import retryMod from '../../dist/agent/providers/retry.js';
@@ -45,7 +45,7 @@ import sandboxMod from '../../dist/agent/tools/sandbox.js';
 const { SimpleEventBus } = eventBusMod;
 const { ChatPromptBuilder, NOTES_PATH } = promptMod;
 const { AgentSession } = sessionMod;
-const { GEMMA_BUDGETS, GEMMA_DEFAULT_MODEL } = gemmaMod;
+const { DEFAULT_BUDGETS, DEFAULT_CHAT_MODEL } = chatProviderMod;
 const { OpenAICompatibleProvider } = openaiMod;
 const { getPreset } = presetsMod;
 const { withRetries } = retryMod;
@@ -81,7 +81,7 @@ const NO_WORKFLOW =
 function parseArgs(argv) {
   const opts = {
     cases: [],
-    model: GEMMA_DEFAULT_MODEL,
+    model: DEFAULT_CHAT_MODEL,
     maxSteps: 80,
     maxCost: 0.6,
     maxMinutes: 40,
@@ -246,7 +246,7 @@ function makeSession({ problem, provider, model, secrets, maxSteps }) {
   const notes = new NotesStore(bus, () => problemDir);
   const tools = new DefaultToolRegistry({
     permissions: gate,
-    capBytes: GEMMA_BUDGETS.toolResultCapBytes,
+    capBytes: DEFAULT_BUDGETS.toolResultCapBytes,
   });
   for (const tool of [
     ...fsTools(),
@@ -287,9 +287,9 @@ function makeSession({ problem, provider, model, secrets, maxSteps }) {
     }),
     secrets: () => secrets,
     maxSteps,
-    contextBudgetTokens: GEMMA_BUDGETS.contextBudgetTokens,
-    maxOutputTokens: GEMMA_BUDGETS.maxOutputTokens,
-    temperature: GEMMA_BUDGETS.temperature,
+    contextBudgetTokens: DEFAULT_BUDGETS.contextBudgetTokens,
+    maxOutputTokens: DEFAULT_BUDGETS.maxOutputTokens,
+    temperature: DEFAULT_BUDGETS.temperature,
   });
 
   // Auto-approve every approval. Remote (Polygon) calls are denied: an eval
@@ -576,7 +576,7 @@ async function runCase(caseId, opts, apiKey) {
     caseId,
     model: opts.model,
     maxSteps: opts.maxSteps,
-    contextBudget: GEMMA_BUDGETS.contextBudgetTokens,
+    contextBudget: DEFAULT_BUDGETS.contextBudgetTokens,
     startedAt: startedAt.toISOString(),
     summary: summarize(events, messages),
     verify: v.json,

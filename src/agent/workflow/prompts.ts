@@ -1,7 +1,7 @@
 /**
  * The prompts of the workflow (manager and workers) and of the chat agent.
  *
- * Written for Gemma 4: short, plain words, one rule per line, the most
+ * Written for small models like Gemma 4: short, plain words, one rule per line, the most
  * important rule first. A smaller model follows a short prompt better than a
  * long one (doc 06, "System prompt").
  */

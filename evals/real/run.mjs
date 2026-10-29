@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { renderReport, renderSummary } from './report.mjs';
 
 import agentIndex from '../../dist/agent/index.js';
-import gemmaMod from '../../dist/agent/providers/gemma.js';
+import chatProviderMod from '../../dist/agent/providers/chat-provider.js';
 import keyStoreMod from '../../dist/agent/providers/key-store.js';
 import retryMod from '../../dist/agent/providers/retry.js';
 import textCallMod from '../../dist/agent/core/text-tool-call.js';
@@ -47,7 +47,7 @@ import schedulerMod from '../../dist/agent/workflow/scheduler.js';
 import workerMod from '../../dist/agent/workflow/worker.js';
 
 const { createChatRuntime } = agentIndex;
-const { createChatProvider, GEMMA_DEFAULT_MODEL } = gemmaMod;
+const { createChatProvider, DEFAULT_CHAT_MODEL } = chatProviderMod;
 const { KeyStore, redact } = keyStoreMod;
 const { withRetries } = retryMod;
 const { findTextToolCall } = textCallMod;
@@ -61,9 +61,9 @@ const { DefaultPermissionGate } = permissionsMod;
 const { workflowTool, WORKFLOW_TIMEOUT_MS } = workflowToolMod;
 const { skillTools } = skillsMod;
 const { CliCheckpoints, MemoCheckpoints } = checkpointsMod;
-const { GemmaManager } = managerMod;
+const { ModelManager } = managerMod;
 const { WorkflowScheduler } = schedulerMod;
-const { GemmaWorker, checkpointPrecheck } = workerMod;
+const { ModelWorker, checkpointPrecheck } = workerMod;
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..', '..');
@@ -81,7 +81,7 @@ function parseArgs(argv) {
     cases: [],
     broken: [],
     recipe: 'fix_verify',
-    model: GEMMA_DEFAULT_MODEL,
+    model: DEFAULT_CHAT_MODEL,
     parallel: undefined,
     reasoning: 'off',
     maxCost: 0.6,
@@ -256,7 +256,7 @@ function observe(provider, rec, budget) {
 }
 
 // ---------------------------------------------------------------------------
-// The scheduler: the same classes as `gemmaSchedulerFactory`, plus a tap on
+// The scheduler: the same classes as `modelSchedulerFactory`, plus a tap on
 // each worker session (its events stay on a local bus in the product) and
 // an auto answer for approvals inside workers.
 
@@ -272,8 +272,8 @@ function schedulerFactory({
   return (problemDir, runner) => {
     const checkpoints = new MemoCheckpoints(new CliCheckpoints(runner));
     return new WorkflowScheduler({
-      manager: new GemmaManager({ provider, model, bus }),
-      worker: new GemmaWorker({
+      manager: new ModelManager({ provider, model, bus }),
+      worker: new ModelWorker({
         provider,
         model,
         problemDir,
@@ -321,7 +321,7 @@ function schedulerFactory({
           return g;
         },
         secrets,
-        // The same precheck as gemmaSchedulerFactory: finish_task runs the
+        // The same precheck as modelSchedulerFactory: finish_task runs the
         // real check before the task ends.
         precheck: checkpointPrecheck(checkpoints, problemDir),
       }),

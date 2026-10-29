@@ -46,7 +46,7 @@ export const BOXES = [
   {
     id: 'out_of_steps',
     title: 'Runs out of steps',
-    fix: 'budgets in `providers/gemma.ts`',
+    fix: 'budgets in `providers/chat-provider.ts`',
     owner: 'Hamza',
   },
   {

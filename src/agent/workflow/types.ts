@@ -1,6 +1,6 @@
 /**
- * The contract of the workflow manager. The manager (Gemma) makes a plan,
- * the scheduler (our code) runs it, workers (Gemma) do one task each, and
+ * The contract of the workflow manager. The manager (the model) makes a plan,
+ * the scheduler (our code) runs it, workers (the model) do one task each, and
  * checkpoints (our code) decide if a task passed.
  */
 
@@ -127,7 +127,7 @@ export type ManagerDecision =
   | { action: 'redo_task'; taskId: string; redoTaskId: string; hint: string }
   | { action: 'ask_user'; taskId: string; question: string };
 
-/** The Gemma side of the workflow that plans and decides. */
+/** The model side of the workflow that plans and decides. */
 export interface Manager {
   makePlan(
     spec: Spec,

@@ -5,7 +5,7 @@ import { Markdown } from './Markdown.js';
 import { WorkflowSummary } from './PlanView.js';
 import { ToolBlock } from './ToolBlock.js';
 
-/** An assistant message: the Gemma `✦` and the markdown text. */
+/** An assistant message: the agent `✦` and the markdown text. */
 export function AssistantText({ text }: { text: string }) {
   return (
     <Box>

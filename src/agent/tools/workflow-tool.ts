@@ -1,7 +1,7 @@
 /**
  * The `start_workflow` tool: the chat agent hands the spec to the workflow
  * manager (doc 10). It reads the spec from the notes, builds a
- * {@link WorkflowScheduler} with Gemma as manager and workers, and runs it
+ * {@link WorkflowScheduler} with the chat model as manager and workers, and runs it
  * inside the chat turn, so esc stops the whole workflow.
  */
 
@@ -11,14 +11,14 @@ import type { Provider } from '../providers/types';
 import type { CliRunner } from '../runner/types';
 import { skillTools } from '../skills';
 import { CliCheckpoints, MemoCheckpoints } from '../workflow/checkpoints';
-import { GemmaManager } from '../workflow/manager';
+import { ModelManager } from '../workflow/manager';
 import {
   WorkflowScheduler,
   type WorkflowRunResult,
 } from '../workflow/scheduler';
 import { parseSpec } from '../workflow/spec';
 import type { Plan, Spec, TaskResult } from '../workflow/types';
-import { checkpointPrecheck, GemmaWorker } from '../workflow/worker';
+import { checkpointPrecheck, ModelWorker } from '../workflow/worker';
 import { cliTools } from './cli-tools';
 import { fsTools } from './fs-tools';
 import { specProblems } from './notes-tools';
@@ -201,7 +201,7 @@ export function workflowTool(
 }
 
 /** What the real scheduler needs from the chat. */
-export interface GemmaSchedulerOptions {
+export interface ModelSchedulerOptions {
   provider: Provider;
   model: string;
   /** The chat bus: plan, task and usage events go to the UI. */
@@ -212,24 +212,24 @@ export interface GemmaSchedulerOptions {
 }
 
 /**
- * The real {@link WorkflowToolOptions.createScheduler}: Gemma manager and
+ * The real {@link WorkflowToolOptions.createScheduler}: model manager and
  * workers, the real session, registry, sandbox and gate classes, and the
  * CLI checkpoints.
  */
-export function gemmaSchedulerFactory(
-  o: GemmaSchedulerOptions
+export function modelSchedulerFactory(
+  o: ModelSchedulerOptions
 ): WorkflowToolOptions['createScheduler'] {
   return (problemDir, runner) => {
     // finish_task runs the check in the session; the memo skips the same
     // check in the scheduler when nothing changed since.
     const checkpoints = new MemoCheckpoints(new CliCheckpoints(runner));
     return new WorkflowScheduler({
-      manager: new GemmaManager({
+      manager: new ModelManager({
         provider: o.provider,
         model: o.model,
         bus: o.bus,
       }),
-      worker: new GemmaWorker({
+      worker: new ModelWorker({
         provider: o.provider,
         model: o.model,
         problemDir,

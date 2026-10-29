@@ -1,5 +1,5 @@
 /**
- * The Gemma worker: runs one task as a small agent session with its own
+ * The model worker: runs one task as a small agent session with its own
  * prompt, tools, sandbox and budget, then stops.
  *
  * The session, registry, sandbox and gate come from factories, so this file
@@ -89,7 +89,7 @@ export function checkpointPrecheck(
 }
 
 /** What the worker needs. The factories let W0b pass the real classes. */
-export interface GemmaWorkerOptions {
+export interface ModelWorkerOptions {
   provider: Provider;
   model: string;
   /** The problem folder. Every worker works inside it. */
@@ -355,12 +355,12 @@ function newState(): RunState {
   };
 }
 
-/** A worker backed by one model, usually Gemma 4. */
-export class GemmaWorker implements Worker {
-  private readonly opts: GemmaWorkerOptions;
+/** A worker backed by one model, the chat model by default. */
+export class ModelWorker implements Worker {
+  private readonly opts: ModelWorkerOptions;
   private readonly sessions = new Map<string, TaskSession>();
 
-  constructor(opts: GemmaWorkerOptions) {
+  constructor(opts: ModelWorkerOptions) {
     this.opts = opts;
   }
 

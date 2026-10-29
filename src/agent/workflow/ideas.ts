@@ -9,7 +9,7 @@
 
 import type { EventBus } from '../core/events';
 import type { Provider, ToolSpec } from '../providers/types';
-import { GemmaManager } from './manager';
+import { ModelManager } from './manager';
 import type { Checkpoint, Plan, PlanTask, TaskResult } from './types';
 
 /** One problem idea, as the ideate call gives it. */
@@ -441,19 +441,19 @@ export interface IdeaRequest {
 
 /** Finds ideas. One instance can run many times, one at a time. */
 export class IdeaWorkflow {
-  private readonly ideator: GemmaManager;
-  private readonly critic: GemmaManager;
+  private readonly ideator: ModelManager;
+  private readonly critic: ModelManager;
 
   constructor(private readonly opts: IdeaWorkflowOptions) {
     // A higher temperature for new ideas, a low one for honest reviews.
-    this.ideator = new GemmaManager({
+    this.ideator = new ModelManager({
       provider: opts.provider,
       model: opts.model,
       bus: opts.bus,
       temperature: 0.9,
       maxOutputTokens: 3000,
     });
-    this.critic = new GemmaManager({
+    this.critic = new ModelManager({
       provider: opts.provider,
       model: opts.model,
       bus: opts.bus,

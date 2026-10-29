@@ -15,7 +15,7 @@ import { ChatPromptBuilder } from './core/prompt';
 import { AgentSession } from './core/session';
 import type { AgentSessionApi } from './core/session-types';
 import { runPlain } from './plain';
-import { GEMMA_BUDGETS, createChatProvider } from './providers/gemma';
+import { DEFAULT_BUDGETS, createChatProvider } from './providers/chat-provider';
 import { withRetries } from './providers/retry';
 import type { Provider } from './providers/types';
 import { NodeCliRunner } from './runner/cli-runner';
@@ -35,7 +35,7 @@ import { DefaultToolRegistry } from './tools/registry';
 import { FolderSandbox } from './tools/sandbox';
 import type { PermissionMode, Sandbox, Tool } from './tools/types';
 import {
-  gemmaSchedulerFactory,
+  modelSchedulerFactory,
   workflowTool,
   type WorkflowToolOptions,
 } from './tools/workflow-tool';
@@ -89,9 +89,9 @@ export interface ChatRuntimeOptions {
   secrets?: string[];
   /** Runs polyman commands. Defaults to {@link NodeCliRunner}. */
   runner?: CliRunner;
-  /** Builds the workflow scheduler. Defaults to Gemma manager and workers. */
+  /** Builds the workflow scheduler. Defaults to a model manager and model workers. */
   createScheduler?: WorkflowToolOptions['createScheduler'];
-  /** Builds the idea workflow. Defaults to Gemma. */
+  /** Builds the idea workflow. Defaults to the chat model. */
   createIdeas?: () => IdeasRunner;
   /** Base folder for a relative `dir`. Defaults to `process.cwd()`. */
   cwd?: string;
@@ -143,7 +143,7 @@ export function createChatRuntime(opts: ChatRuntimeOptions): ChatRuntime {
   const notes = new NotesStore(bus, () => problemDir);
   const createScheduler =
     opts.createScheduler ??
-    gemmaSchedulerFactory({
+    modelSchedulerFactory({
       provider: opts.provider,
       model: opts.model,
       bus,
@@ -153,7 +153,7 @@ export function createChatRuntime(opts: ChatRuntimeOptions): ChatRuntime {
 
   const tools = new DefaultToolRegistry({
     permissions: gate,
-    capBytes: GEMMA_BUDGETS.toolResultCapBytes,
+    capBytes: DEFAULT_BUDGETS.toolResultCapBytes,
   });
   const all: Tool[] = [
     ...fsTools(),
@@ -210,10 +210,10 @@ export function createChatRuntime(opts: ChatRuntimeOptions): ChatRuntime {
       },
     }),
     secrets,
-    maxSteps: GEMMA_BUDGETS.chatMaxSteps,
-    contextBudgetTokens: GEMMA_BUDGETS.contextBudgetTokens,
-    maxOutputTokens: GEMMA_BUDGETS.maxOutputTokens,
-    temperature: GEMMA_BUDGETS.temperature,
+    maxSteps: DEFAULT_BUDGETS.chatMaxSteps,
+    contextBudgetTokens: DEFAULT_BUDGETS.contextBudgetTokens,
+    maxOutputTokens: DEFAULT_BUDGETS.maxOutputTokens,
+    temperature: DEFAULT_BUDGETS.temperature,
   });
 
   return { session, bus, gate, problemDir: () => problemDir, notes };

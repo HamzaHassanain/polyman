@@ -10,7 +10,7 @@
 
 import chalk from 'chalk';
 
-/** The two ends of the Gemma gradient: blue to violet. */
+/** The two ends of the chat gradient: blue to violet. */
 export const GRADIENT = ['#3b82f6', '#8b5cf6'] as const;
 
 const PALETTE = {

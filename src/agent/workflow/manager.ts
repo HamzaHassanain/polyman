@@ -1,5 +1,5 @@
 /**
- * The Gemma manager: fills a recipe into a plan (`submit_plan`) and decides
+ * The model manager: fills a recipe into a plan (`submit_plan`) and decides
  * what to do when a task failed 3 times (`decide`). It does not use a
  * session: each call is a few plain model calls with one tool.
  *
@@ -31,7 +31,7 @@ import type {
 export const MANAGER_STEPS = 3;
 
 /** What the manager needs. */
-export interface GemmaManagerOptions {
+export interface ModelManagerOptions {
   provider: Provider;
   model: string;
   /** Gets the `usage` of every manager call, so the workflow cost is right. */
@@ -131,11 +131,11 @@ const DECIDE: ToolSpec = {
   parameters: DECISION_SCHEMA,
 };
 
-/** A manager backed by one model, usually Gemma 4. */
-export class GemmaManager implements Manager {
-  private readonly opts: GemmaManagerOptions;
+/** A manager backed by one model, the chat model by default. */
+export class ModelManager implements Manager {
+  private readonly opts: ModelManagerOptions;
 
-  constructor(opts: GemmaManagerOptions) {
+  constructor(opts: ModelManagerOptions) {
     this.opts = opts;
   }
 

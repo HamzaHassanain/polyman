@@ -20,7 +20,7 @@ const dist = p => require(path.join(ROOT, 'dist', p));
 
 const { SimpleEventBus } = dist('agent/core/event-bus.js');
 const { AgentSession } = dist('agent/core/session.js');
-const { createChatProvider } = dist('agent/providers/gemma.js');
+const { createChatProvider } = dist('agent/providers/chat-provider.js');
 const { withRetries } = dist('agent/providers/retry.js');
 const { NodeCliRunner } = dist('agent/runner/cli-runner.js');
 const { skillTools } = dist('agent/skills.js');
@@ -30,9 +30,9 @@ const { DefaultPermissionGate } = dist('agent/tools/permissions.js');
 const { DefaultToolRegistry } = dist('agent/tools/registry.js');
 const { FolderSandbox } = dist('agent/tools/sandbox.js');
 const { CliCheckpoints } = dist('agent/workflow/checkpoints.js');
-const { GemmaManager } = dist('agent/workflow/manager.js');
+const { ModelManager } = dist('agent/workflow/manager.js');
 const { WorkflowScheduler } = dist('agent/workflow/scheduler.js');
-const { GemmaWorker, checkpointPrecheck } = dist('agent/workflow/worker.js');
+const { ModelWorker, checkpointPrecheck } = dist('agent/workflow/worker.js');
 
 const argv = process.argv.slice(2);
 const opt = (name, def) => {
@@ -186,8 +186,8 @@ const createSession = deps => {
 const runner = new NodeCliRunner();
 const checkpoints = new CliCheckpoints(runner);
 const scheduler = new WorkflowScheduler({
-  manager: new GemmaManager({ provider, model: prov.model, bus }),
-  worker: new GemmaWorker({
+  manager: new ModelManager({ provider, model: prov.model, bus }),
+  worker: new ModelWorker({
     provider,
     model: prov.model,
     problemDir,
