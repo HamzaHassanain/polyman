@@ -2,13 +2,13 @@
   "polygon-api-docs": {
     "repo": "codeforces/polygon-misc",
     "path": "",
-    "seen": "d1d9c195141d778054cbdb26ece06dcf059bfe4b",
+    "seen": "8430c5076f7bcf39dd079ca0c34d46ed23fa459c",
     "why": "Polygon's API documentation. polyman's remote commands must follow it."
   },
   "testlib": {
     "repo": "MikeMirzayanov/testlib",
     "path": "testlib.h",
-    "seen": "2d20123984e9479b8a56ebe0d6a51e23ad7c35b3",
-    "why": "testlib.h 0.9.45, pinned in corpus/vendor/. A new version must keep every pinned verdict."
+    "seen": "79e40fce2afa9576e4d7ba7053f94be243f6758e",
+    "why": "testlib.h 0.9.46, pinned in corpus/vendor/. A new version must keep every pinned verdict."
   }
 }
