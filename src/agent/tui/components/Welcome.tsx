@@ -36,10 +36,13 @@ export function shortPath(dir: string, home = os.homedir()): string {
 export function Welcome({
   folder,
   model,
+  provider = 'OpenRouter',
   columns,
 }: {
   folder: string;
   model: string;
+  /** The provider name shown next to the model. */
+  provider?: string;
   columns: number;
 }) {
   const width = Math.max(20, Math.min(columns, MAX_WIDTH));
@@ -72,7 +75,7 @@ export function Welcome({
         <Text wrap="truncate-end">
           <Text dimColor>{'model  '}</Text>
           {modelShortName(model)}
-          <Text dimColor> (OpenRouter)</Text>
+          <Text dimColor> ({provider})</Text>
         </Text>
       </Box>
       <Box flexDirection="column" marginTop={1}>

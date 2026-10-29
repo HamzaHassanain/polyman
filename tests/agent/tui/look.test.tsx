@@ -116,6 +116,20 @@ describe('Welcome', () => {
     expect(frame).toContain('3. /help');
   });
 
+  it('shows the model and the provider it was given', () => {
+    const { lastFrame } = render(
+      <Welcome
+        folder="/work/pairs-sum"
+        model="deepseek-flash"
+        provider="DeepSeek"
+        columns={100}
+      />
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('✦ polyman chat · powered by deepseek-flash');
+    expect(frame).toContain('model  deepseek-flash (DeepSeek)');
+  });
+
   it('fits 80 columns', () => {
     const { lastFrame } = render(
       <Welcome folder="/w/x" model="m" columns={80} />

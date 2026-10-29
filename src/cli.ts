@@ -786,21 +786,37 @@ ai.command('list')
 
 /**
  * Command: ai models [provider]
+ * For OpenRouter it shows the live model list (cached for 24 hours), with
+ * tool support, context and prices. Offline it shows the known models.
  * @example
  * polyman ai models
  * polyman ai models groq
+ * polyman ai models openrouter --search deepseek
  */
 ai.command('models [provider]')
-  .description('List the known models of every provider, or of one')
-  .action(async (provider: string | undefined) => {
-    const { aiModelsAction } = await loadAiCommands();
-    await aiModelsAction(provider);
-  });
+  .description(
+    'List the known models of every provider, or of one (live list for openrouter)'
+  )
+  .option('--search <text>', 'Only models whose id has this text')
+  .option('--refresh', 'Fetch the live list again, even when it is cached')
+  .action(
+    async (
+      provider: string | undefined,
+      options: { search?: string; refresh?: boolean }
+    ) => {
+      const { aiModelsAction } = await loadAiCommands();
+      await aiModelsAction(provider, {
+        ...(options.search !== undefined ? { search: options.search } : {}),
+        ...(options.refresh === true ? { refresh: true } : {}),
+      });
+    }
+  );
 
 /**
  * Command: ai use <provider/model>
  * @example
  * polyman ai use deepseek/deepseek-flash
+ * polyman ai use openrouter/deepseek/deepseek-v3.2
  */
 ai.command('use <provider/model>')
   .description('Set the default provider and model')
@@ -827,6 +843,7 @@ const loadChat = () => import('./agent/index.js');
  * @example
  * polyman chat
  * polyman chat my-problem --model google/gemma-4-31b-it
+ * polyman chat my-problem --provider openrouter --model deepseek/deepseek-v3.2
  * polyman chat my-problem --plain
  */
 program
@@ -834,16 +851,26 @@ program
   .description(
     'Chat with the AI agent to think about, build and fix a problem (a folder without Config.json starts a new problem)'
   )
-  .option('--model <id>', 'Model to use, like google/gemma-4-31b-it')
+  .option(
+    '--provider <id>',
+    'Provider to use, like openrouter (default: the one of "polyman ai use", else openrouter)'
+  )
+  .option(
+    '--model <id>',
+    'Model to use, like google/gemma-4-31b-it or any id of "polyman ai models openrouter"'
+  )
   .option('--plain', 'Line mode without the terminal UI, works with pipes')
   .action(
     async (
       dir: string | undefined,
-      options: { model?: string; plain?: boolean }
+      options: { provider?: string; model?: string; plain?: boolean }
     ) => {
       const { startChat } = await loadChat();
       await startChat({
         ...(dir !== undefined ? { dir } : {}),
+        ...(options.provider !== undefined
+          ? { provider: options.provider }
+          : {}),
         ...(options.model !== undefined ? { model: options.model } : {}),
         ...(options.plain === true ? { plain: true } : {}),
       });

@@ -16,11 +16,15 @@ import { AgentSession } from './core/session';
 import type { AgentSessionApi } from './core/session-types';
 import { runPlain } from './plain';
 import { Capabilities, chatOnlyNotice } from './providers/capabilities';
+import { PolymanError } from '../errors';
 import {
   DEFAULT_BUDGETS,
   createChatProvider,
+  modelSetup,
   type ChatBudgets,
 } from './providers/chat-provider';
+import type { KeyStore } from './providers/key-store';
+import type { ModelCatalog } from './providers/model-catalog';
 import { withRetries } from './providers/retry';
 import type { Provider } from './providers/types';
 import { NodeCliRunner } from './runner/cli-runner';
@@ -264,6 +268,7 @@ function inFolder(tool: Tool, folder: () => string): Tool {
 interface TuiInfo {
   problem: string | null;
   model: string;
+  provider?: string;
   mode?: PermissionMode;
   setMode?: (m: PermissionMode) => void;
 }
@@ -286,36 +291,81 @@ async function loadTui(): Promise<TuiModule> {
   return (await import(file)) as TuiModule;
 }
 
-/** Starts the chat in `opts.dir` with `opts.model`. */
-export async function startChat(opts: {
+/** What `polyman chat` was given. */
+export interface ChatOptions {
   dir?: string;
+  /** `--provider`: a preset id. Overrides the `ai.json` default. */
+  provider?: string;
+  /** `--model`: a model id. Overrides the `ai.json` default. */
   model?: string;
   plain?: boolean;
-}): Promise<void> {
+}
+
+/** A chat ready to start, and what the UI shows about it. */
+export interface PreparedChat {
+  runtime: ChatRuntime;
+  model: string;
+  /** The provider name, like `OpenRouter`. */
+  providerLabel: string;
+  /** The preset id of the provider, like `openrouter`. */
+  providerId: string;
+  /** The budgets the chat uses with this model. */
+  budgets: ChatBudgets;
+  /** True when the model has no tool support, as known at the start. */
+  chatOnly: boolean;
+}
+
+/**
+ * Builds everything before the UI: the provider (from `--provider`,
+ * `--model` and `ai.json`), what the model can do (with the live list,
+ * offline is fine), its budgets and the runtime. A missing key or an
+ * unknown provider throws a {@link PolymanError} with exit code 2.
+ */
+export async function prepareChat(
+  opts: ChatOptions,
+  deps: { keyStore?: KeyStore; catalog?: ModelCatalog } = {}
+): Promise<PreparedChat> {
+  const made = await createChatProvider({
+    ...(opts.provider !== undefined ? { provider: opts.provider } : {}),
+    ...(opts.model !== undefined ? { model: opts.model } : {}),
+    ...(deps.keyStore ? { keyStore: deps.keyStore } : {}),
+  });
+  if ('error' in made) throw new PolymanError(made.error, 2);
+
+  const setup = await modelSetup(made.providerId, made.model, {
+    ...(deps.keyStore ? { keyStore: deps.keyStore } : {}),
+    ...(deps.catalog ? { catalog: deps.catalog } : {}),
+  });
+  const runtime = createChatRuntime({
+    ...(opts.dir !== undefined ? { dir: opts.dir } : {}),
+    provider: withRetries(made.provider, { secrets: made.secrets }),
+    providerId: made.providerId,
+    model: made.model,
+    capabilities: setup.capabilities,
+    budgets: setup.budgets,
+    secrets: made.secrets,
+  });
+  return {
+    runtime,
+    model: made.model,
+    providerLabel: made.providerLabel,
+    providerId: made.providerId,
+    budgets: setup.budgets,
+    chatOnly: !setup.caps.tools,
+  };
+}
+
+/** Starts the chat in `opts.dir` with the provider and model it picks. */
+export async function startChat(opts: ChatOptions): Promise<void> {
   if (opts.plain !== true && !(process.stdin.isTTY && process.stdout.isTTY)) {
     console.error('polyman chat needs a terminal (or use --plain).');
     process.exitCode = 2;
     return;
   }
 
-  const made = await createChatProvider(
-    opts.model !== undefined ? { model: opts.model } : {}
-  );
-  if ('error' in made) {
-    console.error(made.error);
-    process.exitCode = 2;
-    return;
-  }
-
-  const runtime = createChatRuntime({
-    ...(opts.dir !== undefined ? { dir: opts.dir } : {}),
-    provider: withRetries(made.provider, { secrets: made.secrets }),
-    model: made.model,
-    secrets: made.secrets,
-  });
+  const { runtime, model, providerLabel } = await prepareChat(opts);
   const { session, bus, gate } = runtime;
   const problem = runtime.problemDir();
-  const model = made.model;
 
   let tui: TuiModule | null = null;
   if (opts.plain !== true) {
@@ -334,6 +384,7 @@ export async function startChat(opts: {
       await tui.startTui(session, bus, {
         problem,
         model,
+        provider: providerLabel,
         mode: gate.mode,
         setMode: m => gate.setMode(m),
       });

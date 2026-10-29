@@ -27,6 +27,7 @@ import {
   type Preset,
   type PresetModel,
 } from './providers/presets';
+import { ModelCatalog, type ModelList } from './providers/model-catalog';
 import { readAllStdin, readHiddenLine } from './secret-input';
 
 /** What the commands read and write. Tests pass fakes. */
@@ -37,6 +38,16 @@ export interface AiIo {
   readStdin?: () => Promise<string>;
   /** Asks for the key with a hidden prompt. */
   promptHidden?: (question: string) => Promise<string>;
+  /** Live model lists. Defaults to a {@link ModelCatalog} in `~/.polyman`. */
+  catalog?: ModelCatalog;
+}
+
+/** Options of `polyman ai models`. */
+export interface AiModelsOptions {
+  /** Only models whose id has this text, case does not matter. */
+  search?: string;
+  /** Fetch the live list even when the cache is fresh. */
+  refresh?: boolean;
 }
 
 /** Options of `polyman ai login`. */
@@ -136,33 +147,60 @@ export async function aiListAction(io: AiIo = {}): Promise<void> {
   });
 }
 
-/** `polyman ai models [provider]`: the known models. */
+/**
+ * `polyman ai models [provider]`: the models of every provider, or of one.
+ * For a provider with a live list (OpenRouter) it shows the live list, as a
+ * table: id, tools, context and prices. Offline, it shows the known models
+ * of the preset. `--search` keeps the ids that have the text.
+ */
 export async function aiModelsAction(
   providerId: string | undefined,
+  options: AiModelsOptions = {},
   io: AiIo = {}
 ): Promise<void> {
   const store = io.store ?? new KeyStore();
-  await withRedaction(store, [], () => {
+  await withRedaction(store, [], async () => {
     const presets = providerId ? [requirePreset(providerId)] : PRESETS;
+    const search = options.search?.trim().toLowerCase() ?? '';
+    const matches = (id: string) =>
+      search === '' || id.toLowerCase().includes(search);
+    const catalog = io.catalog ?? ModelCatalog.nextTo(store.dir);
     for (const preset of presets) {
+      // Only `ai models <provider>` fetches: `ai models` stays offline.
+      if (providerId !== undefined && catalog.supports(preset.id)) {
+        const list = await catalog.list(preset.id, {
+          ...(options.refresh ? { refresh: true } : {}),
+        });
+        if (list) {
+          printLiveModels(preset, list, search, matches);
+          continue;
+        }
+        fmt.warning(
+          `${fmt.warningIcon()} Cannot get the live ${preset.label} model list (offline?). These are the known models.`
+        );
+      }
       fmt.info(fmt.bold(`${preset.label} (${preset.id})`));
-      const models = knownModels(store, preset);
+      const models = knownModels(store, preset).filter(m => matches(m.id));
       if (models.length === 0) {
-        fmt.log('  no known models');
+        fmt.log(search === '' ? '  no known models' : '  no model matches');
       }
       for (const model of models) {
         fmt.info(`  ${describeModel(preset.id, model)}`);
       }
       fmt.newLine();
     }
-    return Promise.resolve();
+    if (providerId === undefined) {
+      fmt.log(
+        'Every OpenRouter model, live: polyman ai models openrouter --search <text>'
+      );
+    }
   });
 }
 
 /** `polyman ai use <provider>/<model>`: sets the default model. */
 export async function aiUseAction(spec: string, io: AiIo = {}): Promise<void> {
   const store = io.store ?? new KeyStore();
-  await withRedaction(store, [], () => {
+  await withRedaction(store, [], async () => {
     const slash = spec.indexOf('/');
     const providerId = slash === -1 ? '' : spec.slice(0, slash);
     const modelId = slash === -1 ? '' : spec.slice(slash + 1).trim();
@@ -170,7 +208,7 @@ export async function aiUseAction(spec: string, io: AiIo = {}): Promise<void> {
       throw new PolymanError(
         `"${spec}" is not <provider>/<model>.`,
         2,
-        'Example: polyman ai use deepseek/deepseek-flash'
+        'Example: polyman ai use openrouter/deepseek/deepseek-v3.2'
       );
     }
     const preset = requirePreset(providerId);
@@ -178,14 +216,28 @@ export async function aiUseAction(spec: string, io: AiIo = {}): Promise<void> {
     store.setDefault(preset.id, modelId);
     fmt.success(`${fmt.checkmark()} Default model: ${preset.id}/${modelId}`);
 
-    if (!knownModels(store, preset).some(m => m.id === modelId)) {
+    // Ids change often, so a model missing from the list is a warning only.
+    const catalog = io.catalog ?? ModelCatalog.nextTo(store.dir);
+    const found = await catalog.find(preset.id, modelId);
+    if (found.listed && !found.model) {
+      fmt.warning(
+        `${fmt.warningIcon()} ${modelId} is not in the live ${preset.label} model list. It is used as is. ` +
+          `Check the id: polyman ai models ${preset.id} --search <text>`
+      );
+    } else if (
+      !found.listed &&
+      !knownModels(store, preset).some(m => m.id === modelId)
+    ) {
       fmt.warning(
         `${fmt.warningIcon()} ${modelId} is not in the known models of ${preset.label}. It is used as is.`
       );
     }
     if (preset.keyRequired && !store.getKey(preset.id)) {
       fmt.warning(
-        `${fmt.warningIcon()} No ${preset.label} key yet. Run: polyman ai login ${preset.id}`
+        `${fmt.warningIcon()} No ${preset.label} key yet. Run: polyman ai login ${preset.id}` +
+          (preset.keysUrl !== undefined
+            ? ` (get a key at ${preset.keysUrl})`
+            : '')
       );
     }
     if (preset.id === 'custom' && !store.baseUrlFor('custom')) {
@@ -194,14 +246,66 @@ export async function aiUseAction(spec: string, io: AiIo = {}): Promise<void> {
       );
     }
     const overrides = store.read().overrides;
-    if (!lookupCapabilities(preset.id, modelId, overrides).tools) {
+    const live = found.listed ? found.model : undefined;
+    if (!lookupCapabilities(preset.id, modelId, overrides, live).tools) {
       fmt.warning(
         `${fmt.warningIcon()} This model has no tool support. It can only chat, it cannot build the problem.`
       );
     }
-    return Promise.resolve();
   });
 }
+
+/** Prints a live model list as a table, filtered by `search`. */
+function printLiveModels(
+  preset: Preset,
+  list: ModelList,
+  search: string,
+  matches: (id: string) => boolean
+): void {
+  const models = list.models
+    .filter(m => matches(m.id))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  const when = new Date(list.fetchedAt).toISOString().slice(0, 16);
+  const from =
+    list.source === 'live'
+      ? `live list`
+      : list.source === 'cache'
+        ? `cached list from ${when} UTC`
+        : `old cached list from ${when} UTC, offline`;
+  const count =
+    search === ''
+      ? `${list.models.length} models`
+      : `${models.length} of ${list.models.length} models match "${search}"`;
+  fmt.info(fmt.bold(`${preset.label} (${preset.id}): ${count} (${from})`));
+  if (models.length === 0) {
+    fmt.newLine();
+    return;
+  }
+  const width = Math.min(
+    MAX_ID_WIDTH,
+    Math.max('model'.length, ...models.map(m => m.id.length))
+  );
+  const row = (cells: string[]) =>
+    `  ${(cells[0] ?? '').padEnd(width)}  ${(cells[1] ?? '').padEnd(5)}  ${(cells[2] ?? '').padStart(9)}  ${(cells[3] ?? '').padStart(9)}  ${(cells[4] ?? '').padStart(9)}`;
+  fmt.info(fmt.dim(row(['model', 'tools', 'context', '$/1M in', '$/1M out'])));
+  for (const m of models) {
+    fmt.info(
+      row([
+        m.id,
+        m.supportsTools === undefined ? '?' : m.supportsTools ? 'yes' : 'no',
+        m.contextWindow === undefined
+          ? '?'
+          : m.contextWindow.toLocaleString('en-US'),
+        m.pricePerMTokIn === undefined ? '?' : usd(m.pricePerMTokIn),
+        m.pricePerMTokOut === undefined ? '?' : usd(m.pricePerMTokOut),
+      ])
+    );
+  }
+  fmt.newLine();
+}
+
+/** Longer ids are not cut, they only push their row wider. */
+const MAX_ID_WIDTH = 48;
 
 function requirePreset(providerId: string): Preset {
   const preset = getPreset(providerId);

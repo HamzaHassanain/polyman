@@ -48,6 +48,8 @@ export interface TuiInfo {
   problem: string | null;
   /** The model id, like `google/gemma-4-31b-it`. */
   model: string;
+  /** The provider name shown next to the model, `OpenRouter` by default. */
+  provider?: string;
   /** The permission mode at start, `ask` by default. */
   mode?: PermissionMode;
   /** Called when the user switches the mode (shift+tab). */
@@ -337,6 +339,7 @@ export function App({ session, bus, info, onForceExit }: AppProps) {
         items={state.finished}
         folder={path.resolve(info.problem ?? process.cwd())}
         model={info.model}
+        {...(info.provider !== undefined ? { provider: info.provider } : {})}
         columns={columns}
       />
       {!exiting && (
