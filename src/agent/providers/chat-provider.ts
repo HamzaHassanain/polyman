@@ -6,6 +6,7 @@
 
 import { PolymanError } from '../../errors';
 import { AnthropicProvider } from './anthropic';
+import type { BudgetOverride, ModelCapabilities } from './capabilities';
 import { KeyStore } from './key-store';
 import { OpenAICompatibleProvider } from './openai-compatible';
 import { getPreset, type Preset } from './presets';
@@ -17,18 +18,102 @@ export const DEFAULT_CHAT_MODEL = 'google/gemma-4-31b-it';
 /** The provider of {@link DEFAULT_CHAT_MODEL}. */
 export const DEFAULT_CHAT_PROVIDER = 'openrouter';
 
+/** The budgets of one chat. */
+export interface ChatBudgets {
+  /** Model calls per chat turn. */
+  chatMaxSteps: number;
+  /** Context budget of the chat, in tokens (system prompt included). */
+  contextBudgetTokens: number;
+  /** Longest tool result kept in the conversation, in bytes. */
+  toolResultCapBytes: number;
+  /** Upper bound on generated tokens per call. */
+  maxOutputTokens: number;
+  /** Sampling temperature. */
+  temperature: number;
+}
+
 /**
  * Budgets of a chat. They were made for Gemma 4, which is smaller than the
  * frontier models, so it gets fewer steps and a much smaller context than
- * its 262k window (design/agent/03-providers.md).
+ * its 262k window (design/agent/03-providers.md). They are also the upper
+ * bounds of {@link budgetsFor}, so a big model gets the same budgets.
  */
-export const DEFAULT_BUDGETS = {
+export const DEFAULT_BUDGETS: Readonly<ChatBudgets> = Object.freeze({
   chatMaxSteps: 20,
   contextBudgetTokens: 32000,
   toolResultCapBytes: 8192,
   maxOutputTokens: 8000,
   temperature: 0.3,
-} as const;
+});
+
+/** The smallest context budget we give, even to a tiny model. */
+export const MIN_CONTEXT_BUDGET = 1024;
+
+/** The smallest output budget we give, even to a tiny model. */
+export const MIN_OUTPUT_TOKENS = 256;
+
+/**
+ * The part of the context window the conversation may use, after the
+ * output. The rest is for the tool definitions, which the budget does not
+ * count, and for the rough `chars / 4` token estimate.
+ */
+const CONTEXT_SHARE = 0.75;
+
+/**
+ * The budgets of a chat with a model:
+ *
+ * - `maxOutputTokens`: the default (8000), but not more than the model's
+ *   max output, and not more than a quarter of its context window.
+ * - `contextBudgetTokens`: the default (32000), but not more than 75% of
+ *   what is left of the window after the output.
+ * - the steps, the tool result cap and the temperature stay the default.
+ *
+ * Then `override` (the `ai.json` override of the model) may set
+ * `chatMaxSteps`, `contextBudgetTokens` and `maxOutputTokens` as they are.
+ * Override fields that are not positive integers are ignored.
+ *
+ * Gemma 4 (262k window, 16k max output) gets exactly {@link DEFAULT_BUDGETS}.
+ */
+export function budgetsFor(
+  caps: Pick<ModelCapabilities, 'contextWindow' | 'maxOutput'>,
+  override?: BudgetOverride
+): ChatBudgets {
+  const base = DEFAULT_BUDGETS;
+  const maxOutputTokens = Math.max(
+    MIN_OUTPUT_TOKENS,
+    Math.min(
+      base.maxOutputTokens,
+      caps.maxOutput,
+      Math.floor(caps.contextWindow / 4)
+    )
+  );
+  const room = Math.floor(
+    (caps.contextWindow - maxOutputTokens) * CONTEXT_SHARE
+  );
+  const budgets: ChatBudgets = {
+    ...base,
+    maxOutputTokens,
+    contextBudgetTokens: Math.max(
+      MIN_CONTEXT_BUDGET,
+      Math.min(base.contextBudgetTokens, room)
+    ),
+  };
+  if (override) {
+    for (const field of BUDGET_FIELDS) {
+      const value = (override as Record<string, unknown>)[field];
+      if (typeof value === 'number' && Number.isInteger(value) && value > 0) {
+        budgets[field] = value;
+      }
+    }
+  }
+  return budgets;
+}
+
+const BUDGET_FIELDS = [
+  'chatMaxSteps',
+  'contextBudgetTokens',
+  'maxOutputTokens',
+] as const;
 
 /** Options of {@link createChatProvider}. */
 export interface ChatProviderOptions {

@@ -6,14 +6,16 @@
  * Lookup order, last one wins:
  * 1. safe defaults ({@link DEFAULT_CAPABILITIES})
  * 2. the model list of the preset (`presets.ts`)
- * 3. the user override from `ai.json` (`overrides["provider/model"]`)
+ * 3. the live model list of the provider, when there is one
+ *    (`model-catalog.ts`, OpenRouter only for now)
+ * 4. the user override from `ai.json` (`overrides["provider/model"]`)
  *
  * On top of that, a model that failed with `tools_not_supported` has
  * `tools: false` for the rest of the session.
  */
 
 import { getPreset, type PresetModel } from './presets';
-import { ProviderError } from './types';
+import { ProviderError, type ModelInfo } from './types';
 
 /** What one model can do. */
 export interface ModelCapabilities {
@@ -33,18 +35,36 @@ export interface ModelCapabilities {
   pricePerMTokOut?: number;
 }
 
-/** User overrides, keyed by `provider/model`, as in `ai.json`. */
-export type CapabilityOverrides = Readonly<
-  Record<string, Partial<ModelCapabilities>>
->;
+/**
+ * Budget overrides of one model in `ai.json`. They set the chat budgets as
+ * they are, instead of the budgets made from the capabilities.
+ */
+export interface BudgetOverride {
+  /** Model calls per chat turn. */
+  chatMaxSteps?: number;
+  /** Context budget of the chat, in tokens. */
+  contextBudgetTokens?: number;
+  /** Upper bound on generated tokens per call. */
+  maxOutputTokens?: number;
+}
 
-/** Used when neither the preset nor the user says anything. */
+/** What `ai.json` may say about one model. */
+export type ModelOverride = Partial<ModelCapabilities> & BudgetOverride;
+
+/** User overrides, keyed by `provider/model`, as in `ai.json`. */
+export type CapabilityOverrides = Readonly<Record<string, ModelOverride>>;
+
+/**
+ * Used when neither the preset, the live list nor the user says anything.
+ * `maxOutput` is 8000, what the chat asked every model for before it knew
+ * the models, so a model with no data keeps working as before.
+ */
 export const DEFAULT_CAPABILITIES: Readonly<ModelCapabilities> = Object.freeze({
   tools: true,
   parallelToolCalls: false,
   reasoning: false,
   contextWindow: 32_000,
-  maxOutput: 4_096,
+  maxOutput: 8_000,
 });
 
 /** The key of a model in overrides and in the session table. */
@@ -61,20 +81,29 @@ export function presetCapabilities(
   return model ? fromPresetModel(model) : {};
 }
 
+/** What a live model list says about a model. */
+export function liveCapabilities(
+  model: ModelInfo | undefined
+): Partial<ModelCapabilities> {
+  return model ? fromModelInfo(model) : {};
+}
+
 /**
- * Looks up a model: defaults, then the preset, then the user override.
- * Override fields with a wrong type or value are ignored, since they come
- * from a file the user edits by hand.
+ * Looks up a model: defaults, then the preset, then the live list, then the
+ * user override. Override fields with a wrong type or value are ignored,
+ * since they come from a file the user edits by hand.
  */
 export function lookupCapabilities(
   providerId: string,
   modelId: string,
-  overrides: CapabilityOverrides = {}
+  overrides: CapabilityOverrides = {},
+  live?: ModelInfo
 ): ModelCapabilities {
   const override = overrides[modelKey(providerId, modelId)];
   return {
     ...DEFAULT_CAPABILITIES,
     ...presetCapabilities(providerId, modelId),
+    ...liveCapabilities(live),
     ...cleanOverride(override),
   };
 }
@@ -95,11 +124,28 @@ export function chatOnlyNotice(providerId: string, modelId: string): string {
 export class Capabilities {
   private readonly noTools = new Set<string>();
 
-  constructor(private readonly overrides: CapabilityOverrides = {}) {}
+  /**
+   * @param overrides the `overrides` of `ai.json`.
+   * @param live live model info, keyed by {@link modelKey}.
+   */
+  constructor(
+    private readonly overrides: CapabilityOverrides = {},
+    private readonly live: Readonly<Record<string, ModelInfo>> = {}
+  ) {}
+
+  /** The `ai.json` override of a model, as it is in the file. */
+  override(providerId: string, modelId: string): ModelOverride | undefined {
+    return this.overrides[modelKey(providerId, modelId)];
+  }
 
   /** Capabilities of a model for this session. */
   lookup(providerId: string, modelId: string): ModelCapabilities {
-    const caps = lookupCapabilities(providerId, modelId, this.overrides);
+    const caps = lookupCapabilities(
+      providerId,
+      modelId,
+      this.overrides,
+      this.live[modelKey(providerId, modelId)]
+    );
     if (this.noTools.has(modelKey(providerId, modelId))) {
       return { ...caps, tools: false, parallelToolCalls: false };
     }
@@ -134,11 +180,16 @@ export class Capabilities {
 }
 
 function fromPresetModel(model: PresetModel): Partial<ModelCapabilities> {
-  const caps: Partial<ModelCapabilities> = {};
-  if (model.supportsTools !== undefined) caps.tools = model.supportsTools;
+  const caps = fromModelInfo(model);
   if (model.parallelToolCalls !== undefined) {
     caps.parallelToolCalls = model.parallelToolCalls;
   }
+  return caps;
+}
+
+function fromModelInfo(model: ModelInfo): Partial<ModelCapabilities> {
+  const caps: Partial<ModelCapabilities> = {};
+  if (model.supportsTools !== undefined) caps.tools = model.supportsTools;
   if (model.reasoning !== undefined) caps.reasoning = model.reasoning;
   if (model.contextWindow !== undefined) {
     caps.contextWindow = model.contextWindow;
