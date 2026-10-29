@@ -75,6 +75,7 @@ function attemptName(a) {
 
 function cell(text) {
   return String(text ?? '')
+    .replace(/\\/g, '\\\\')
     .replace(/\|/g, '\\|')
     .replace(/\n/g, ' ');
 }

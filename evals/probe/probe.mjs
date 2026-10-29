@@ -289,7 +289,8 @@ function median(xs) {
 }
 
 const frac = (a, b) => `${a}/${b}`;
-const oneLine = s => String(s).replace(/\s+/g, ' ').replace(/\|/g, '\\|');
+const oneLine = s =>
+  String(s).replace(/\s+/g, ' ').replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
 
 function summaryRows(records, opts) {
   const rows = [];
