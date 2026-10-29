@@ -5,16 +5,18 @@ import {
   asList,
   asMap,
   asString,
+  jobOf,
   parseYaml,
   readWorkflow,
+  runsOf,
   stepsOf,
   strings,
   type Workflow,
 } from './workflow-yaml';
 
-// Checks every workflow for what GitHub only reports when it runs: a `needs`
-// to a missing job, an action on another major version, no least-privilege
-// permissions. Also pins the Dependabot config.
+// Pins the release, nightly and security workflows, and checks every workflow
+// for what GitHub only reports when it runs: a `needs` to a missing job, an
+// action on another major version, no least-privilege permissions.
 const DIR = resolve(__dirname, '../../.github/workflows');
 const FILES = readdirSync(DIR).filter(f => /\.ya?ml$/.test(f));
 
@@ -67,7 +69,150 @@ describe('every workflow', () => {
   }
 });
 
-describe('dependabot', () => {
+describe('release.yml', () => {
+  const wf = readWorkflow('release.yml');
+  const publish = jobOf(wf, 'publish');
+  const check = jobOf(wf, 'next-check');
+  const promote = jobOf(wf, 'promote');
+  const release = jobOf(wf, 'github-release');
+
+  it('runs on version tags only', () => {
+    expect(Object.keys(asMap(wf['on']))).toEqual(['push']);
+    const push = asMap(asMap(wf['on'])['push']);
+    expect(strings(push['tags'])).toEqual(['v*']);
+    expect(push['branches']).toBeUndefined();
+  });
+
+  it('publishes to next only when the tag is package.json version', () => {
+    const runs = runsOf(publish);
+    const tag = runs.findIndex(r => r.includes('"v$VERSION"'));
+    const npm = runs.indexOf(
+      'npm publish --provenance --access public --tag next'
+    );
+    expect(tag).toBeGreaterThanOrEqual(0);
+    expect(runs[tag]).toContain('$GITHUB_REF_NAME');
+    expect(runs[tag]).toContain('exit 1');
+    expect(npm).toBeGreaterThan(tag);
+    expect(asMap(publish['permissions'])).toEqual({
+      contents: 'read',
+      'id-token': 'write',
+    });
+    const step = stepsOf(publish).find(s => s['run'] === runs[npm])!;
+    expect(asMap(step['env'])['NODE_AUTH_TOKEN']).toBe(
+      '${{ secrets.NPM_TOKEN }}'
+    );
+  });
+
+  it('gates latest on no regression against the previous latest', () => {
+    expect(needsOf(check)).toEqual(['publish']);
+    const runs = runsOf(check).join('\n');
+    expect(runs).toContain('polyman-cli@latest');
+    expect(runs).toContain('polyman-cli@$RELEASE_VERSION');
+    expect(runsOf(check)).toContain(
+      'node corpus/regressions.mjs corpus/out/latest/summary.json corpus/out/next/summary.json'
+    );
+  });
+
+  it('promotes only after the check, with a reviewer of npm-latest', () => {
+    expect(needsOf(promote)).toEqual(['publish', 'next-check']);
+    expect(asMap(promote['environment'])['name']).toBe('npm-latest');
+    expect(promote['if']).toBeUndefined();
+    expect(runsOf(promote)).toEqual([
+      'npm dist-tag add "polyman-cli@$RELEASE_VERSION" latest',
+    ]);
+  });
+
+  it('makes the GitHub Release only after the promote', () => {
+    expect(needsOf(release)).toContain('promote');
+    expect(release['if']).toBe(
+      "${{ !cancelled() && needs.promote.result == 'success' }}"
+    );
+    expect(asMap(release['permissions'])).toEqual({ contents: 'write' });
+    const runs = runsOf(release).join('\n');
+    expect(runs).toContain('CHANGELOG.md');
+    expect(runs).toContain('gh release create "v$RELEASE_VERSION"');
+    expect(runs).not.toMatch(/CI_PIPELINE|CI_JOB|GITLAB/);
+  });
+
+  it('gives write access only to the jobs that need it', () => {
+    expect(asMap(wf['permissions'])).toEqual({ contents: 'read' });
+    for (const [id, job] of Object.entries(jobs(wf)))
+      if (!['publish', 'github-release'].includes(id))
+        expect(asMap(job)['permissions'], id).toBeUndefined();
+  });
+});
+
+describe('nightly.yml', () => {
+  const wf = readWorkflow('nightly.yml');
+
+  it('runs on a schedule and by hand', () => {
+    expect(Object.keys(asMap(wf['on']))).toEqual([
+      'schedule',
+      'workflow_dispatch',
+    ]);
+  });
+
+  it('judges the polyman users install from npm', () => {
+    const job = jobOf(wf, 'production');
+    expect(asMap(job['env'])['POLYMAN_VERSION']).toBe('latest');
+    expect(runsOf(job).join('\n')).toContain('polyman-cli@"$POLYMAN_VERSION"');
+  });
+
+  it('runs the Polygon round trip on the default branch, with the secrets', () => {
+    const gate = jobOf(wf, 'polygon-gate');
+    const polygon = jobOf(wf, 'polygon');
+    expect(gate['if']).toBe(
+      "github.ref == format('refs/heads/{0}', github.event.repository.default_branch)"
+    );
+    const check = stepsOf(gate)[0];
+    expect(asMap(check['env'])).toEqual({
+      HAS_KEY: "${{ secrets.POLYGON_API_KEY != '' }}",
+      HAS_SECRET: "${{ secrets.POLYGON_API_SECRET != '' }}",
+    });
+    expect(needsOf(polygon)).toEqual(['polygon-gate']);
+    expect(polygon['if']).toBe("needs.polygon-gate.outputs.ready == 'true'");
+    expect(runsOf(polygon)).toContain(
+      'node corpus/polygon-roundtrip.mjs --all'
+    );
+    // polygon-roundtrip.mjs reads these two variables
+    expect(asMap(polygon['env'])).toEqual({
+      POLYGON_API_KEY: '${{ secrets.POLYGON_API_KEY }}',
+      POLYGON_API_SECRET: '${{ secrets.POLYGON_API_SECRET }}',
+    });
+  });
+
+  it('writes to Polygon from one job at a time', () => {
+    for (const id of ['production', 'polygon'])
+      expect(asMap(jobOf(wf, id)['concurrency'])).toEqual({
+        group: 'polygon',
+        'cancel-in-progress': 'false',
+      });
+  });
+
+  it('checks upstream drift with the run token', () => {
+    const job = jobOf(wf, 'upstream');
+    const step = stepsOf(job).find(
+      s => s['run'] === 'node corpus/upstream.mjs'
+    );
+    expect(asMap(step?.['env'])['GITHUB_TOKEN']).toBe('${{ github.token }}');
+  });
+});
+
+describe('security scanning', () => {
+  it('runs CodeQL on javascript-typescript on push, pull request and weekly', () => {
+    const wf = readWorkflow('codeql.yml');
+    expect(Object.keys(asMap(wf['on']))).toEqual(
+      expect.arrayContaining(['push', 'pull_request', 'schedule'])
+    );
+    const init = stepsOf(jobOf(wf, 'analyze')).find(
+      s => s['uses'] === 'github/codeql-action/init@v4'
+    );
+    expect(asMap(init?.['with'])['languages']).toBe('javascript-typescript');
+    expect(asMap(jobOf(wf, 'analyze')['permissions'])['security-events']).toBe(
+      'write'
+    );
+  });
+
   it('has Dependabot updates for npm and the actions, weekly', () => {
     const config = asMap(
       parseYaml(readFileSync(resolve(DIR, '../dependabot.yml'), 'utf8')),

@@ -1,0 +1,133 @@
+# Nightly checks of things that change without a commit here:
+#
+# production: the polyman users install from npm (polyman-cli@latest), judged
+#   by the same corpus and Polygon round trip. A release that judges wrongly,
+#   or a change on Polygon's side, turns the nightly run red.
+# upstream: Polygon's API docs and testlib.h change outside our control. Fails,
+#   listing the new upstream commits, when either moved since the commit pinned
+#   in corpus/upstream.json.
+# polygon: push the corpus problems with polyman built from this commit, read
+#   them back from Polygon and compare them with their folders
+#   (corpus/polygon-roundtrip.mjs). Only on the default branch, and only when
+#   the POLYGON_API_KEY and POLYGON_API_SECRET secrets exist.
+#
+# production and polygon write the same Polygon problems, so they share the
+# `polygon` concurrency group: one at a time, also across runs.
+name: Nightly
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  production:
+    name: Production check (polyman-cli@latest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    container: node:20
+    environment: polygon
+    concurrency:
+      group: polygon
+      cancel-in-progress: false
+    env:
+      POLYMAN_VERSION: latest
+      POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+      POLYGON_API_SECRET: ${{ secrets.POLYGON_API_SECRET }}
+    steps:
+      - uses: actions/checkout@v7
+      - run: npm ci --no-audit --no-fund
+      - run: apt-get update -qq && apt-get install -y -qq default-jdk-headless python-is-python3 >/dev/null
+      - run: npm i --prefix /tmp/published --no-audit --no-fund polyman-cli@"$POLYMAN_VERSION"
+      - name: Judge the published polyman
+        run: |
+          PUBLISHED=/tmp/published/node_modules/polyman-cli/dist/cli.js
+          node "$PUBLISHED" --version
+          status=0
+          node corpus/run.mjs --polyman "$PUBLISHED" --junit corpus/out/junit-production.xml || status=1
+          # without credentials the Polygon half would pass unseen: say so and fail
+          if [ -n "$POLYGON_API_KEY" ] && [ -n "$POLYGON_API_SECRET" ]; then
+            node corpus/polygon-roundtrip.mjs --all --polyman "$PUBLISHED" --junit corpus/out/junit-production-polygon.xml || status=1
+          else
+            echo "SKIPPED: no Polygon credentials, the round trip did not run"
+            echo "Production check: no Polygon credentials, the round trip did not run" >> "$GITHUB_STEP_SUMMARY"
+            status=1
+          fi
+          exit $status
+      - name: Upload the verdicts
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: production-verdicts
+          path: corpus/out/
+          retention-days: 90
+
+  upstream:
+    name: Upstream drift (testlib.h, Polygon API docs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20.x
+      - run: node corpus/upstream.mjs
+        env:
+          # read-only GitHub API calls; the token only lifts the rate limit
+          GITHUB_TOKEN: ${{ github.token }}
+
+  # Job-level `if:` can't read secrets, so this job says whether the round
+  # trip can run, and `polygon` shows as skipped (not failed) when it can't.
+  polygon-gate:
+    name: Polygon credentials present
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: polygon
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      - id: check
+        env:
+          HAS_KEY: ${{ secrets.POLYGON_API_KEY != '' }}
+          HAS_SECRET: ${{ secrets.POLYGON_API_SECRET != '' }}
+        run: |
+          if [ "$HAS_KEY" = true ] && [ "$HAS_SECRET" = true ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Polygon round trip skipped: POLYGON_API_KEY or POLYGON_API_SECRET is not set" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  polygon:
+    name: Polygon round trip
+    needs: polygon-gate
+    if: needs.polygon-gate.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    container: node:20
+    environment: polygon
+    concurrency:
+      group: polygon
+      cancel-in-progress: false
+    # Red on polyman 3.0.0 (#24, #25, #26). Becomes blocking once they're fixed.
+    continue-on-error: true
+    env:
+      POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+      POLYGON_API_SECRET: ${{ secrets.POLYGON_API_SECRET }}
+    steps:
+      - uses: actions/checkout@v7
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      - run: node corpus/polygon-roundtrip.mjs --all
+      - name: Upload the round trip reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: polygon-roundtrip
+          path: corpus/out/
+          if-no-files-found: ignore
+          retention-days: 30

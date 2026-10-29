@@ -1,0 +1,135 @@
+# The corpus: real problems with deliberately wrong solutions, judged by real
+# compilers and checkers, compared with pinned true verdicts (corpus/README.md).
+# Runs on every push to the default branch, and on pull requests that change
+# polyman's code, the corpus or the dependencies.
+#
+# The Linux jobs run in the official node images:
+# they have g++ and python3 but no `python` command, and each job installs
+# what its lane needs with apt-get.
+name: Corpus
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'corpus/**'
+      - 'template/**'
+      - 'assets/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/corpus.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: corpus-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # polyman gives each compile 10 s. On a 2-vCPU runner, sum-parity's 7
+  # compiles can wait for a CPU and cross that limit, so the corpus uses 60 s.
+  POLYMAN_COMPILE_TIMEOUT_MS: '60000'
+
+jobs:
+  # g++, Java and Python reachable as `python`: the toolchain polyman supports.
+  # Blocking.
+  corpus:
+    name: Corpus (g++, Java 17, Python)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    container: node:20
+    steps:
+      - uses: actions/checkout@v7
+      - run: npm ci --no-audit --no-fund
+      - run: apt-get update -qq && apt-get install -y -qq default-jdk-headless python-is-python3 >/dev/null
+      - run: npm run build
+      - run: node corpus/run.mjs
+      - name: Upload the verdicts
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: corpus-verdicts
+          path: corpus/out/
+          retention-days: 30
+
+  # Environments polyman's users have. Each lane pins one fact about them.
+  # node-20.19 is blocking; no-python-alias is reported, not yet blocking.
+  toolchain:
+    name: Corpus toolchain (${{ matrix.lane }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    container: ${{ matrix.image }}
+    continue-on-error: ${{ matrix.allow-failure }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The oldest Node polyman supports (^20.19.0 || >=22.12.0).
+          - lane: node-20.19
+            image: node:20.19
+            python-alias: 'yes'
+            allow-failure: false
+          # Stock Debian/Ubuntu: python3 only, no `python` command.
+          - lane: no-python-alias
+            image: node:22
+            python-alias: 'no'
+            allow-failure: true
+    steps:
+      - uses: actions/checkout@v7
+      - run: npm ci --no-audit --no-fund
+      - run: apt-get update -qq && apt-get install -y -qq default-jdk-headless >/dev/null
+      - if: matrix.python-alias == 'yes'
+        run: apt-get install -y -qq python-is-python3 >/dev/null
+      - run: npm run build
+      - run: node dist/cli.js --version
+      - run: node corpus/run.mjs --junit corpus/out/junit-${{ matrix.lane }}.xml
+      - name: Upload the verdicts
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: corpus-verdicts-${{ matrix.lane }}
+          path: corpus/out/
+          retention-days: 30
+
+  # The precompiled <bits/stdc++.h> (#113) on one corpus solution, compiled and
+  # run five times by corpus/pch-check.mjs: PCH off (--no-cache), PCH built on
+  # an empty folder, the same PCH used again, other flags (a key of its own) and
+  # clang++ (which must skip it). The node image has g++ but no clang. Blocking.
+  pch:
+    name: Corpus PCH
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    container: node:20
+    steps:
+      - uses: actions/checkout@v7
+      - run: npm ci --no-audit --no-fund
+      - run: apt-get update -qq && apt-get install -y -qq clang >/dev/null
+      - run: npm run build
+      - run: node corpus/pch-check.mjs
+      - name: Upload the PCH check
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: corpus-pch
+          path: corpus/out/
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # The pinned verdicts judged again without polyman (corpus/truth.mjs): g++,
+  # javac and Python run every solution and the checker directly. A difference
+  # means a pinned verdict is wrong (or this runner judges differently), not
+  # that polyman is, so this job is the check on the corpus itself. It needs
+  # no npm packages.
+  truth:
+    name: Corpus truth
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    container: node:20
+    steps:
+      - uses: actions/checkout@v7
+      - run: apt-get update -qq && apt-get install -y -qq default-jdk-headless >/dev/null
+      - run: node corpus/truth.mjs --check

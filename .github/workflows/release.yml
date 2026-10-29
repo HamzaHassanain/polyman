@@ -1,0 +1,259 @@
+# npm release channels: a version tag (vX.Y.Z, equal to package.json's version)
+# is published to npm under `next`, judged there as users install it against
+# `latest`, and becomes `latest` only after a person approves the promote job
+# (the npm-latest environment has required reviewers). Then a GitHub Release
+# keeps the evidence of why the version was allowed out.
+#
+#   publish -> next-check -> promote (approval) -> github-release
+#           -> mutation (evidence only) -------------^
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+jobs:
+  # Publishes package.json's version to npm under the `next` tag, with
+  # provenance: npmjs.com links the package to this run. npm checks that
+  # package.json's repository.url is the repository of this run.
+  publish:
+    name: Publish to npm (next)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: npm-next
+      url: https://www.npmjs.com/package/polyman-cli?activeTab=versions
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      new: ${{ steps.npm.outputs.new }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20.x
+          registry-url: https://registry.npmjs.org
+          cache: 'npm'
+      - name: Check that the tag is package.json's version
+        id: version
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+            echo "::error::the tag $GITHUB_REF_NAME is not package.json's version v$VERSION"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Check that the version is not on npm yet
+        id: npm
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if npm view "polyman-cli@$VERSION" version >/dev/null 2>&1; then
+            echo "polyman-cli@$VERSION is already on npm: nothing to publish, check or promote" | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "new=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.npm.outputs.new == 'true'
+        run: npm ci --no-audit --no-fund
+      - if: steps.npm.outputs.new == 'true'
+        run: npm run build
+      - if: steps.npm.outputs.new == 'true'
+        run: npm publish --provenance --access public --tag next
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # Judges `next` as users install it, against `latest` on the same machine:
+  # the gate is no regression (corpus/regressions.mjs), since the corpus can't
+  # be all green while judge bugs are open. The Polygon round trip on `next` is
+  # kept as evidence when the Polygon secrets are there; it gates too once the
+  # push bugs (#24, #25, #26) are fixed.
+  next-check:
+    name: Judge next against latest
+    needs: publish
+    if: needs.publish.outputs.new == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    container: node:20
+    env:
+      RELEASE_VERSION: ${{ needs.publish.outputs.version }}
+      POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+      POLYGON_API_SECRET: ${{ secrets.POLYGON_API_SECRET }}
+    steps:
+      - uses: actions/checkout@v7
+      - run: apt-get update -qq && apt-get install -y -qq default-jdk-headless python-is-python3 >/dev/null
+      - name: Install next and latest from npm
+        run: |
+          # npm's CDN can take a moment to serve a new version
+          for i in $(seq 1 30); do npm i --prefix /tmp/next --no-audit --no-fund "polyman-cli@$RELEASE_VERSION" && break; sleep 10; done
+          test -f /tmp/next/node_modules/polyman-cli/dist/cli.js
+          npm i --prefix /tmp/latest --no-audit --no-fund polyman-cli@latest
+          echo "next: $(node /tmp/next/node_modules/polyman-cli/dist/cli.js --version)"
+          echo "latest: $(node /tmp/latest/node_modules/polyman-cli/dist/cli.js --version)"
+      - name: Corpus on latest and on next
+        run: |
+          node corpus/run.mjs --polyman /tmp/latest/node_modules/polyman-cli/dist/cli.js --junit corpus/out/latest/junit.xml || true
+          node corpus/run.mjs --polyman /tmp/next/node_modules/polyman-cli/dist/cli.js --junit corpus/out/next/junit.xml || true
+          if [ -n "$POLYGON_API_KEY" ] && [ -n "$POLYGON_API_SECRET" ]; then
+            node corpus/polygon-roundtrip.mjs --all --polyman /tmp/next/node_modules/polyman-cli/dist/cli.js --junit corpus/out/next/junit-polygon.xml || echo "the round trip on next failed: see its report (evidence, not yet a gate)"
+          fi
+      - name: No regression against latest
+        run: node corpus/regressions.mjs corpus/out/latest/summary.json corpus/out/next/summary.json
+      # reached only when next has no regression against latest
+      - name: Next step
+        run: echo "polyman-cli@$RELEASE_VERSION on next judges as well as latest or better. A reviewer of the npm-latest environment approves the promote job of this run to make it latest - $RUN_URL" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Upload the release check
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-check
+          path: corpus/out/
+          retention-days: 90
+
+  # The mutation report of the released commit, kept with the release. Best
+  # effort: it is evidence, not a gate.
+  mutation:
+    name: Mutation report (evidence)
+    needs: publish
+    if: needs.publish.outputs.new == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    container: node:20
+    continue-on-error: true
+    env:
+      # tests/actions.test.ts sets TZ at runtime, which Stryker's workers don't see
+      TZ: Asia/Kolkata
+    steps:
+      - uses: actions/checkout@v7
+      - run: npm ci --no-audit --no-fund
+      - run: npm i --no-save --legacy-peer-deps --no-audit --no-fund @stryker-mutator/core@9 @stryker-mutator/vitest-runner@9
+      - run: ./node_modules/.bin/stryker run corpus/stryker.config.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-mutation-report
+          path: corpus/out/mutation/index.html
+          retention-days: 90
+
+  # Moves `latest` to the judged version. Waits for a required reviewer of the
+  # npm-latest environment, and runs only after the check passed.
+  promote:
+    name: Promote to latest
+    needs: [publish, next-check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: npm-latest
+      url: https://www.npmjs.com/package/polyman-cli
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20.x
+          registry-url: https://registry.npmjs.org
+      - run: npm dist-tag add "polyman-cli@$RELEASE_VERSION" latest
+        env:
+          RELEASE_VERSION: ${{ needs.publish.outputs.version }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # The GitHub Release vX.Y.Z: the CHANGELOG.md section of the version, links
+  # to the npm package, its provenance and this run, and the evidence as
+  # release assets:
+  #   - corpus verdicts on next and on the latest it replaced (next-check)
+  #   - the Polygon round trip on next, when the Polygon secrets were there
+  #   - the mutation report of this commit (mutation)
+  #   - a CycloneDX SBOM of the published package's dependencies
+  #   - npm's provenance attestation, and a link to its Sigstore log entry
+  # Each evidence step is best effort: latest has already moved, so a missing
+  # file must not stop the Release.
+  github-release:
+    name: GitHub Release
+    needs: [publish, next-check, mutation, promote]
+    # the mutation report is optional evidence: only the promote must have passed
+    if: ${{ !cancelled() && needs.promote.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      RELEASE_VERSION: ${{ needs.publish.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20.x
+          cache: 'npm'
+      - name: Download the release check
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: release-check
+          path: check/
+      - name: Download the mutation report
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: release-mutation-report
+          path: mutation/
+      - name: Corpus verdicts, Polygon round trip and mutation report
+        continue-on-error: true
+        run: |
+          mkdir -p evidence
+          cp check/next/report.html evidence/corpus-verdicts-next.html || echo "no corpus verdicts on next"
+          cp check/latest/report.html evidence/corpus-verdicts-latest.html || true
+          # one report per round-tripped problem (polygon-roundtrip.mjs --all), and the skipped ones
+          for f in check/next/junit-polygon-*.xml; do [ -e "$f" ] || { echo "no Polygon round trip on next (no Polygon secrets in this run)"; break; }; cp "$f" "evidence/polygon-roundtrip-next-${f##*/junit-polygon-}"; done
+          cp mutation/index.html evidence/mutation-report.html || echo "no mutation report in this run"
+      - name: SBOM of the published package
+        continue-on-error: true
+        run: |
+          mkdir -p evidence
+          npm ci --no-audit --no-fund
+          npx --yes @cyclonedx/cyclonedx-npm@6.0.1 --omit dev --output-format JSON --output-file evidence/sbom.cdx.json
+      - name: npm provenance attestation
+        continue-on-error: true
+        run: |
+          mkdir -p evidence
+          # what npm recorded when the publish job published with --provenance
+          curl -sSf "https://registry.npmjs.org/-/npm/v1/attestations/polyman-cli@$RELEASE_VERSION" -o evidence/npm-attestations.json || { rm -f evidence/npm-attestations.json; echo "npm has no attestations for polyman-cli@$RELEASE_VERSION"; }
+      - name: Release notes
+        run: |
+          mkdir -p evidence
+          NOTES="$(awk -v v="## $RELEASE_VERSION" '$0 == v || index($0, v " ") == 1 { f = 1; next } /^## / { f = 0 } f' CHANGELOG.md)"
+          if [ -z "$(printf '%s' "$NOTES" | tr -d '[:space:]')" ]; then
+            echo "::warning::CHANGELOG.md has no section for $RELEASE_VERSION"
+            NOTES="No CHANGELOG.md section for $RELEASE_VERSION."
+          fi
+          LOG_INDEX="$(node -e 'try { const a = require("./evidence/npm-attestations.json").attestations.find(x => /provenance/.test(x.predicateType)); console.log(a.bundle.verificationMaterial.tlogEntries[0].logIndex) } catch {}')"
+          {
+            printf '%s\n\n' "$NOTES"
+            echo "## Evidence"
+            echo
+            echo "Published to npm from [this run]($RUN_URL) with provenance, and judged by the corpus against the previous latest before a person promoted it. The files attached to this release are the evidence kept for it; the Polygon round trip, when it ran, is evidence, not a gate."
+            echo
+            echo "- npm: https://www.npmjs.com/package/polyman-cli/v/$RELEASE_VERSION"
+            echo "- npm provenance: https://www.npmjs.com/package/polyman-cli/v/$RELEASE_VERSION#provenance"
+            if [ -n "$LOG_INDEX" ]; then echo "- Sigstore transparency log entry $LOG_INDEX: https://search.sigstore.dev/?logIndex=$LOG_INDEX"; fi
+            echo "- Release check, next vs latest: $RUN_URL"
+          } > release-notes.md
+          cat release-notes.md
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          files=(evidence/*)
+          gh release create "v$RELEASE_VERSION" --verify-tag \
+            --title "polyman-cli $RELEASE_VERSION" \
+            --notes-file release-notes.md \
+            "${files[@]}"

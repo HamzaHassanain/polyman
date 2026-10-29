@@ -1,0 +1,146 @@
+# Mutation testing of the code that decides verdicts (corpus/README.md).
+#
+# mutation: Stryker plants small bugs in src/helpers/solution.ts and counts how
+#   many the unit tests catch. The score and the mutants no test catches go to
+#   the run's summary; the HTML report is an artifact.
+# survivors, survivors-report: who judges the judge. The mutants the unit tests
+#   miss are planted one at a time, polyman is rebuilt and the corpus judges
+#   all problems (corpus/survivors.mjs). A measurement: it never fails the run
+#   because the judges miss a mutant.
+#
+# Pull requests that change the verdict code or its tests run the mutation job
+# only. A push to the default branch runs everything when something the
+# survivors read changed; the weekly schedule and workflow_dispatch always run
+# everything (workflow_dispatch on a branch is the way to judge a pull
+# request's survivors).
+name: Mutation
+
+on:
+  pull_request:
+    paths:
+      - 'src/helpers/solution.ts'
+      - 'src/types.d.ts'
+      - 'tests/**'
+      - 'corpus/stryker.config.json'
+      - 'corpus/mutation-metrics.mjs'
+      - 'corpus/lib.mjs'
+      - '.github/workflows/mutation.yml'
+  push:
+    branches: [main, master]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'corpus/**'
+      - 'template/**'
+      - 'assets/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig*.json'
+      - 'vitest.config.ts'
+      - '.github/workflows/mutation.yml'
+  schedule:
+    # Mondays 02:00 UTC
+    - cron: '0 2 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  mutation:
+    name: Mutation score (Stryker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # Full node image: g++ and python3 for the integration tests Stryker runs.
+    container: node:20
+    env:
+      # tests/actions.test.ts sets TZ at runtime, which Stryker's workers don't see
+      TZ: Asia/Kolkata
+    steps:
+      - uses: actions/checkout@v7
+      - run: npm ci --no-audit --no-fund
+      # --no-save keeps package.json as it is; --legacy-peer-deps avoids an npm
+      # crash (edgesOut) when adding packages without saving them
+      - run: npm i --no-save --legacy-peer-deps --no-audit --no-fund @stryker-mutator/core@9 @stryker-mutator/vitest-runner@9
+      - run: ./node_modules/.bin/stryker run corpus/stryker.config.json
+      - name: Mutation score to the run summary
+        run: |
+          node corpus/mutation-metrics.mjs corpus/out/mutation/mutation.json corpus/out/mutation-summary.md
+          cat corpus/out/mutation-summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload the mutation report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutation-report
+          path: |
+            corpus/out/mutation/
+            corpus/out/mutation-summary.md
+          if-no-files-found: ignore
+          retention-days: 30
+
+  survivors:
+    name: Judges vs surviving mutants (${{ matrix.shard }}/8)
+    needs: mutation
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    container: node:20
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    steps:
+      - uses: actions/checkout@v7
+      - run: npm ci --no-audit --no-fund
+      - run: apt-get update -qq && apt-get install -y -qq default-jdk-headless python-is-python3 >/dev/null
+      - name: Download the Stryker report of this run
+        uses: actions/download-artifact@v8
+        with:
+          name: mutation-report
+          path: corpus/out/
+      - run: node corpus/survivors.mjs --report corpus/out/mutation/mutation.json --shard "${{ matrix.shard }}/8"
+      - name: Upload this shard
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: survivors-shard-${{ matrix.shard }}
+          path: corpus/out/survivors/
+          retention-days: 30
+
+  survivors-report:
+    name: Judges vs surviving mutants (report)
+    needs: survivors
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.survivors.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20.x
+      - name: Download every shard
+        uses: actions/download-artifact@v8
+        with:
+          pattern: survivors-shard-*
+          path: corpus/out/survivors/
+          merge-multiple: true
+      - name: Sum the shards into the run summary
+        run: |
+          status=0
+          node corpus/survivors.mjs report --shards 8 || status=$?
+          if [ -f corpus/out/survivors/summary.md ]; then cat corpus/out/survivors/summary.md >> "$GITHUB_STEP_SUMMARY"; fi
+          exit $status
+      - name: Upload the summary
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: survivors-summary
+          path: corpus/out/survivors/summary.md
+          if-no-files-found: ignore
+          retention-days: 30
