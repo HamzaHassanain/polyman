@@ -166,7 +166,15 @@ polyman remote commit . "Updated solutions"
 
 ### Providers, keys and models
 
-<!-- PROVIDERS: filled by the any-model PR -->
+Bring your own key. Any model with tool support works, the easiest is OpenRouter (Gemma, DeepSeek, Qwen, Llama, ...):
+
+```bash
+polyman ai login openrouter                        # key from https://openrouter.ai/keys
+polyman ai models openrouter --search deepseek     # live list: tools, context, price
+polyman ai use openrouter/deepseek/deepseek-v3.2   # default model, optional
+```
+
+The default model is Gemma 4 on OpenRouter. OpenAI, Anthropic, DeepSeek, Qwen, Gemini, Groq, Mistral, Ollama and any OpenAI-compatible server work too.
 
 ### Quick start
 
@@ -175,7 +183,7 @@ polyman chat my-problem           # a folder with Config.json, or a new problem
 polyman chat my-problem --plain   # line mode, works with pipes
 ```
 
-- The default model is Gemma 4 on OpenRouter. `--model <id>` picks another one.
+- `--provider <id>` and `--model <id>` pick another model for one chat.
 - File writes ask you first (`shift+tab` switches to `auto-edit`), a workflow asks once for its whole plan, and Polygon changes always ask.
 - The agent works only inside the problem folder and runs only polyman commands, never a shell.
 - What you send to the model provider: your messages, the files the agent reads and the output of the commands it runs.

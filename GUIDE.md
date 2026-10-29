@@ -2091,8 +2091,8 @@ esac
 | `polyman ai login <provider>` | Saves a key. It is read from a hidden prompt, or from stdin with `--key-stdin`, never from the command line, so it stays out of shell history. |
 | `polyman ai logout <provider>` | Removes the saved key. |
 | `polyman ai list` | Lists the providers, which have a key (shown masked) and the default model. |
-| `polyman ai models [provider]` | Lists the known models of every provider, or of one, with context size, tool support and price where known. |
-| `polyman ai use <provider>/<model>` | Sets the default model, for example `polyman ai use deepseek/deepseek-flash`. A model that is not in the known list is used as is, with a warning. |
+| `polyman ai models [provider]` | Lists the known models of every provider, or of one, with context size, tool support and price where known. For `openrouter` the list is live: `--search <text>` filters it, `--refresh` skips the 24 hour cache. |
+| `polyman ai use <provider>/<model>` | Sets the default model, for example `polyman ai use deepseek/deepseek-flash`. A model that is not in the known (or live) list is used as is, with a warning. Only the first `/` splits, so `openrouter/deepseek/deepseek-v3.2` works. |
 
 ```bash
 polyman ai login deepseek
@@ -2596,7 +2596,55 @@ You need what polyman needs anyway (Node.js and `g++`), plus a key for a model p
 
 ### Providers, keys and models
 
-<!-- PROVIDERS: filled by the any-model PR -->
+You bring your own key. The chat works with any model of any provider in [AI Provider Keys](#ai-provider-keys), as long as the model supports tool calls. The easiest way is OpenRouter: one key gives you Gemma, DeepSeek, Qwen, Llama and hundreds more.
+
+```bash
+# 1- save the key (get one at https://openrouter.ai/keys), or set OPENROUTER_API_KEY
+polyman ai login openrouter
+
+# 2- find a model, the list is live from OpenRouter
+polyman ai models openrouter --search deepseek
+
+# 3- make it the default, or pass it for one chat only
+polyman ai use openrouter/deepseek/deepseek-v3.2
+polyman chat my-problem --model qwen/qwen3-coder
+```
+
+Without a default, the chat uses `google/gemma-4-31b-it` on OpenRouter.
+
+**How the chat picks the provider and model.** The provider is `--provider`, else the `ai.json` default, else `openrouter`. The model is `--model`, else the `ai.json` model when it is for the same provider, else `google/gemma-4-31b-it` for OpenRouter, the first saved model for `custom`, or the first known model for the other providers. An unknown provider exits with code `2` and lists the known ones. A missing key exits with code `2` and says how to add it.
+
+```bash
+polyman chat my-problem --provider deepseek --model deepseek-flash
+polyman chat my-problem --provider ollama --model qwen3:8b
+```
+
+**The live model list.** `polyman ai models openrouter` shows every OpenRouter model with tool support, context size and price per 1M tokens in and out. `--search <text>` filters by id, `--refresh` skips the cache. The list is fetched without your key and cached for 24 hours in `~/.polyman/agent/models/openrouter.json`. When you are offline, the command and the chat use the old cache or the known models, they never fail because of it. `polyman ai use` warns (it does not fail) when the model is not in the live list, or when the model has no tool support.
+
+**Budgets follow the model.** The chat reads the model's context size and max output from the live list (or the known list) and sizes itself to fit:
+
+- max output per reply: the smallest of 8000, the model's max output, and a quarter of its context
+- context the chat keeps: the smallest of 32000 and 75% of what is left after the output
+
+Gemma 4 gets 32000 and 8000. A model with an 8k context gets 4608 and 2048. You can set the numbers yourself in `~/.polyman/ai.json`, per model:
+
+```json
+{
+  "overrides": {
+    "openrouter/deepseek/deepseek-v3.2": {
+      "contextBudgetTokens": 64000,
+      "maxOutputTokens": 8000,
+      "chatMaxSteps": 30
+    }
+  }
+}
+```
+
+The same `overrides` entry can also correct what polyman knows about a model: `tools`, `contextWindow`, `maxOutput`, `reasoning`, `parallelToolCalls`, `pricePerMTokIn` and `pricePerMTokOut`.
+
+**Models without tools.** A model that cannot call tools can only talk, it cannot build anything. The chat says so once and goes on in chat-only mode. This also happens in the middle of a chat, when the provider answers that the model does not support tools.
+
+**Which model to pick.** Smaller models are cheaper but make more mistakes in the workflows. The workflows were tested mostly on Gemma 4, see [Known limits](#known-limits).
 
 ### Starting a Chat
 
@@ -2608,10 +2656,11 @@ Then write what you want, for example `a problem about counting pairs with sum k
 
 `polyman chat` options:
 
-| Option         | What it does                                                                                |
-| -------------- | ------------------------------------------------------------------------------------------- |
-| `--model <id>` | The model to use for this chat, like `google/gemma-4-31b-it`.                               |
-| `--plain`      | Line mode without the terminal UI, works with pipes. See [Plain mode](#plain-mode---plain). |
+| Option            | What it does                                                                                       |
+| ----------------- | -------------------------------------------------------------------------------------------------- |
+| `--provider <id>` | The provider for this chat, like `openrouter` or `deepseek`. Wins over the `ai.json` default.      |
+| `--model <id>`    | The model for this chat, like `deepseek/deepseek-v3.2`. Wins over the `ai.json` default.           |
+| `--plain`         | Line mode without the terminal UI, works with pipes. See [Plain mode](#plain-mode---plain).        |
 
 ### New Problem or Existing Problem
 

@@ -663,7 +663,17 @@ agent/tui/ or plain.ts    Ink terminal UI, or the line mode; both only read even
 
 ### Providers, keys and models
 
-<!-- PROVIDERS: filled by the any-model PR -->
+`agent/providers/` turns a provider and a model into a `Provider` and the budgets of the chat.
+
+- `presets.ts`: the known providers (base URL, env var, quirks, known models). Two adapters: `openai-compatible.ts` for every OpenAI-compatible server and `anthropic.ts`. Both stream through `sse-parser.ts`, and `retry.ts` retries rate limits and server errors before the first byte.
+- `key-store.ts`: `~/.polyman/ai.json` (keys, the default, `overrides`). `keyForRequest` only gives a key for its own base URL.
+- `model-catalog.ts`: the live model list. `ModelCatalog` calls `listModels()` of the OpenAI-compatible adapter without a key, caches the result for 24 hours in `~/.polyman/agent/models/<provider>.json` and falls back to the old cache when offline. Only OpenRouter uses it today.
+- `capabilities.ts`: what a model can do. Lookup order, last one wins: `DEFAULT_CAPABILITIES`, the preset model, the live list, the `ai.json` override. The `Capabilities` table of a session also turns tools off for a model that failed with `tools_not_supported`.
+- `chat-provider.ts`: `createChatProvider` picks the provider (`--provider`, the `ai.json` default, `openrouter`) and the model (`--model`, the default, `DEFAULT_CHAT_MODEL`), checks the key and returns the provider with its capabilities. `budgetsFor` sizes the chat from the capabilities: `maxOutputTokens = min(8000, maxOutput, contextWindow / 4)` and `contextBudgetTokens = min(32000, (contextWindow - maxOutputTokens) * 0.75)`, then the `ai.json` override (`chatMaxSteps`, `contextBudgetTokens`, `maxOutputTokens`) wins.
+
+The workflow uses the same provider and model. `ModelManager` and `ModelWorker` get the model's max output, and a worker keeps `min(16000, chat context budget)` of context.
+
+A session with a chat-only model sends no tools and emits one `notice` event with the reason. When the provider answers `tools_not_supported` in the middle of a turn, the session turns tools off and runs the step again without them.
 
 ### The Event Protocol
 
@@ -680,6 +690,7 @@ Everything the core reports is an event on the bus (`core/events.ts`). The TUI, 
 | `plan_created`, `plan_approval_needed`              | The manager made a plan, and the plan waits for the user.                                                         |
 | `task_started`, `task_checkpoint`, `task_done`      | A workflow task started an attempt, ran its check, and ended.                                                     |
 | `workflow_done`                                     | The workflow ended, with `ok`, a summary and the cost.                                                            |
+| `notice`                                            | A line from the session for the user, never sent to the model, like "this model can only chat".                   |
 
 The UI answers approvals with `session.resolveApproval()`, which calls the gate's `resolve()`.
 
@@ -703,7 +714,7 @@ The idea is in [10-workflow-manager.md](design/agent/10-workflow-manager.md): do
 
 1. Write a `Tool` (`tools/types.ts`) in the file of its group, or a new file in `src/agent/tools/`: a snake_case `name`, a plain `description`, a JSON Schema in `parameters`, a `risk`, `needsProblem`, and `describe()` for the approval title and command.
 2. In `run()`, pass every path through `ctx.sandbox.resolve()` and every polyman command through `ctx.runner` with `--json`. Return a short `content` for the model and the full data in `data` for the UI. Return `isError: true` for a failure, do not throw.
-3. Register it in `createChatRuntime()` in `src/agent/index.ts`. If workers need it, add it to the tools of `gemmaSchedulerFactory()` in `tools/workflow-tool.ts` and to `workerToolNames()` in `workflow/worker.ts`.
+3. Register it in `createChatRuntime()` in `src/agent/index.ts`. If workers need it, add it to the tools of `modelSchedulerFactory()` in `tools/workflow-tool.ts` and to `workerToolNames()` in `workflow/worker.ts`.
 4. Pick the risk with care: it decides when the user is asked. Anything that changes Polygon is `remote`.
 5. If the agent must know when to use it, add a line to `chatSystemPrompt()` in `workflow/prompts.ts`.
 6. Add tests in `tests/agent/tools/`, and a safety test in `tests/agent/safety/` if it touches files or secrets.
