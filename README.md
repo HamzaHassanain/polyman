@@ -162,68 +162,52 @@ polyman remote commit . "Updated solutions"
 
 ## Chat (preview)
 
-`polyman chat` brings an interactive problem-setting AI agent into your terminal. Powered by open-weights Gemma 4 models (via OpenRouter), it pairs with problem setters to turn ideas into fully generated and verified problems.
+`polyman chat` is an AI agent in your terminal. You talk with it about a problem idea, it writes the spec with you, then a team of small workers builds the problem and the polyman CLI checks every step. It can also fix a failing `verify`, add stronger tests, and push to Polygon after you approve.
 
-### How the workflow works
+### Providers, keys and models
 
-1. **spec**: Interactive discussion of problem idea, limits, and sample cases, saved to `.polyman/agent/notes.md`.
-2. **plan**: Gemma manager creates a structured plan of small tasks with explicit dependencies.
-3. **gemma workers**: Independent, focused Gemma workers execute individual tasks in parallel.
-4. **polyman checks**: The CLI automatically checks every worker's output at strict checkpoints.
-5. **verify**: Full `polyman verify` validates all solutions on all tests; fixer workers resolve any failures.
-
-### Setup
+Bring your own key. Any model with tool support works, the easiest is OpenRouter (Gemma, DeepSeek, Qwen, Llama, ...):
 
 ```bash
-# 1. Build from source
-npm run build
-
-# 2. Log in with OpenRouter
-polyman ai login openrouter
-# or provide via environment variable
-export OPENROUTER_API_KEY="sk-or-..."
+polyman ai login openrouter                        # key from https://openrouter.ai/keys
+polyman ai models openrouter --search deepseek     # live list: tools, context, price
+polyman ai use openrouter/deepseek/deepseek-v3.2   # default model, optional
 ```
 
-### Usage
+The default model is Gemma 4 on OpenRouter. OpenAI, Anthropic, DeepSeek, Qwen, Gemini, Groq, Mistral, Ollama and any OpenAI-compatible server work too.
+
+### Quick start
 
 ```bash
-# Start interactive terminal chat for a problem folder (or create a new one)
-polyman chat <dir>
-
-# Choose a specific model (defaults to google/gemma-4-31b-it)
-polyman chat <dir> --model google/gemma-4-31b-it
-
-# Run in plain line mode without the full TUI
-polyman chat <dir> --plain
+polyman chat my-problem           # a folder with Config.json, or a new problem
+polyman chat my-problem --plain   # line mode, works with pipes
 ```
 
-### Keybindings
+- `--provider <id>` and `--model <id>` pick another model for one chat.
+- File writes ask you first (`shift+tab` switches to `auto-edit`), a workflow asks once for its whole plan, and Polygon changes always ask.
+- The agent works only inside the problem folder and runs only polyman commands, never a shell.
+- What you send to the model provider: your messages, the files the agent reads and the output of the commands it runs.
 
-| Key | Action |
-| --- | --- |
-| `enter` | Send message |
-| `esc` | Interrupt the current turn or cancel running work |
-| `shift+tab` | Switch permission modes (`ask` / `auto-edit`) |
-| `ctrl+o` | Expand / collapse task details and tool output |
-| `ctrl+c` twice | Clear input; press twice to exit |
+Full chapter: [GUIDE.md - Chat (AI agent)](GUIDE.md#chat-ai-agent), with the keys, the workflows, safety and privacy, and the known limits.
 
 ## Commands
 
 ### Essential Commands
 
-| Command                        | Purpose                         |
-| ------------------------------ | ------------------------------- |
-| `polyman new <dir>`            | Create new problem template     |
-| `polyman chat <dir>`           | Interactive terminal chat agent |
-| `polyman download-testlib`     | Download testlib.h header       |
-| `polyman generate --all`       | Generate all test cases         |
-| `polyman validate --all`       | Validate test inputs            |
-| `polyman run <solution> --all` | Run solution on all tests       |
-| `polyman test <component>`     | Test validator/checker/solution |
-| `polyman verify`               | Complete verification workflow  |
-| `polyman verify --json`        | Same, as a JSON report on stdout |
-| `polyman cache status`         | Show cached compiled binaries   |
-| `polyman cache clear`          | Delete the compilation cache    |
+| Command                        | Purpose                                       |
+| ------------------------------ | --------------------------------------------- |
+| `polyman new <dir>`            | Create new problem template                   |
+| `polyman chat <dir>`           | Chat with the AI agent (preview)              |
+| `polyman ai <command>`         | Manage AI provider keys and the default model |
+| `polyman download-testlib`     | Download testlib.h header                     |
+| `polyman generate --all`       | Generate all test cases                       |
+| `polyman validate --all`       | Validate test inputs                          |
+| `polyman run <solution> --all` | Run solution on all tests                     |
+| `polyman test <component>`     | Test validator/checker/solution               |
+| `polyman verify`               | Complete verification workflow                |
+| `polyman verify --json`        | Same, as a JSON report on stdout              |
+| `polyman cache status`         | Show cached compiled binaries                 |
+| `polyman cache clear`          | Delete the compilation cache                  |
 
 ### Polygon Commands
 
@@ -270,7 +254,7 @@ The scripts are built from the CLI's own command list, so they stay current afte
 
 `run` and `verify` accept `--json`: stdout then carries exactly one JSON document and all human-readable output moves to stderr, so `polyman verify --json > verify.json` is safe to parse. The exit code is unchanged. `remote push` accepts `--yes` and `--name <slug>` so a new problem can be created without a terminal; without a TTY the command fails fast instead of waiting on a prompt. See [GUIDE.md](GUIDE.md#full-verification) for the report shape.
 
-`polyman ai login|logout|list|models|use` saves API keys for AI model providers (OpenAI, Anthropic, DeepSeek, Qwen, Gemini, Groq, Mistral, OpenRouter, a local Ollama, or any OpenAI-compatible server) in `~/.polyman/ai.json` (mode 0600) and sets a default model; it only manages these settings, and no command calls a model yet. See [GUIDE.md](GUIDE.md#ai-provider-keys).
+`polyman ai login|logout|list|models|use` saves API keys for AI model providers (OpenAI, Anthropic, DeepSeek, Qwen, Gemini, Groq, Mistral, OpenRouter, a local Ollama, or any OpenAI-compatible server) in `~/.polyman/ai.json` (mode 0600) and sets a default model; `polyman chat` uses these settings. See [GUIDE.md](GUIDE.md#ai-provider-keys).
 
 ## Solution Tags
 

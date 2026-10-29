@@ -24,10 +24,19 @@ A TypeScript-based CLI tool for Codeforces problem setters that automates proble
     - [Polygon SDK](#polygon-sdk)
     - [API Authentication](#api-authentication)
     - [Remote Operations Flow](#remote-operations-flow)
-16. [File Structure](#file-structure)
-17. [Development Guide](#development-guide)
-18. [API Reference](#api-reference)
-19. [Implementation Notes](#implementation-notes)
+16. [Agent Architecture (src/agent)](#agent-architecture-srcagent)
+    - [Layers](#layers)
+    - [Providers, keys and models](#providers-keys-and-models)
+    - [The Event Protocol](#the-event-protocol)
+    - [The Workflow Engine](#the-workflow-engine)
+    - [Adding a Tool](#adding-a-tool)
+    - [Adding a Recipe](#adding-a-recipe)
+    - [Testing the Agent](#testing-the-agent)
+    - [Evals](#evals)
+17. [File Structure](#file-structure)
+18. [Development Guide](#development-guide)
+19. [API Reference](#api-reference)
+20. [Implementation Notes](#implementation-notes)
 
 ---
 
@@ -609,6 +618,146 @@ await Promise.all(promises);
 
 ---
 
+## Agent Architecture (src/agent)
+
+`polyman chat` and the `polyman ai` commands live in `src/agent/`. The user side is in [GUIDE.md - Chat (AI agent)](GUIDE.md#chat-ai-agent). The design docs are in [`design/agent/`](design/agent/README.md); this section is a map of the code, not a copy of them.
+
+The main rule (design decision D1): the agent never imports `actions.ts` or `steps.ts`. It runs the polyman CLI as a child process with `--json`, like a user would. A crash or a `process.exit` in the CLI cannot kill the chat, and the CLI stays the one source of truth.
+
+### Layers
+
+```
+cli.ts                    `chat` and `ai` load the agent with import(), only when they run
+  ↓
+agent/index.ts            createChatRuntime(): bus, gate, runner, tools, sandbox, prompt, session
+  ↓
+agent/core/               AgentSession (the loop), event bus, context trimming, system prompt
+  ↓
+agent/tools/              registry, permission gate, sandbox, the tools themselves
+  ↓
+agent/runner/             NodeCliRunner: runs dist/cli.js as a child process
+  ↓
+agent/providers/          the model APIs (streaming, retries, keys)
+  ↓
+agent/tui/ or plain.ts    Ink terminal UI, or the line mode; both only read events
+```
+
+- **`cli.ts`** loads `agent/index.js` and `agent/ai-commands.js` with a dynamic `import()`. Other commands never load the agent code, so they do not start slower.
+- **`agent/index.ts`**: `resolveChatStart()` decides the problem folder (a folder with `Config.json`, or "new problem" mode). `createChatRuntime()` wires everything and needs no terminal and no key, so tests call it with a mock provider. `startChat()` adds the real provider and the UI.
+- **`agent/core/`**:
+  - `session.ts`: `AgentSession`, the agent loop. One turn asks the model, runs the tool calls it asks for, and asks again, until the model stops, the step limit, a cancel or an error. It has a repeat guard (the same call with the same arguments at most twice per turn, reset after a successful write) and it redacts secrets from tool output and errors. The chat and every workflow worker use this same class.
+  - `event-bus.ts`, `events.ts`: the event protocol, see below.
+  - `context.ts`: trims a copy of the history to the context budget before each model call. The history itself is never changed.
+  - `prompt.ts`: `ChatPromptBuilder` builds the system prompt before each call: the rules (`workflow/prompts.ts`), the skills index, the environment (OS, `g++`, polyman version) and the problem state (notes, a `Config.json` summary, file names).
+  - `text-tool-call.ts`: finds a tool call the model wrote as text, so the session can ask it to use the real format.
+  - `pasted-key.ts`: blocks a message that looks like a Polygon key before it is sent.
+- **`agent/tools/`**:
+  - `registry.ts`: every call goes through the same checks: the tool exists, the arguments are valid JSON and match the schema (`schema.ts`), there is a problem folder when the tool needs one, the permission gate allows it, it runs with a time limit, and its output is cut to a size the model can read. A failure is an error output the model reads, never a throw (only a cancel throws).
+  - `permissions.ts`: `DefaultPermissionGate`. Each tool has a risk (`read`, `run`, `write`, `remote`) and the mode (`ask`, `auto-edit`, `plan-approved`) decides what asks the user. `remote` always asks. Asking emits `approval_needed` and waits for `resolve()`.
+  - `sandbox.ts`: `FolderSandbox` checks every path by its real path (symlinks followed). It refuses paths outside the problem folder and writes to `.polyman/cache/`, `.polyman/agent/sessions/` and `testlib.h`. A workflow worker gets a sandbox with `allowWrite` set to the files its task owns.
+  - `fs-tools.ts`, `cli-tools.ts`, `remote-tools.ts`, `notes-tools.ts`, `ideas-tool.ts`, `workflow-tool.ts`, and `skills.ts` one level up: the tools. `skills.ts` reads `template/instructions/*.md` from the installed package.
+- **`agent/runner/`**: `NodeCliRunner` spawns `process.execPath dist/cli.js ...`, never a shell. All runs go through one FIFO lock (`lock.ts`), so parallel workers never compile or time solutions at the same time. The child gets `POLYMAN_AGENT=1`, `NO_COLOR=1` and the environment without API keys. On POSIX the child leads its own process group and `kill-tree.ts` kills the whole group on a timeout or a cancel; on Windows it uses `taskkill /T /F`. The full output goes to `<problem>/.polyman/agent/logs/`, the tool result keeps only the start and the end.
+- **`agent/providers/`**: see [Providers, keys and models](#providers-keys-and-models). `mock.ts` (`MockProvider`) plays a fixed script and is what the tests use.
+- **`agent/tui/`**: the Ink UI. It is the only ESM part of polyman (`src/agent/tui/package.json` has `"type": "module"`, and `npm run build` copies it to `dist/`), because Ink is ESM only. `agent/index.ts` loads it with a variable path. `store.ts` is a pure reducer from events to screen state, so most UI logic is tested without a terminal. `keybindings.ts` has the keys and `/help`. `dev/run.tsx` starts the UI with a fake session: `npm run build && node dist/agent/tui/dev/run.js`.
+- **`agent/plain.ts`**: the line mode (`--plain`) with `readline`. It is also the fallback when the TUI fails to load.
+
+### Providers, keys and models
+
+`agent/providers/` turns a provider and a model into a `Provider` and the budgets of the chat.
+
+- `presets.ts`: the known providers (base URL, env var, quirks, known models). Two adapters: `openai-compatible.ts` for every OpenAI-compatible server and `anthropic.ts`. Both stream through `sse-parser.ts`, and `retry.ts` retries rate limits and server errors before the first byte.
+- `key-store.ts`: `~/.polyman/ai.json` (keys, the default, `overrides`). `keyForRequest` only gives a key for its own base URL.
+- `model-catalog.ts`: the live model list. `ModelCatalog` calls `listModels()` of the OpenAI-compatible adapter without a key, caches the result for 24 hours in `~/.polyman/agent/models/<provider>.json` and falls back to the old cache when offline. Only OpenRouter uses it today.
+- `capabilities.ts`: what a model can do. Lookup order, last one wins: `DEFAULT_CAPABILITIES`, the preset model, the live list, the `ai.json` override. The `Capabilities` table of a session also turns tools off for a model that failed with `tools_not_supported`.
+- `chat-provider.ts`: `createChatProvider` picks the provider (`--provider`, the `ai.json` default, `openrouter`) and the model (`--model`, the default, `DEFAULT_CHAT_MODEL`), checks the key and returns the provider with its capabilities. `budgetsFor` sizes the chat from the capabilities: `maxOutputTokens = min(8000, maxOutput, contextWindow / 4)` and `contextBudgetTokens = min(32000, (contextWindow - maxOutputTokens) * 0.75)`, then the `ai.json` override (`chatMaxSteps`, `contextBudgetTokens`, `maxOutputTokens`) wins.
+
+The workflow uses the same provider and model. `ModelManager` and `ModelWorker` get the model's max output, and a worker keeps `min(16000, chat context budget)` of context.
+
+A session with a chat-only model sends no tools and emits one `notice` event with the reason. When the provider answers `tools_not_supported` in the middle of a turn, the session turns tools off and runs the step again without them.
+
+### The Event Protocol
+
+Everything the core reports is an event on the bus (`core/events.ts`). The TUI, the plain mode, the evals and the tests read the same events. `SimpleEventBus` gives each event a `seq` number.
+
+| Event                                               | When                                                                                                              |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `turn_start`, `turn_end`                            | A user message starts a turn. `turn_end` has the reason: `done`, `cancelled`, `max_steps` or `error`.             |
+| `text_delta`, `reasoning_delta`                     | A chunk of the answer or of the model's reasoning.                                                                |
+| `tool_call`, `tool_progress`, `tool_result`         | A tool call, a progress line (stderr of the CLI), and its result. Events from a workflow worker carry a `taskId`. |
+| `approval_needed`, `approval_resolved`              | A call waits for the user, and the answer (`allow_once`, `allow_session`, or `deny` with a reason).               |
+| `usage`                                             | Token counts of one model call, and its cost when the provider reports it.                                        |
+| `notes_updated`, `problem_dir_changed`, `compacted` | The spec changed, `create_problem` made a new folder, old messages were trimmed.                                  |
+| `plan_created`, `plan_approval_needed`              | The manager made a plan, and the plan waits for the user.                                                         |
+| `task_started`, `task_checkpoint`, `task_done`      | A workflow task started an attempt, ran its check, and ended.                                                     |
+| `workflow_done`                                     | The workflow ended, with `ok`, a summary and the cost.                                                            |
+| `notice`                                            | A line from the session for the user, never sent to the model, like "this model can only chat".                   |
+
+The UI answers approvals with `session.resolveApproval()`, which calls the gate's `resolve()`.
+
+### The Workflow Engine
+
+The idea is in [10-workflow-manager.md](design/agent/10-workflow-manager.md): do not make the model smarter, make each of its tasks smaller and check every task with real tools. The contract is `workflow/types.ts`.
+
+- **`tools/workflow-tool.ts`**: the `start_workflow` tool. It reads the spec from the notes, checks that the spec has the sections the recipe needs, builds a `WorkflowScheduler` and runs it inside the chat turn, so `esc` stops it. Its risk is `run`, because the user approves the plan instead. It puts the gate's mode back when the workflow ends.
+- **`workflow/manager.ts`**: the manager. It fills a recipe into a plan with the `submit_plan` tool, and with the `decide` tool it chooses what to do with a task that failed 3 times (`retry_with_hint`, `redo_task` or `ask_user`). It does not use a session, only a few plain model calls. It never checks the plan.
+- **`workflow/scheduler.ts`**: `WorkflowScheduler`, our code, no model. It gets the plan (a second try with the errors, then a default plan from `recipes.ts`), checks it with `checkPlan()`, asks the user once (`gate.askPlan()`, which puts the gate in `plan-approved`), and runs the tasks in dependency order with at most `WORKFLOW_LIMITS.parallel` workers at a time. The retry ladder: attempt 2 continues the worker session with the error digest, attempt 3 is a fresh worker with a short note, then the manager decides. A `verify` task runs up to `WORKFLOW_LIMITS.fixRounds` fix rounds. A failed task skips the tasks that depend on it.
+- **`workflow/worker.ts`**: one task as a small `AgentSession` with its own prompt, tools, sandbox (`allowWrite` = the task's files), gate and a private bus. A worker gets only a few tools: `read_file`, `list_files`, `load_skill`, the write tools when the task writes, `verify` for a fix task, `review` for the statement critic, and `finish_task`. `finish_task` runs the task's real check first, so the worker can fix a failure in the same session.
+- **`workflow/checkpoints.ts`**: `CliCheckpoints` runs the real check of each task kind with the compiler and the CLI (`test validator --json`, `generate --all --json`, `validate --all --json`, `verify --json`), and runs the tasks that need no model (`scaffold`, `checker`, `generate_validate`, `verify` and the `prove_idea` checks). `MemoCheckpoints` skips a check that already passed when the task's files and `Config.json` did not change.
+- **`workflow/config-patch.ts`**: the single writer of `Config.json` during a workflow. Workers return a `ConfigPatch`, the scheduler applies the patches one at a time, and a patch that makes the config invalid is refused with nothing written. `dropTemplateExamples()` removes the template's examples in the scaffold task.
+- **`workflow/recipes.ts`**: the recipes (`build_problem`, `fix_verify`, `strengthen_tests`, `prove_idea`, `find_ideas`): which task kinds a plan may have, which it must have, and the order rules. Also `checkPlan()`, `addRecipeDependencies()` and the fixed or default plans (`buildProblemSkeleton()`, `fixVerifyPlan()`, `strengthenTestsSkeleton()`, `proveIdeaPlan()`).
+- **`workflow/prove.ts`**: the `prove_idea` checks (stress, samples, max test, kill wrong) on the quick programs in `.polyman/agent/prove/`. `compile.ts` compiles and runs them without the CLI.
+- **`workflow/ideas.ts`**: `IdeaWorkflow` for `find_ideas`. It emits the same plan and task events, so the UI shows the same tree.
+- **`workflow/spec.ts`**: parses the spec. The format is in [`design/agent/briefs/SPEC-FORMAT.md`](design/agent/briefs/SPEC-FORMAT.md).
+- **`workflow/prompts.ts`**: the prompts of the chat agent, the manager and each worker kind.
+
+### Adding a Tool
+
+1. Write a `Tool` (`tools/types.ts`) in the file of its group, or a new file in `src/agent/tools/`: a snake_case `name`, a plain `description`, a JSON Schema in `parameters`, a `risk`, `needsProblem`, and `describe()` for the approval title and command.
+2. In `run()`, pass every path through `ctx.sandbox.resolve()` and every polyman command through `ctx.runner` with `--json`. Return a short `content` for the model and the full data in `data` for the UI. Return `isError: true` for a failure, do not throw.
+3. Register it in `createChatRuntime()` in `src/agent/index.ts`. If workers need it, add it to the tools of `modelSchedulerFactory()` in `tools/workflow-tool.ts` and to `workerToolNames()` in `workflow/worker.ts`.
+4. Pick the risk with care: it decides when the user is asked. Anything that changes Polygon is `remote`.
+5. If the agent must know when to use it, add a line to `chatSystemPrompt()` in `workflow/prompts.ts`.
+6. Add tests in `tests/agent/tools/`, and a safety test in `tests/agent/safety/` if it touches files or secrets.
+
+### Adding a Recipe
+
+1. Add the name to `Plan['recipe']` in `workflow/types.ts`, and any new task kind to `TaskKind`.
+2. Add the recipe to `RECIPES` in `workflow/recipes.ts`: allowed kinds, required kinds and order rules. If the plan has a fixed shape, write a plan function (like `fixVerifyPlan()`) and use it in `makePlan()` in `scheduler.ts`, so no model call is needed. Add a default plan if the manager can fail.
+3. For a new task kind: its check in `CliCheckpoints.check()` (worker kinds) or `runNoModelTask()` (no model kinds) in `checkpoints.ts`, its worker prompt and info in `workflow/prompts.ts`, its tools in `workerToolNames()`, and the kind lists in `recipes.ts` (`NO_MODEL_KINDS`, `MUST_OWN_FILES`).
+4. Describe the recipe for the manager in `recipeDescription()` in `workflow/prompts.ts`.
+5. Add it to the `recipe` enum of `start_workflow` and to `workflowSpecProblems()` in `tools/workflow-tool.ts`, and tell the chat agent when to use it in `chatSystemPrompt()`.
+6. Add tests in `tests/agent/workflow/` (`recipes.test.ts`, `scheduler.test.ts`, `checkpoints.test.ts`).
+
+### Testing the Agent
+
+`npm test` runs the agent tests with the rest. They need no key and no network.
+
+- **Mock provider.** `MockProvider` plays a script of model turns (text, tool calls, usage, errors). Most core, tool and workflow tests use it with `createChatRuntime()`.
+- **Recorded fixtures.** `tests/fixtures/agent/openai/` and `tests/fixtures/agent/anthropic/` have HTTP responses in the providers' wire formats, close to what `curl -i` prints. The provider tests parse them.
+- **Fake CLI.** `tests/agent/fixtures/fake-cli.mjs` is a small fake polyman for the runner tests: it prints lines, sleeps, starts children and exits with a code.
+- **TUI.** `tests/agent/tui/` renders the components and the whole `App` with `ink-testing-library` and sends keys to it. `store.test.ts` tests the reducer alone.
+- **Safety.** `tests/agent/safety/` has path escapes, protected files, permissions, secrets, limits and bad tool calls.
+- **End to end.** `tests/agent/e2e/build-problem.test.ts` runs a scripted model through the real chat runtime, tools, scheduler, checkpoints and `dist/cli.js` to build a problem in a temp folder, and the real `polyman verify` must pass. It needs `npm run build` and `g++`, and is skipped without them.
+
+### Evals
+
+The evals run the agent with a real model. They are not part of `npm test`. They need `npm run build` and `g++`. The probe, real, baseline and wf runs also need an OpenRouter key in `OPENROUTER_API_KEY` (only read from the environment, never written to a file). They copy `corpus/vendor/testlib.h` instead of downloading it.
+
+**They cost real money.** A probe run is a few cents, but a real or baseline run can cost up to about $0.60 per case. Use the `--max-cost` option, and run one case before `--all`.
+
+| Folder            | What it does                                                                                                                                                                                                                         | Run                                            |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------- |
+| `evals/cases/`    | The test problems (`pairs-sum`, `max-subarray`, `bracket-depth`): a `spec.md` and a hidden `reference/` (main, brute, wrong solutions, tests, answers) the agent never sees. `check.mjs` checks the cases themselves, with no model. | `node evals/cases/check.mjs [--case <id>]`     |
+| `evals/probe/`    | One model call per case, no agent loop: does the model call the right tool with valid arguments?                                                                                                                                     | `node evals/probe/probe.mjs --runs 3`          |
+| `evals/real/`     | The whole `build_problem` workflow on a case, then `verify` and hidden checks against the reference.                                                                                                                                 | `node evals/real/run.mjs --case pairs-sum`     |
+| `evals/baseline/` | The same build with one long chat session and no workflow, to compare with `evals/real/`. `compare.mjs` puts them side by side.                                                                                                      | `node evals/baseline/run.mjs --case pairs-sum` |
+| `evals/broken/`   | Three copies of pairs-sum, each with one planted bug that `verify` catches. Used to test `fix_verify` and `strengthen_tests`, no model needed to run `verify` on them.                                                               | see `evals/broken/README.md`                   |
+| `evals/wf/`       | `drive.mjs`, a small script that runs the real `build_problem` workflow on one case.                                                                                                                                                 | `node evals/wf/drive.mjs --case pairs-sum`     |
+
+Each folder's `README.md` has the options, what one run does and the last results. The results go to `evals/*/results/`, which is git-ignored.
+
+---
+
 ## File Structure
 
 See [GUIDE.md - Directory Structure](GUIDE.md#directory-structure) for the canonical layout of a Polyman problem directory and the bundled template tree.
@@ -639,6 +788,18 @@ npm link
 - `src/helpers/` - Domain modules
 - `src/executor.ts` - Process execution
 - `src/formatter.ts` - Output formatting
+
+**Agent (`polyman chat`, `polyman ai`), see [Agent Architecture](#agent-architecture-srcagent):**
+
+- `src/agent/index.ts` - `startChat()` and `createChatRuntime()`
+- `src/agent/core/` - Agent loop, event bus, context, system prompt
+- `src/agent/tools/` - Tools, registry, permission gate, sandbox
+- `src/agent/runner/` - Runs the CLI as a child process
+- `src/agent/providers/` - Model providers and keys
+- `src/agent/workflow/` - Workflow manager, scheduler, workers, checkpoints
+- `src/agent/tui/` - Ink terminal UI (ESM)
+- `evals/` - Evals with a real model, not part of `npm test`
+- `design/agent/` - Design docs of the agent
 
 **Types:**
 
@@ -677,6 +838,9 @@ npm run lint
 
 # Build
 npm run build
+
+# Unit tests (the agent tests need no key and no network)
+npm test
 
 # Manual testing
 polyman new test-problem
@@ -752,6 +916,7 @@ Important considerations for development, deployment, and platform-specific beha
 - **Template Guide:** `GUIDE.md`
 - **Testlib Documentation:** [testlib on GitHub](https://github.com/MikeMirzayanov/testlib)
 - **Polygon System:** [Codeforces Polygon](https://polygon.codeforces.com/)
+- **Agent design:** [`design/agent/`](design/agent/README.md)
 
 ---
 

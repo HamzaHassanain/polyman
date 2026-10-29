@@ -84,14 +84,26 @@
     - [Committing Changes](#committing-changes)
     - [Building Packages](#building-packages)
 
-11. [Best Practices](#best-practices)
+11. [Chat (AI agent)](#chat-ai-agent)
+    - [Quick Start](#quick-start)
+    - [Providers, keys and models](#providers-keys-and-models)
+    - [New Problem or Existing Problem](#new-problem-or-existing-problem)
+    - [The Terminal UI](#the-terminal-ui)
+    - [Plain Mode (`--plain`)](#plain-mode---plain)
+    - [What the Agent Can Do](#what-the-agent-can-do)
+    - [Workflows](#workflows)
+    - [Notes and Logs](#notes-and-logs)
+    - [Safety and Privacy](#safety-and-privacy)
+    - [Known Limits](#known-limits)
+
+12. [Best Practices](#best-practices)
     - [Directory Organization](#1-directory-organization)
     - [Configuration Management](#2-configuration-management)
     - [Test Coverage](#3-test-coverage)
     - [Solution Testing](#4-solution-testing)
     - [Version Control](#5-version-control)
 
-12. [Troubleshooting](#troubleshooting)
+13. [Troubleshooting](#troubleshooting)
     - [Compilation Errors](#compilation-errors)
     - [Validation Errors](#validation-errors)
     - [Checker Errors](#checker-errors)
@@ -100,7 +112,7 @@
     - [Memory Issues](#memory-issues)
     - [Time Issues](#time-issues)
 
-13. [FAQ](#faq)
+14. [FAQ](#faq)
     - [Do I need a custom checker?](#1-do-i-need-to-write-a-custom-checker-for-my-problem)
     - [Can I use Python for main solution?](#2-can-i-use-python-for-my-main-solution)
     - [How many tests should I include?](#3-how-many-tests-should-i-include)
@@ -2072,15 +2084,15 @@ esac
 
 ### AI Provider Keys
 
-`polyman ai` saves API keys for AI model providers and picks a default model. It only manages these settings: no polyman command sends anything to a provider yet.
+`polyman ai` saves API keys for AI model providers and picks a default model. [`polyman chat`](#chat-ai-agent) uses these settings.
 
 | Command | What it does |
 | ------- | ------------ |
 | `polyman ai login <provider>` | Saves a key. It is read from a hidden prompt, or from stdin with `--key-stdin`, never from the command line, so it stays out of shell history. |
 | `polyman ai logout <provider>` | Removes the saved key. |
 | `polyman ai list` | Lists the providers, which have a key (shown masked) and the default model. |
-| `polyman ai models [provider]` | Lists the known models of every provider, or of one, with context size, tool support and price where known. |
-| `polyman ai use <provider>/<model>` | Sets the default model, for example `polyman ai use deepseek/deepseek-flash`. A model that is not in the known list is used as is, with a warning. |
+| `polyman ai models [provider]` | Lists the known models of every provider, or of one, with context size, tool support and price where known. For `openrouter` the list is live: `--search <text>` filters it, `--refresh` skips the 24 hour cache. |
+| `polyman ai use <provider>/<model>` | Sets the default model, for example `polyman ai use deepseek/deepseek-flash`. A model that is not in the known (or live) list is used as is, with a warning. Only the first `/` splits, so `openrouter/deepseek/deepseek-v3.2` works. |
 
 ```bash
 polyman ai login deepseek
@@ -2563,6 +2575,342 @@ polyman remote package . standard
 ---
 
 For Polygon-specific errors see [Troubleshooting - Remote Operations](#remote-operations).
+
+---
+
+## Chat (AI agent)
+
+`polyman chat` opens an AI agent in your terminal. You talk with it about a problem idea, it writes the spec with you, then it builds the problem with a team of small workers and checks every step with the polyman CLI. It can also fix a problem whose `verify` fails, add stronger tests, and push to Polygon when you say yes.
+
+The chat is a **preview**. It works, but expect rough edges. See [Known limits](#known-limits).
+
+What it is not:
+
+- It is not a general coding agent. It has no shell and no internet tool. It can only read and write files inside the problem folder and run polyman commands.
+- It does not decide if your problem is correct. The CLI does: `generate`, `validate`, `test`, `verify` and the compiler give every pass or fail, not the model.
+- It does not change Polygon on its own. Every push, commit and package build asks you first.
+
+### Quick Start
+
+You need what polyman needs anyway (Node.js and `g++`), plus a key for a model provider. The default model is Gemma 4 on OpenRouter. Set up the key first, see [Providers, keys and models](#providers-keys-and-models), then start the chat.
+
+### Providers, keys and models
+
+You bring your own key. The chat works with any model of any provider in [AI Provider Keys](#ai-provider-keys), as long as the model supports tool calls. The easiest way is OpenRouter: one key gives you Gemma, DeepSeek, Qwen, Llama and hundreds more.
+
+```bash
+# 1- save the key (get one at https://openrouter.ai/keys), or set OPENROUTER_API_KEY
+polyman ai login openrouter
+
+# 2- find a model, the list is live from OpenRouter
+polyman ai models openrouter --search deepseek
+
+# 3- make it the default, or pass it for one chat only
+polyman ai use openrouter/deepseek/deepseek-v3.2
+polyman chat my-problem --model qwen/qwen3-coder
+```
+
+Without a default, the chat uses `google/gemma-4-31b-it` on OpenRouter.
+
+**How the chat picks the provider and model.** The provider is `--provider`, else the `ai.json` default, else `openrouter`. The model is `--model`, else the `ai.json` model when it is for the same provider, else `google/gemma-4-31b-it` for OpenRouter, the first saved model for `custom`, or the first known model for the other providers. An unknown provider exits with code `2` and lists the known ones. A missing key exits with code `2` and says how to add it.
+
+```bash
+polyman chat my-problem --provider deepseek --model deepseek-flash
+polyman chat my-problem --provider ollama --model qwen3:8b
+```
+
+**The live model list.** `polyman ai models openrouter` shows every OpenRouter model with tool support, context size and price per 1M tokens in and out. `--search <text>` filters by id, `--refresh` skips the cache. The list is fetched without your key and cached for 24 hours in `~/.polyman/agent/models/openrouter.json`. When you are offline, the command and the chat use the old cache or the known models, they never fail because of it. `polyman ai use` warns (it does not fail) when the model is not in the live list, or when the model has no tool support.
+
+**Budgets follow the model.** The chat reads the model's context size and max output from the live list (or the known list) and sizes itself to fit:
+
+- max output per reply: the smallest of 8000, the model's max output, and a quarter of its context
+- context the chat keeps: the smallest of 32000 and 75% of what is left after the output
+
+Gemma 4 gets 32000 and 8000. A model with an 8k context gets 4608 and 2048. You can set the numbers yourself in `~/.polyman/ai.json`, per model:
+
+```json
+{
+  "overrides": {
+    "openrouter/deepseek/deepseek-v3.2": {
+      "contextBudgetTokens": 64000,
+      "maxOutputTokens": 8000,
+      "chatMaxSteps": 30
+    }
+  }
+}
+```
+
+The same `overrides` entry can also correct what polyman knows about a model: `tools`, `contextWindow`, `maxOutput`, `reasoning`, `parallelToolCalls`, `pricePerMTokIn` and `pricePerMTokOut`.
+
+**Models without tools.** A model that cannot call tools can only talk, it cannot build anything. The chat says so once and goes on in chat-only mode. This also happens in the middle of a chat, when the provider answers that the model does not support tools.
+
+**Which model to pick.** Smaller models are cheaper but make more mistakes in the workflows. The workflows were tested mostly on Gemma 4, see [Known limits](#known-limits).
+
+### Starting a Chat
+
+```bash
+polyman chat my-problem
+```
+
+Then write what you want, for example `a problem about counting pairs with sum k, rating 1300`. The agent asks a few questions first, then writes the spec and asks `Should I build the problem?`.
+
+`polyman chat` options:
+
+| Option            | What it does                                                                                       |
+| ----------------- | -------------------------------------------------------------------------------------------------- |
+| `--provider <id>` | The provider for this chat, like `openrouter` or `deepseek`. Wins over the `ai.json` default.      |
+| `--model <id>`    | The model for this chat, like `deepseek/deepseek-v3.2`. Wins over the `ai.json` default.           |
+| `--plain`         | Line mode without the terminal UI, works with pipes. See [Plain mode](#plain-mode---plain).        |
+
+### New Problem or Existing Problem
+
+The folder you give decides how the chat starts:
+
+| You run                                                         | The chat                                                                                                      |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `polyman chat my-problem`, folder has `Config.json`             | Works on that problem. A new problem it creates goes next to it, never inside it.                             |
+| `polyman chat my-problem`, folder does not exist                | Starts with no problem. When it creates one, it uses the name `my-problem` and makes it in the parent folder. |
+| `polyman chat some-folder`, folder exists without `Config.json` | Starts with no problem. New problems are made inside `some-folder`.                                           |
+| `polyman chat` (no folder)                                      | Same as above, with the current folder.                                                                       |
+
+**A new problem** goes like this:
+
+1. You give an idea (or ask for ideas, see [find_ideas](#find_ideas)).
+2. The agent asks 3 to 6 short questions, each with its own suggestion: the exact task, the constraints, the intended solution, the wrong approaches the tests must break, the time limit.
+3. It writes the spec to `.polyman/agent/notes.md` and asks if it should build.
+4. When you say build, it creates the folder (`polyman new` and `polyman download-testlib`, you approve it), runs [prove_idea](#prove_idea), and when every check passes it runs [build_problem](#build_problem).
+5. It tells you the result in 2 or 3 lines.
+
+**An existing problem** (made by hand or pulled from Polygon) works too. The agent can read the files, run `verify`, and change files when you ask. The workflows need a spec in `.polyman/agent/notes.md` with at least the `# Idea`, `# Constraints` and `# Samples` sections. If the problem has no spec yet, ask the agent to write one from the statement first.
+
+### The Terminal UI
+
+The screen has the transcript at the top, the input box, and a status line at the bottom. The status line shows the problem folder (or `new problem`), the permission mode, the model, the tokens used and the cost so far.
+
+#### Keys
+
+| Key                     | What it does                               |
+| ----------------------- | ------------------------------------------ |
+| `enter`                 | Send the message                           |
+| `ctrl+j`, `\` + `enter` | New line                                   |
+| `up` / `down`           | Input history (when the input is empty)    |
+| `esc`                   | Interrupt the agent                        |
+| `shift+tab`             | Switch the mode: `ask` / `auto-edit`       |
+| `ctrl+o`                | Details of a workflow task (while it runs) |
+| `ctrl+c`                | Clear the input, press it twice to exit    |
+| `ctrl+z`                | Quit now, stops the agent                  |
+
+Type `/help` to see these keys in the chat. `/help` is the only command for now.
+
+If you press `enter` while the agent works, the message is not sent. Wait for the turn to end, or press `esc` to stop it.
+
+#### Approvals
+
+Some tool calls wait for you. The chat shows a box with what the agent wants to do (a command, or a short diff for a file write) and three options:
+
+1. **Yes**: allow this call once.
+2. **Yes, and do not ask again for `<tool>` in this session**: allow this tool until you close the chat.
+3. **No, and tell the agent what to do differently**: type a reason and press `enter`. The agent reads your reason and tries another way. `esc` goes back to the options.
+
+Choose with the arrow keys (or `tab`) and `enter`, or press `1`, `2` or `3`. `esc` on the options interrupts the whole turn.
+
+Option 2 is only remembered for tools that write files. Polygon tools ask every time.
+
+#### Permission Modes
+
+Each tool has a risk, and the mode decides which ones ask:
+
+| Tool risk | Examples                                                   | `ask` mode (default)                  | `auto-edit` mode |
+| --------- | ---------------------------------------------------------- | ------------------------------------- | ---------------- |
+| read      | `read_file`, `list_files`, `remote_view`                   | never asks                            | never asks       |
+| run       | `generate`, `validate`, `verify`, `start_workflow`         | never asks                            | never asks       |
+| write     | `write_file`, `edit_file`, `write_notes`, `create_problem` | asks (unless allowed for the session) | never asks       |
+| remote    | `remote_push`, `remote_commit`, `remote_package`           | always asks                           | always asks      |
+
+`shift+tab` switches between `ask` and `auto-edit`. In `auto-edit` the agent writes files and then runs the code it wrote without asking you, so use it when you trust the direction.
+
+"Run" tools compile and run the files in the problem folder. In `ask` mode they do not ask, but the agent had to get your approval to write those files first.
+
+#### Plan Approval
+
+A workflow does not ask for every file. It asks once, for the whole plan:
+
+```
+Run this plan?
+build_problem · pairs-sum · 11 tasks · up to 4 in parallel
+
+t1   Scaffold              no model, CLI only
+t2   Statement             statements/english/legend.tex, ...
+t4   Main solution         solutions/main.cpp
+...
+Workers write only the files above, and the CLI runs the code they write.
+
+❯ 1. Run it    2. Edit the plan    3. Cancel
+```
+
+Each row is one task with the files it may write. `no model, CLI only` means polyman runs that task itself, with no model call.
+
+- **Run it**: the workflow starts. Each worker may write only its own files, without asking.
+- **Edit the plan**: nothing runs. Type what to change and the agent makes a new plan.
+- **Cancel**: nothing runs.
+
+Use the arrow keys or `tab` and `enter`, or the number keys. `esc` is the same as Cancel. When the workflow ends, the mode goes back to what it was before.
+
+#### Watching a Workflow
+
+While a workflow runs, the chat shows the task tree: each task with its status, attempts and the last check. Press `ctrl+o` to open the details of a task: its files, its brief, every attempt with each check and the error digest, the tool calls of the worker, and the result. `up` / `down` moves to another task, `esc` or `ctrl+o` closes the details.
+
+#### Stopping and Exiting
+
+- `esc` stops the current turn. A running workflow and its commands are stopped too.
+- `ctrl+c` clears the input. Press it twice within one second to exit.
+- `ctrl+z` exits at once and stops the agent.
+
+### Plain Mode (`--plain`)
+
+The terminal UI needs a real terminal on stdin and stdout. Without one, `polyman chat` stops with `polyman chat needs a terminal (or use --plain).` and exit code `2`. With `--plain` the chat works line by line, so it works in pipes, scripts and simple terminals. If the terminal UI fails to load, the chat also falls back to plain mode by itself.
+
+In plain mode:
+
+- Your prompt is `you>`. Each tool call is one line like `> verify({})`, and its result is a line that starts with `=`.
+- A tool approval is `Allow <title>? [y/N/a(lways)]`. `y` allows once, `a` allows for the session, `n` or an empty line denies. Any other text denies, and the text is sent to the agent as the reason.
+- A plan approval is `Run this plan? [y/N]`, after the plan is printed as a list.
+- If the input ends while the chat waits for an answer, the answer is no.
+- The mode is always `ask`.
+- `ctrl+c` cancels the answer. `ctrl+c` twice, or `ctrl+d`, exits.
+
+```bash
+# one message, then "y" to the next approval
+printf 'run verify and tell me what fails\ny\n' | polyman chat my-problem --plain
+```
+
+### What the Agent Can Do
+
+The agent works only through these tools:
+
+| Group            | Tools                                                                             | Notes                                                                                                                           |
+| ---------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Files            | `list_files`, `read_file`, `write_file`, `edit_file`                              | Only inside the problem folder, see [Safety and Privacy](#safety-and-privacy).                                                  |
+| Problem commands | `create_problem`, `generate`, `validate`, `run_solution`, `test_target`, `verify` | Each one runs the polyman CLI with `--json`, never a shell. `create_problem` runs `polyman new` and `polyman download-testlib`. |
+| Polygon          | `remote_push`, `remote_commit`, `remote_package`, `remote_view`                   | Push, commit and package always ask you. `remote_view` only reads. You must run `polyman remote register` yourself first.       |
+| Notes            | `read_notes`, `write_notes`                                                       | The spec in `.polyman/agent/notes.md`.                                                                                          |
+| Skills           | `list_skills`, `load_skill`                                                       | The instruction files of polyman (`template/instructions/`), read from the installed package.                                   |
+| Ideas            | `find_ideas`                                                                      | The idea workflow, see [find_ideas](#find_ideas).                                                                               |
+| Workflows        | `start_workflow`                                                                  | Runs a recipe, see [Workflows](#workflows).                                                                                     |
+
+The agent runs one polyman command at a time. The model gets only the start and the end of a long output; the full output is in the [logs](#notes-and-logs).
+
+### Workflows
+
+A workflow is how the agent builds or fixes a problem. One long chat with one model loses the rules and trusts its own work, so the workflow splits the job:
+
+- A **manager** (a model) fills a fixed plan shape, called a recipe, into a plan of small tasks.
+- The **scheduler** (polyman code, no model) runs the tasks in dependency order, up to 4 at a time.
+- Each **worker** (a model) does one task in a small session of its own. It can write only the files its task owns, and it has no Polygon tools.
+- Each task ends with a **checkpoint** that polyman runs: the compiler, `polyman test validator`, `polyman generate`, `polyman verify`. The model never decides if a task passed.
+
+When a task fails its check, the worker tries again with the error (attempt 2), then a fresh worker starts from the spec (attempt 3). After that the manager decides: try once more with a hint, redo an earlier task (once per workflow), or ask you a question. Tasks that depend on a failed task are skipped.
+
+Workers never write `Config.json`. They send a small patch (add this solution, set the validator, ...) and polyman applies the patches one at a time. A patch that would make `Config.json` invalid is refused.
+
+A whole workflow can run for at most 30 minutes. `esc` stops it.
+
+The agent picks the recipe from what you ask. You can also name it, like `run fix_verify`.
+
+#### find_ideas
+
+When you ask for problem ideas, the agent does not invent them in its answer. It runs the idea workflow: 3 ideas written in parallel, each from a different angle, a check of each idea's fields and of its complexity against its own constraints, a critic review of each one (clarity, rating, known or fresh), then a ranking. You pick one, and the chat goes on to the questions.
+
+It writes no files and needs no problem folder, so there is no plan approval. Ask for `more novel` or `other ideas` to run it again without the ideas you saw.
+
+#### prove_idea
+
+Checks the idea with quick programs before anything is built. The plan comes from the spec with no model call:
+
+- Workers write a brute force, the intended solution, a random generator, and one program per wrong approach, in `.polyman/agent/prove/`.
+- **Stress**: the brute force and the intended solution must agree on 300 small random tests.
+- **Samples**: the samples of the spec must match both programs.
+- **Max test**: the intended solution must run 3 max tests within the time limit of the spec (1 second if the spec has none).
+- **Kill wrong**: each wrong approach must really fail with its verdict. A plain brute force approach in the spec must be too slow on a max test. `ML` approaches are skipped, memory is not measured here.
+
+A failed check is the answer, not an error to fix: the workflow ends, and the agent tells you what failed with the counterexample. If the brute force and the intended solution agree but a sample does not, the sample is probably wrong, and the agent fixes it in the spec.
+
+#### build_problem
+
+Builds every file of the problem from the spec:
+
+| Task                                                 | Who     | The check                                                                                                           |
+| ---------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------- |
+| Scaffold                                             | polyman | `Config.json` exists. Removes the template's example solutions, tests and statement, sets the limits from the spec. |
+| Statement                                            | worker  | The statement files are written (not empty, not the template copy).                                                 |
+| Statement critic                                     | worker  | Reviews the statement against the spec.                                                                             |
+| Main solution, brute force                           | worker  | Compiles, and gives the right output on every sample of the spec.                                                   |
+| Wrong solutions (one per wrong approach in the spec) | worker  | Compiles. Its tag comes from the spec.                                                                              |
+| Validator                                            | worker  | `polyman test validator` passes.                                                                                    |
+| Generators                                           | worker  | `polyman generate --all` passes.                                                                                    |
+| Checker                                              | polyman | Picks a standard checker from the spec.                                                                             |
+| Generate and validate                                | polyman | `polyman generate --all`, then `polyman validate --all`.                                                            |
+| Verify                                               | polyman | `polyman verify`. When it fails, up to 3 fix rounds, like [fix_verify](#fix_verify).                                |
+
+If the manager gives an invalid plan twice, polyman uses a default plan made from the spec.
+
+#### fix_verify
+
+For a problem whose `verify` fails. It runs `polyman verify`, and when it fails, up to 3 rounds of: a fixer worker reads the verify digest and changes only the files the failure points to, then `verify` runs again. When a correct solution gets a wrong answer, the main solution may be the bug, so the fixer may change it too. When a wrong solution passes every test, the tests are weak, so the fixer may change the generators and the script.
+
+#### strengthen_tests
+
+For wrong solutions that pass every test. A worker adds a generator or script lines whose tests break them (it keeps the old tests), then polyman runs `generate`, `validate` and `verify`.
+
+#### What You See at the End
+
+Every workflow ends with a short summary, like `build_problem: 11 of 11 tasks passed`, the failed and skipped tasks, and any question from the manager. The agent tells you the result in 2 or 3 lines. If something failed, it asks if it should run `fix_verify`; it does not fix the files itself.
+
+### Notes and Logs
+
+Everything the agent keeps is inside the problem folder, under `.polyman/agent/`:
+
+- **`notes.md`** is the spec: the idea, constraints, input, output, intended solution, wrong approaches, edge cases, samples and decisions (time limit, memory limit, checker). Every workflow reads it, and the agent sees it on every model call. Before the problem folder exists, the notes are kept in memory and written when the folder is created. You can edit the file yourself. The exact format is in [`design/agent/briefs/SPEC-FORMAT.md`](design/agent/briefs/SPEC-FORMAT.md).
+- **`logs/`** has the full output of every polyman command the agent ran, one file per run, like `2026-10-26T15-30-12-345Z-verify.log`.
+- **`prove/`** has the quick programs of `prove_idea`.
+
+If the problem is in git, decide if you want these files in it. The notes are useful to keep. The logs are not.
+
+### Safety and Privacy
+
+**What is sent to the model provider.** The chat sends your messages and the agent's context to the provider of the model you use. The context has:
+
+- a system prompt with the notes, a summary of `Config.json`, the file names of the problem folder (two levels deep, without `testsets/`), the full path of the problem folder, your OS name and version, your `g++` version and the polyman version;
+- the content of every file the agent reads;
+- the output of every command the agent runs (cut to the start and the end), including `remote_view` output from Polygon.
+
+So the provider sees your problem: statement, solutions, tests it reads. Their privacy policy applies. If the problem is for a contest that did not happen yet, think about which provider you send it to.
+
+**The sandbox.** Every file path is checked by its real path, with symlinks followed. A path outside the problem folder is refused. Some files are never written by the agent: `.polyman/cache/`, `.polyman/agent/sessions/` and `testlib.h`. Inside a workflow, a worker can write only the files of its task.
+
+**Commands.** The agent runs only the polyman CLI, as a child process, never a shell. The child process gets your environment without any `*_API_KEY` variable or provider key variable, because it compiles and runs code the model wrote.
+
+**Secrets.** Provider keys and your Polygon key and secret are removed from tool output and error messages before the model or the screen sees them. There is no tool to register Polygon credentials: the agent tells you to run `polyman remote register` in your own terminal. If you paste something that looks like a Polygon key or secret into the chat, it is not sent to the model and not saved in the input history; the chat shows a warning instead.
+
+**Keys.** Provider keys are stored in `~/.polyman/ai.json` with mode `0600`. A key is only sent to the base URL of its own provider. See [AI Provider Keys](#ai-provider-keys).
+
+**Approvals show the real text.** Control characters and bidi marks in a command or path are shown as `\uXXXX`, so a file name cannot hide what it really is.
+
+### Known Limits
+
+The chat is a preview. The main known problems:
+
+- The workflow epic is [#136](https://github.com/HamzaHassanain/polyman/issues/136), with the issues [#120](https://github.com/HamzaHassanain/polyman/issues/120) to [#135](https://github.com/HamzaHassanain/polyman/issues/135). Some of them:
+  - one failed side task skips `verify` and the whole fix loop ([#127](https://github.com/HamzaHassanain/polyman/issues/127)),
+  - the 30 minute timeout throws away all results ([#122](https://github.com/HamzaHassanain/polyman/issues/122)),
+  - custom checkers are not supported, only standard ones ([#128](https://github.com/HamzaHassanain/polyman/issues/128)),
+  - the statement critic can never fail ([#124](https://github.com/HamzaHassanain/polyman/issues/124)),
+  - running `build_problem` again starts from zero ([#134](https://github.com/HamzaHassanain/polyman/issues/134)).
+- No session resume: when you close the chat, the conversation is gone. The notes and the files stay ([#61](https://github.com/HamzaHassanain/polyman/issues/61)).
+- No headless `polyman ask` command yet. Use `--plain` with a pipe for now ([#63](https://github.com/HamzaHassanain/polyman/issues/63)).
+- On Windows, stopping a command and everything it started (`taskkill /T /F`) is not tested yet ([#55](https://github.com/HamzaHassanain/polyman/issues/55)).
+- The workflow checks C++ solutions only.
+- A workflow never touches Polygon. Push with the chat after it ends, or with `polyman remote push`.
 
 ---
 
