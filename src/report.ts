@@ -13,6 +13,8 @@ import fs from 'fs';
 import path from 'path';
 import { fmt } from './formatter';
 import type {
+  DiffComponent,
+  DiffReport,
   GeneratedTestResult,
   GenerateReport,
   JsonReport,
@@ -106,7 +108,8 @@ type SimpleKind =
   | 'validate'
   | 'selftest'
   | 'solution-test'
-  | 'remote';
+  | 'remote'
+  | 'diff';
 
 interface SimpleOutput {
   kind: SimpleKind;
@@ -120,6 +123,7 @@ interface SimpleOutput {
   mainSolution: string | null;
   problemId: number | null;
   actions: RemoteAction[];
+  components: DiffComponent[];
 }
 
 /** Text that replaces a credential found in a report message. */
@@ -290,6 +294,24 @@ export class ReportCollector {
       action.error = stripAnsi(entry.error).trim();
     }
     this.active.simple.actions.push(action);
+  }
+
+  /**
+   * Begin collecting a diff report (`remote diff`, `remote push --dry-run`).
+   * Like `startRemote`, only errors passed to `fail` / `addError` are kept.
+   */
+  startDiff(command: string): void {
+    this.start(command, '', 'diff');
+    fmt.setErrorSink(null);
+  }
+
+  /**
+   * Records how one component differs between the local problem and Polygon.
+   * Ignored unless a diff report is active.
+   */
+  addDiffComponent(entry: DiffComponent): void {
+    if (this.active?.simple?.kind !== 'diff') return;
+    this.active.simple.components.push({ ...entry });
   }
 
   /**
@@ -486,6 +508,7 @@ export class ReportCollector {
               mainSolution: null,
               problemId: null,
               actions: [],
+              components: [],
             },
       requestedSolution,
       requestedTag: null,
@@ -602,6 +625,19 @@ export class ReportCollector {
           warnings: active.warnings.map(warning => this.redact(warning)),
         };
         return remoteReport;
+      }
+      if (active.simple.kind === 'diff') {
+        const components = active.simple.components.map(component => ({
+          ...component,
+        }));
+        const diffReport: DiffReport = {
+          ...common,
+          problemId: active.simple.problemId,
+          components,
+          changes: components.filter(c => c.status !== 'same').length,
+          warnings: active.warnings.map(warning => this.redact(warning)),
+        };
+        return diffReport;
       }
       if (active.simple.kind === 'path') {
         const pathReport: PathReport = {

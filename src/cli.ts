@@ -27,6 +27,7 @@ import {
   remoteListProblemsAction,
   remotePullProblemAction,
   remotePushProblemAction,
+  remoteDiffAction,
   remoteViewProblemAction,
   remoteCommitProblemAction,
   remotePackageProblemAction,
@@ -608,6 +609,7 @@ remote
  * polyman remote push ./my-problem -s -c  # Push only solutions and checker
  * polyman remote push ./my-problem --all  # Push everything (default)
  * polyman remote push . --yes --name two-sum  # Create the Polygon problem headlessly
+ * polyman remote push ./my-problem --dry-run  # Show what would change, upload nothing
  * */
 remote
   .command('push <directory>')
@@ -623,6 +625,10 @@ remote
   .option('-i, --info', 'Update problem info (time/memory limits)')
   .option('-y, --yes', 'Create a new Polygon problem without confirmation')
   .option('-n, --name <name>', 'Name (slug) for a new Polygon problem')
+  .option(
+    '-d, --dry-run',
+    'Compare with Polygon and report what would change; creates and uploads nothing'
+  )
   .option(
     '--json',
     'Print a JSON report to stdout (human output goes to stderr)'
@@ -642,12 +648,32 @@ remote
         info?: boolean;
         yes?: boolean;
         name?: string;
+        dryRun?: boolean;
         json?: boolean;
       }
     ) => {
       await remotePushProblemAction(directory, options);
     }
   );
+
+/**
+ * Command: remote diff <directory>
+ * Compares the local problem with its Polygon copy and shows what a push
+ * would change. Reads only: uploads, downloads and writes nothing.
+ * @example
+ * polyman remote diff ./my-problem
+ * polyman remote diff . --json  # Machine-readable components + change count
+ * */
+remote
+  .command('diff <directory>')
+  .description('Compare local problem with Polygon without changing either')
+  .option(
+    '--json',
+    'Print a JSON report to stdout (human output goes to stderr)'
+  )
+  .action(async (directory: string, options: { json?: boolean }) => {
+    await remoteDiffAction(directory, { json: options.json === true });
+  });
 
 /**
  * Command: remote view <problem-id>

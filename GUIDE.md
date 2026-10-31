@@ -2329,6 +2329,7 @@ polyman remote push ./my-problem --all
 | Info | `-i, --info` | Update problem info (limits) |
 | Yes | `-y, --yes` | Create a new Polygon problem without the confirmation prompt |
 | Name | `-n, --name <slug>` | Slug for the new Polygon problem instead of prompting |
+| Dry run | `-d, --dry-run` | Compare with Polygon and report what would change; creates and uploads nothing |
 
 #### Creating the Polygon problem headlessly
 
@@ -2347,6 +2348,67 @@ A `--name` that does not match `^[a-z0-9]+(-[a-z0-9]+)*$` or already exists on P
 - Use selective push to update specific parts without affecting others
 - Always pull before pushing to avoid conflicts
 - If you replace the problem ID with a directory path that Contains `Config.json` that has a valid problem ID, it will be used.
+
+---
+
+### Comparing With Polygon
+
+A push overwrites: it replaces files, switches the checker, and clears and re-uploads every testset it touches. `remote diff` answers what would change, without changing anything.
+
+```bash
+polyman remote diff <directory>
+```
+
+**Example:**
+
+```bash
+polyman remote diff ./my-problem
+```
+
+```
+  Solutions
+    ✓ main.cpp        same
+    ✗ wa.cpp          changed
+    ⚠ jury.cpp        local only
+    ℹ old.cpp         remote only
+  Checker
+    ✓ std::wcmp.cpp   same
+
+  ℹ Compared 4 component(s), 3 would change
+```
+
+**What is compared:**
+
+| Component | How |
+|-----------|-----|
+| Solutions | By file name, then by content |
+| Checker | The standard checker by name (`std::wcmp.cpp`), a custom one by content |
+| Validator | Same as the checker |
+| Generators | Membership of the source files, then content |
+| Statements | One entry per configured language and section |
+| Testsets | The generator script and each declared manual test input |
+
+**What is not:**
+
+- Generated test contents. They are produced by the script and the generator binaries, so the script is compared instead.
+- `sourceType`, time and memory limits, tags and the title.
+- Testsets that exist only on Polygon: the API has no endpoint that lists a problem's testsets. `remote view` shows them.
+
+`remote diff` reads the local files through the same code a push uploads from, so it cannot disagree with the real thing: a Java solution is compared after the `public class Main` rename, a script after its generator names are rewritten, and every file after line endings are normalized. Local `LF` and Polygon `CRLF` are the same text here. A blank line is not: adding or removing one counts as a change.
+
+Nothing is uploaded, nothing is downloaded to disk, and `Config.json` is not touched. It needs the problem to be on Polygon already (`Config.json` has a `problemId`); a problem that was never pushed exits 2 and points at `--dry-run` below.
+
+#### Dry run
+
+`remote push --dry-run` is the same comparison inside the command that would do the damage. Use it when the problem may not exist on Polygon yet, or when you are pushing only some components.
+
+```bash
+polyman remote push ./my-problem --dry-run          # or -d
+polyman remote push ./my-problem --dry-run -t       # what a tests-only push would do
+polyman remote push . --dry-run --json > plan.json
+```
+
+A dry run never creates a problem and never uploads: it stops before the confirmation prompt, before the new problem is made, and before any testset is cleared. When `Config.json` has no `problemId` it exits 0 and warns that a real push would create the problem and upload every component.
 
 ---
 
@@ -2475,11 +2537,12 @@ polyman remote package ./my-problem standard
 
 ### JSON Output for Remote Commands
 
-`remote pull`, `push`, `view`, `commit` and `package` accept `--json`. Same rule as `run` and `verify`: stdout carries exactly one JSON document, and every human line goes to stderr. The exit code is unchanged.
+`remote pull`, `push`, `diff`, `view`, `commit` and `package` accept `--json`. Same rule as `run` and `verify`: stdout carries exactly one JSON document, and every human line goes to stderr. The exit code is unchanged.
 
 ```bash
 polyman remote push . --json > push.json
 polyman remote commit . "Fix validator" --json
+polyman remote diff . --json > diff.json
 ```
 
 Shape:
@@ -2516,6 +2579,34 @@ Shape:
   - the description or the tags. `Config.json` then has no `description` (or `tags`) key, not an empty value, so a later `remote push` leaves the one on Polygon as it is.
 
   The human output lists the same files under "PULL COMPLETED WITH ERRORS" and repeats the warnings at the end. A testset Polygon refused is an `ok: false` entry in `actions`, and a refused problem fetch fails the pull.
+
+`remote diff --json`, and `remote push --dry-run --json`, report the comparison instead of the uploads. Every component that was checked gets one entry, `same` ones included, so an absent component means it was not compared:
+
+```json
+{
+  "schemaVersion": 1,
+  "polymanVersion": "3.1.0",
+  "command": "remote diff",
+  "ok": true,
+  "exitCode": 0,
+  "durationMs": 412,
+  "errors": [],
+  "problemId": 123456,
+  "components": [
+    { "component": "solution", "name": "main.cpp", "status": "same" },
+    { "component": "solution", "name": "wa.cpp", "status": "changed" },
+    { "component": "solution", "name": "jury.cpp", "status": "local-only" },
+    { "component": "solution", "name": "old.cpp", "status": "remote-only" }
+  ],
+  "changes": 3,
+  "warnings": ["generators: a generator that is only on Polygon is not listed here, check `polyman remote view`"]
+}
+```
+
+- `status` is `same`, `changed`, `local-only` (a push would upload it) or `remote-only` (a push would leave it alone).
+- `changes` counts the entries that are not `same`. Differences are not a failure: a report that finds changes still has `ok: true` and exits 0, so a caller can read the list and decide.
+- A Polygon request that fails is one line in `warnings` and no entry for that component. A component that could not be read is never reported as `same`.
+- With `--dry-run`, `command` stays `"remote push"` and the document is this shape rather than the `actions` one, because nothing was uploaded.
 
 ---
 

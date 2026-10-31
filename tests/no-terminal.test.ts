@@ -7,7 +7,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawnSync } from 'child_process';
-import { existsSync, mkdtempSync, rmSync } from 'fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, resolve } from 'path';
 
@@ -77,6 +77,7 @@ const commands: string[][] = [
   ['__complete', 'solutions'],
   ['remote', 'list'],
   ['remote', 'pull', '123', 'out'],
+  ['remote', 'diff', '.'],
   ['remote', 'view', '123'],
   ['remote', 'commit', '123', 'msg'],
   ['remote', 'package', '123', 'standard'],
@@ -116,6 +117,26 @@ describe('commands without a terminal', () => {
       expect(result.status).toBe(2);
       expect(result.out).toContain('--yes');
       expect(result.out).not.toContain(ESCAPE);
+    },
+    TIMEOUT_MS + 5_000
+  );
+
+  it(
+    'remote push --dry-run creates no problem and uploads nothing',
+    () => {
+      // register dummy credentials so the dry run reaches the config step
+      polyman(['remote', 'register', 'key', 'secret'], work);
+      const result = polyman(['remote', 'push', '.', '--dry-run'], problem);
+      expect(result.signal).toBeNull();
+      expect(result.status).toBe(0);
+      expect(result.out).toContain('not on Polygon yet');
+      expect(result.out).toContain('nothing was created or uploaded');
+      expect(result.out).not.toContain(ESCAPE);
+      // A first push would write the new Polygon id back into Config.json.
+      const config = JSON.parse(
+        readFileSync(join(problem, 'Config.json'), 'utf8')
+      ) as { problemId?: number };
+      expect(config.problemId).toBeUndefined();
     },
     TIMEOUT_MS + 5_000
   );
