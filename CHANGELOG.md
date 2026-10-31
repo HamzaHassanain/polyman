@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- New `polyman remote diff <dir>` compares a local problem with its Polygon copy and prints one line per component: `same`, `changed`, `local-only` (a push would upload it) or `remote-only` (a push would leave it alone). `--json` puts the list in a report with a `changes` count, and finding differences is not a failure: it still exits 0. It reads the files through the same code `push` uploads from, so the Java class rename, the generator script rewrite and the line-ending normalization are all already in the text it compares, and local `LF` against Polygon `CRLF` counts as the same file. Nothing is uploaded, downloaded to disk or written to `Config.json`. Generated test contents, `sourceType`, limits, tags and the title are not compared, and a testset that exists only on Polygon cannot be detected because the API does not list them; each such gap is a `warnings` line. A problem with no `problemId` is not on Polygon yet, so it exits 2 and points at `--dry-run` (GitHub #10).
+- `remote push` accepts `-d, --dry-run`: the same comparison inside the command that would do the damage, printed as "what this push would change". It stops before the create-problem prompt, so it creates no problem, clears no testset, uploads nothing and leaves `Config.json` alone. With `--json` the report has the `remote diff` shape and keeps `"command": "remote push"`.
+
 - `run` and `verify` use only `test<N>.txt` files (N > 0), like `validate`, and sort them by N. A stray `test1.txt.bak`, `test_notes.txt` or `test0.txt` in a testset folder is not run any more (GitLab #117, !349).
 - The docs say a `WA` tag passes on Wrong Answer or Presentation Error everywhere the tags are described (GitLab #121, !351).
 - A solution tagged `RE` must crash on at least one test. Before, an `RE` solution that passed every test was reported as "Behaves as expected" (GitLab #123, !352).
