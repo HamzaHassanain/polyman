@@ -208,6 +208,74 @@ describe('parseGeneratorScript - FreeMarker expansion (corpus/scripts)', () => {
     ).toEqual(['5', '50', '500']);
   });
 
+  it('expands a sequence of strings', () => {
+    expect(
+      argsOf(
+        '<#list ["random", "adversarial"] as mode>\n' +
+          'spider -N=5 -label=${mode} > $\n' +
+          '</#list>\n'
+      )
+    ).toEqual(['-N=5 -label=random', '-N=5 -label=adversarial']);
+  });
+
+  it('accepts single quotes, commas inside strings, and escapes', () => {
+    expect(
+      argsOf(
+        "<#list ['random', 'adversarial'] as mode>\ngen ${mode} > $\n</#list>"
+      )
+    ).toEqual(['random', 'adversarial']);
+    expect(argsOf('<#list ["a,b", "c"] as s>\ngen ${s} > $\n</#list>')).toEqual(
+      ['a,b', 'c']
+    );
+    expect(
+      argsOf(
+        '<#list ["a\\\\b", "\\x61", "a\\=b"] as s>\ngen ${s} > $\n</#list>'
+      )
+    ).toEqual(['a\\b', 'a', 'a=b']);
+    expect(argsOf('<#list ["a\\tb"] as s>\ngen "${s}" > $\n</#list>')).toEqual([
+      'a\tb',
+    ]);
+  });
+
+  it('keeps a > inside a string literal, including the \\g escape', () => {
+    expect(
+      argsOf('<#list ["a>b", "c\\gd"] as s>\ngen "${s}" > $\n</#list>')
+    ).toEqual(['a>b', 'c>d']);
+  });
+
+  it('mixes integers and strings, and reuses a string variable', () => {
+    expect(
+      argsOf('<#list [1, "a", 2+1] as x>\ngen ${x} > $\n</#list>')
+    ).toEqual(['1', 'a', '3']);
+    expect(
+      argsOf(
+        [
+          '<#list ["p", "q"] as p>',
+          '<#list [p] as t>',
+          'gen ${t} > $',
+          '</#list>',
+          '</#list>',
+        ].join('\n')
+      )
+    ).toEqual(['p', 'q']);
+    expect(argsOf('<#list [""] as s>\ngen x${s}y > $\n</#list>')).toEqual([
+      'xy',
+    ]);
+  });
+
+  it('does not let a string loop variable escape its list', () => {
+    expect(
+      argsOf(
+        '<#assign mode = 1>\n<#list ["a"] as mode>\ngen ${mode} > $\n</#list>\ngen ${mode} > $'
+      )
+    ).toEqual(['a', '1']);
+    expect(() =>
+      parser.parseGeneratorScript(
+        '<#list ["a"] as mode>\ngen ${mode} > $\n</#list>\ngen ${mode} > $'
+      )
+    ).toThrow(/Undefined variable "mode"/);
+  });
+
   it('nested.txt: expands nested lists in order', () => {
     expect(
       argsOf(
@@ -530,13 +598,45 @@ describe('parseGeneratorScript - FreeMarker edge cases (review of !83)', () => {
   });
 
   it('rejects a trailing comma or an empty item in a sequence', () => {
-    for (const items of ['1,2,', '1,,2']) {
+    for (const items of ['1,2,', '1,,2', '"a",', '"a",,']) {
       expect(() =>
         parser.parseGeneratorScript(
           `<#list [${items}] as n>\ngen \${n} > $\n</#list>`
         )
       ).toThrow(/Unsupported expression <#list \[.*\] as n> on line 1/);
     }
+  });
+
+  it('rejects a bad string literal in a sequence', () => {
+    expect(() =>
+      parser.parseGeneratorScript('<#list ["a] as s>\ngen ${s} > $\n</#list>')
+    ).toThrow('Unclosed FreeMarker tag <#list> on line 1');
+    expect(() =>
+      parser.parseGeneratorScript(
+        '<#list ["\\q"] as s>\ngen ${s} > $\n</#list>'
+      )
+    ).toThrow(/Invalid string escape "\\q"/);
+    expect(() =>
+      parser.parseGeneratorScript(
+        '<#list ["a${b}"] as s>\ngen ${s} > $\n</#list>'
+      )
+    ).toThrow(/String interpolation is not supported/);
+    expect(() =>
+      parser.parseGeneratorScript('<#assign s = "a">\ngen ${s} > $')
+    ).toThrow(/Unsupported expression <#assign s = "a">/);
+  });
+
+  it('rejects a string variable in an integer expression', () => {
+    expect(() =>
+      parser.parseGeneratorScript(
+        '<#list ["a"] as mode>\ngen ${mode+1} > $\n</#list>'
+      )
+    ).toThrow(/Variable "mode" is a string in \$\{mode\+1\} on line 2/);
+    expect(() =>
+      parser.parseGeneratorScript(
+        '<#list ["a"] as mode>\n<#list mode..1 as i>\ngen ${i} > $\n</#list>\n</#list>'
+      )
+    ).toThrow(/Variable "mode" is a string/);
   });
 
   it('rejects > inside an expression', () => {

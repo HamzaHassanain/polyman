@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Generator scripts expand `<#list ["a", "b"] as s>` over FreeMarker string literals (`"..."` or `'...'`). `${s}` is replaced with the string. A string still cannot be used where an integer expression is required.
 - `run` and `verify` use only `test<N>.txt` files (N > 0), like `validate`, and sort them by N. A stray `test1.txt.bak`, `test_notes.txt` or `test0.txt` in a testset folder is not run any more (GitLab #117, !349).
 - The docs say a `WA` tag passes on Wrong Answer or Presentation Error everywhere the tags are described (GitLab #121, !351).
 - A solution tagged `RE` must crash on at least one test. Before, an `RE` solution that passed every test was reported as "Behaves as expected" (GitLab #123, !352).

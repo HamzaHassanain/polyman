@@ -19,11 +19,19 @@
  *                                  down when a > b)
  *   - `<#list [5, 50, 500] as n> ... </#list>`
  *                                — expanded over a sequence of integers
+ *   - `<#list ["a", "b"] as s> ... ${s} ... </#list>`
+ *                                — expanded over FreeMarker string literals
+ *                                  (`"..."` or `'...'`, with that language's
+ *                                  escapes). `${s}` inserts the string.
+ *                                  Interpolation inside the literal and raw
+ *                                  strings (`r"..."`) are rejected. A string
+ *                                  cannot be used in an integer expression.
  *   - `<#assign n = 7>`          — defines an integer variable
  *   - `${expr}`                  — integer expression over loop and assigned
  *                                  variables: `+ - * %`, parentheses, unary
- *                                  minus. Anything else is rejected, never
- *                                  passed through literally.
+ *                                  minus. A bare `${name}` also prints a
+ *                                  string loop variable. Anything else is
+ *                                  rejected, never passed through literally.
  *
  * Any other FreeMarker directive (`<#if>`, `<#macro>`, `<@x>`, ...), the
  * `#{...}` numeric interpolation and the square-bracket tag syntax (`[#list]`,
@@ -279,7 +287,33 @@ type FmListNode = Extract<FmPiece, { kind: 'list' }>;
 class FmExprError extends Error {}
 
 const FM_TOKEN_RE =
-  /(<#--[\s\S]*?-->)|<(\/?)([#@])([A-Za-z_][\w.]*)([^>]*)>|\$\{([^}]*)\}|(#\{)|(\[\/?[#@][\w.]*)/g;
+  /(<#--[\s\S]*?-->)|<(\/?)([#@])([A-Za-z_][\w.]*)|\$\{([^}]*)\}|(#\{)|(\[\/?[#@][\w.]*)/g;
+
+/**
+ * Index of the `>` that closes a FreeMarker tag whose name ends at `from`.
+ * A quoted string may contain `>`, and a backslash inside a string escapes
+ * the next character. Returns -1 when the tag never closes.
+ */
+function scanTagClose(script: string, from: number): number {
+  let quote: '"' | "'" | null = null;
+  for (let i = from; i < script.length; i++) {
+    const c = script[i];
+    if (quote) {
+      if (c === '\\') {
+        i++;
+        continue;
+      }
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      quote = c;
+      continue;
+    }
+    if (c === '>') return i;
+  }
+  return -1;
+}
 
 /**
  * Builds a lookup from a character offset to its 1-based line number. The
@@ -329,51 +363,63 @@ function parseFreeMarker(script: string): FmPiece[] {
     pending += text;
   };
 
+  FM_TOKEN_RE.lastIndex = 0;
   let last = 0;
-  for (const m of script.matchAll(FM_TOKEN_RE)) {
-    const offset = m.index;
+  let found: RegExpExecArray | null;
+  while ((found = FM_TOKEN_RE.exec(script)) !== null) {
+    const offset = found.index;
     addText(script.slice(last, offset), last);
-    last = offset + m[0].length;
     const line = lineAt(offset);
 
-    if (m[1] !== undefined) {
+    if (found[1] !== undefined) {
       // Comments that survived preprocess (`@group ...`) stay as text, but
       // FreeMarker would evaluate a `${...}` inside them, so refuse those.
-      const interp = m[1].indexOf('${');
+      last = offset + found[0].length;
+      const interp = found[1].indexOf('${');
       if (interp >= 0) {
-        const expr = /^\$\{[^}]*\}?/.exec(m[1].slice(interp))![0];
+        const expr = /^\$\{[^}]*\}?/.exec(found[1].slice(interp))![0];
         throw new Error(
           `Unsupported expression ${expr} in @group on line ` +
             `${lineAt(offset + interp)}`
         );
       }
-      pending += m[1];
+      pending += found[1];
       continue;
     }
 
-    if (m[6] !== undefined) {
+    if (found[5] !== undefined) {
+      last = offset + found[0].length;
       flush();
-      target().push({ kind: 'expr', source: m[6], line });
+      target().push({ kind: 'expr', source: found[5], line });
       continue;
     }
 
-    if (m[7] !== undefined) {
+    if (found[6] !== undefined) {
       throw new Error(
         `Unsupported FreeMarker construct #{...} on line ${line}`
       );
     }
-    if (m[8] !== undefined) {
+    if (found[7] !== undefined) {
       throw new Error(
-        `Unsupported FreeMarker construct ${m[8]} (square-bracket syntax) ` +
+        `Unsupported FreeMarker construct ${found[7]} (square-bracket syntax) ` +
           `on line ${line}`
       );
     }
 
-    const closing = m[2] === '/';
-    const sigil = m[3];
-    const name = m[4];
-    const args = m[5];
-    const shown = `<${m[2]}${sigil}${name}>`;
+    const close = scanTagClose(script, FM_TOKEN_RE.lastIndex);
+    if (close < 0) {
+      throw new Error(
+        `Unclosed FreeMarker tag <${found[2] ?? ''}${found[3] ?? ''}${found[4] ?? ''}> on line ${line}`
+      );
+    }
+    const args = script.slice(FM_TOKEN_RE.lastIndex, close);
+    FM_TOKEN_RE.lastIndex = close + 1;
+    last = close + 1;
+
+    const closing = found[2] === '/';
+    const sigil = found[3];
+    const name = found[4];
+    const shown = `<${found[2]}${sigil}${name}>`;
 
     if (sigil === '#' && name === 'list') {
       flush();
@@ -434,15 +480,156 @@ function parseFreeMarker(script: string): FmPiece[] {
   return root;
 }
 
+/** A loop variable is an integer, or a string from a quoted sequence item. */
+type FmValue = number | string;
+
+/**
+ * FreeMarker string-literal escapes. `\x` is handled separately: it takes
+ * one to four hex digits. Any other backslash is an error, as in FreeMarker.
+ * https://freemarker.apache.org/docs/dgui_template_exp.html#dgui_template_exp_stringliteral
+ */
+const STRING_ESCAPES: Record<string, string> = {
+  '"': '"',
+  "'": "'",
+  '{': '{',
+  '=': '=',
+  '\\': '\\',
+  n: '\n',
+  r: '\r',
+  t: '\t',
+  b: '\b',
+  f: '\f',
+  l: '<',
+  g: '>',
+  a: '&',
+};
+
+/**
+ * Parses a FreeMarker string literal that occupies all of `source`.
+ * `source` is already trimmed. Interpolation (`${...}`, `#{...}`) and
+ * trailing junk are rejected: this parser does not evaluate them.
+ */
+function parseStringLiteral(source: string): string {
+  const quote = source[0];
+  if (quote !== '"' && quote !== "'") throw new FmExprError('unsupported');
+  let out = '';
+  let i = 1;
+  while (i < source.length) {
+    const c = source[i];
+    if (c === '\\') {
+      const esc = source[i + 1];
+      if (esc === undefined) throw new FmExprError('Unclosed string');
+      if (esc === 'x') {
+        let j = i + 2;
+        let hex = '';
+        while (
+          hex.length < 4 &&
+          j < source.length &&
+          /[0-9A-Fa-f]/.test(source[j])
+        ) {
+          hex += source[j];
+          j++;
+        }
+        if (hex.length === 0) {
+          throw new FmExprError('Invalid string escape "\\x"');
+        }
+        out += String.fromCharCode(parseInt(hex, 16));
+        i = j;
+        continue;
+      }
+      const mapped = STRING_ESCAPES[esc];
+      if (mapped === undefined) {
+        throw new FmExprError(`Invalid string escape "\\${esc}"`);
+      }
+      out += mapped;
+      i += 2;
+      continue;
+    }
+    if (c === quote) {
+      if (source.slice(i + 1).trim() !== '') {
+        throw new FmExprError('unsupported');
+      }
+      return out;
+    }
+    // `$\{` is an escaped `{`, so it does not start an interpolation.
+    if ((c === '$' || c === '#') && source[i + 1] === '{') {
+      throw new FmExprError('String interpolation is not supported');
+    }
+    out += c;
+    i++;
+  }
+  throw new FmExprError('Unclosed string');
+}
+
+/**
+ * Splits a `[...]` sequence on commas that are outside quotes. A backslash
+ * inside a quote escapes the next character, including a quote or a comma.
+ */
+function splitSequenceItems(inner: string): string[] {
+  const items: string[] = [];
+  let buf = '';
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < inner.length; i++) {
+    const c = inner[i];
+    if (quote) {
+      buf += c;
+      if (c === '\\') {
+        const next = inner[i + 1];
+        if (next !== undefined) {
+          buf += next;
+          i++;
+        }
+        continue;
+      }
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      quote = c;
+      buf += c;
+      continue;
+    }
+    if (c === ',') {
+      items.push(buf);
+      buf = '';
+      continue;
+    }
+    buf += c;
+  }
+  items.push(buf);
+  return items;
+}
+
+/**
+ * One item of a `<#list [...]>` sequence: a string literal, a string
+ * variable, or an integer expression.
+ */
+function evalSequenceItem(
+  item: string,
+  lookup: (name: string) => FmValue | undefined
+): FmValue {
+  const trimmed = item.trim();
+  if (trimmed.length === 0) throw new FmExprError('unsupported');
+  if (trimmed.startsWith('"') || trimmed.startsWith("'")) {
+    return parseStringLiteral(trimmed);
+  }
+  if (/^[A-Za-z_]\w*$/.test(trimmed)) {
+    const v = lookup(trimmed);
+    if (typeof v === 'string') return v;
+  }
+  return evalExpression(trimmed, lookup);
+}
+
 /**
  * Evaluates an integer expression: `+ - * %`, parentheses, unary minus,
- * integer literals and variables. Anything else (`/`, strings, built-ins,
- * decimals) is unsupported, because its FreeMarker result can't be matched
- * here with certainty.
+ * integer literals and variables. Anything else (`/`, string literals,
+ * built-ins, decimals) is unsupported, because its FreeMarker result can't
+ * be matched here with certainty. A variable that holds a string is rejected
+ * here too; `${name}` prints it before this function is called.
  */
 function evalExpression(
   source: string,
-  lookup: (name: string) => number | undefined
+  lookup: (name: string) => FmValue | undefined
 ): number {
   const tokens = source.match(/\s*(\d+|[A-Za-z_]\w*|[-+*%()]|\S)/g) ?? [];
   const toks = tokens.map(t => t.trim());
@@ -465,6 +652,9 @@ function evalExpression(
     if (/^[A-Za-z_]\w*$/.test(t)) {
       const v = lookup(t);
       if (v === undefined) throw new FmExprError(`Undefined variable "${t}"`);
+      if (typeof v !== 'number') {
+        throw new FmExprError(`Variable "${t}" is a string`);
+      }
       return v;
     }
     if (t === '(') {
@@ -514,16 +704,27 @@ function evalExpression(
   return value;
 }
 
+/** Adds the script line to an {@link FmExprError}. */
+function rethrowExpr(e: unknown, shown: string, line: number): never {
+  if (!(e instanceof FmExprError)) throw e;
+  if (e.message === 'unsupported') {
+    throw new Error(`Unsupported expression ${shown} on line ${line}`, {
+      cause: e,
+    });
+  }
+  throw new Error(`${e.message} in ${shown} on line ${line}`, { cause: e });
+}
+
 /**
  * Expands `<#list>`, `<#assign>` and `${expr}` the way Polygon's FreeMarker
- * does for the integer subset documented at the top of this file. Directive
- * tags expand to nothing, so the newlines around them are kept and line
- * numbers of scripts without lists stay aligned with the source.
+ * does for the subset documented at the top of this file. Directive tags
+ * expand to nothing, so the newlines around them are kept and line numbers
+ * of scripts without lists stay aligned with the source.
  */
 function expandFreeMarker(script: string): string {
-  const globals = new Map<string, number>();
-  const locals: Map<string, number>[] = [];
-  const lookup = (name: string): number | undefined => {
+  const globals = new Map<string, FmValue>();
+  const locals: Map<string, FmValue>[] = [];
+  const lookup = (name: string): FmValue | undefined => {
     for (let i = locals.length - 1; i >= 0; i--) {
       const v = locals[i].get(name);
       if (v !== undefined) return v;
@@ -534,15 +735,14 @@ function expandFreeMarker(script: string): string {
     try {
       return evalExpression(source, lookup);
     } catch (e) {
-      if (!(e instanceof FmExprError)) throw e;
-      if (e.message === 'unsupported') {
-        throw new Error(`Unsupported expression ${shown} on line ${line}`, {
-          cause: e,
-        });
-      }
-      throw new Error(`${e.message} in ${shown} on line ${line}`, {
-        cause: e,
-      });
+      return rethrowExpr(e, shown, line);
+    }
+  };
+  const evaluateItem = (item: string, line: number, shown: string): FmValue => {
+    try {
+      return evalSequenceItem(item, lookup);
+    } catch (e) {
+      return rethrowExpr(e, shown, line);
     }
   };
 
@@ -553,9 +753,16 @@ function expandFreeMarker(script: string): string {
       if (node.kind === 'text') {
         out += node.value;
       } else if (node.kind === 'expr') {
-        out += String(
-          evaluate(node.source, node.line, '${' + node.source.trim() + '}')
-        );
+        const shown = '${' + node.source.trim() + '}';
+        const bare = node.source.trim();
+        if (/^[A-Za-z_]\w*$/.test(bare)) {
+          const v = lookup(bare);
+          if (typeof v === 'string') {
+            out += v;
+            continue;
+          }
+        }
+        out += String(evaluate(node.source, node.line, shown));
       } else if (node.kind === 'assign') {
         globals.set(
           node.name,
@@ -574,7 +781,7 @@ function expandFreeMarker(script: string): string {
 
   const renderList = (node: FmListNode): string => {
     const shown = `<#list ${node.header} as ${node.name}>`;
-    const values: number[] = [];
+    const values: FmValue[] = [];
     const tooLarge = (): Error =>
       new Error(
         `${shown} on line ${node.line} expands to more than ` +
@@ -583,8 +790,8 @@ function expandFreeMarker(script: string): string {
     const seq = /^\[([\s\S]*)\]$/.exec(node.header.trim());
     if (seq) {
       if (seq[1].trim().length > 0) {
-        for (const item of seq[1].split(',')) {
-          values.push(evaluate(item, node.line, shown));
+        for (const item of splitSequenceItems(seq[1])) {
+          values.push(evaluateItem(item, node.line, shown));
         }
       }
     } else {
