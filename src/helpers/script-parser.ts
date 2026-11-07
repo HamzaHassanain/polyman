@@ -19,13 +19,8 @@
  *                                  down when a > b)
  *   - `<#list [5, 50, 500] as n> ... </#list>`
  *                                — expanded over a sequence of integers
- *   - `<#list ["a", "b"] as s> ... ${s} ... </#list>`
- *                                — expanded over FreeMarker string literals
- *                                  (`"..."` or `'...'`, with that language's
- *                                  escapes). `${s}` inserts the string.
- *                                  Interpolation inside the literal and raw
- *                                  strings (`r"..."`) are rejected. A string
- *                                  cannot be used in an integer expression.
+ *   - `<#list ["a", "b"] as s> ... </#list>`
+ *                                - expanded over a sequence of strings
  *   - `<#assign n = 7>`          — defines an integer variable
  *   - `${expr}`                  — integer expression over loop and assigned
  *                                  variables: `+ - * %`, parentheses, unary
@@ -298,6 +293,7 @@ function scanTagClose(script: string, from: number): number {
   let quote: '"' | "'" | null = null;
   for (let i = from; i < script.length; i++) {
     const c = script[i];
+
     if (quote) {
       if (c === '\\') {
         i++;
@@ -306,10 +302,12 @@ function scanTagClose(script: string, from: number): number {
       if (c === quote) quote = null;
       continue;
     }
+
     if (c === '"' || c === "'") {
       quote = c;
       continue;
     }
+
     if (c === '>') return i;
   }
   return -1;
@@ -512,13 +510,16 @@ const STRING_ESCAPES: Record<string, string> = {
 function parseStringLiteral(source: string): string {
   const quote = source[0];
   if (quote !== '"' && quote !== "'") throw new FmExprError('unsupported');
+
   let out = '';
   let i = 1;
   while (i < source.length) {
     const c = source[i];
+
     if (c === '\\') {
       const esc = source[i + 1];
       if (esc === undefined) throw new FmExprError('Unclosed string');
+
       if (esc === 'x') {
         let j = i + 2;
         let hex = '';
@@ -537,20 +538,22 @@ function parseStringLiteral(source: string): string {
         i = j;
         continue;
       }
+
       const mapped = STRING_ESCAPES[esc];
-      if (mapped === undefined) {
+      if (mapped === undefined)
         throw new FmExprError(`Invalid string escape "\\${esc}"`);
-      }
+
       out += mapped;
       i += 2;
       continue;
     }
     if (c === quote) {
-      if (source.slice(i + 1).trim() !== '') {
+      if (source.slice(i + 1).trim() !== '')
         throw new FmExprError('unsupported');
-      }
+
       return out;
     }
+
     // `$\{` is an escaped `{`, so it does not start an interpolation.
     if ((c === '$' || c === '#') && source[i + 1] === '{') {
       throw new FmExprError('String interpolation is not supported');
