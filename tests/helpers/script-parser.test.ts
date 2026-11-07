@@ -228,10 +228,8 @@ describe('parseGeneratorScript - FreeMarker expansion (corpus/scripts)', () => {
       ['a,b', 'c']
     );
     expect(
-      argsOf(
-        '<#list ["a\\\\b", "\\x61", "a\\=b"] as s>\ngen ${s} > $\n</#list>'
-      )
-    ).toEqual(['a\\b', 'a', 'a=b']);
+      argsOf('<#list ["a\\\\b", "\\x61"] as s>\ngen ${s} > $\n</#list>')
+    ).toEqual(['a\\b', 'a']);
     expect(argsOf('<#list ["a\\tb"] as s>\ngen "${s}" > $\n</#list>')).toEqual([
       'a\tb',
     ]);
@@ -616,6 +614,12 @@ describe('parseGeneratorScript - FreeMarker edge cases (review of !83)', () => {
         '<#list ["\\q"] as s>\ngen ${s} > $\n</#list>'
       )
     ).toThrow(/Invalid string escape "\\q"/);
+    // Only FreeMarker 2.3.28+ accepts `\=`, and Polygon's version is unknown.
+    expect(() =>
+      parser.parseGeneratorScript(
+        '<#list ["a\\=b"] as s>\ngen ${s} > $\n</#list>'
+      )
+    ).toThrow(/Invalid string escape "\\="/);
     expect(() =>
       parser.parseGeneratorScript(
         '<#list ["a${b}"] as s>\ngen ${s} > $\n</#list>'
@@ -653,6 +657,71 @@ describe('parseGeneratorScript - FreeMarker edge cases (review of !83)', () => {
     expect(() => parser.parseGeneratorScript('gen ${ {1} } > $')).toThrow(
       'Unsupported expression ${{1} on line 1'
     );
+  });
+});
+
+describe('parseGeneratorScript - string values are output, not script', () => {
+  const argsOf = (script: string) =>
+    parser.parseGeneratorScript(script).map(l => l.args.join(' '));
+
+  it('keeps comment markers inside a string literal', () => {
+    expect(
+      argsOf('<#list ["<#--", "-->"] as s>\ngen "x${s}y" > $\n</#list>')
+    ).toEqual(['x<#--y', 'x-->y']);
+  });
+
+  it('does not read a comment from a string value as @group', () => {
+    for (const item of ['"<#-- @group g -->"', '"\\l#-- @group g --\\g"']) {
+      const out = parser.parseGeneratorScript(
+        `<#list [${item}] as s>\ngen "\${s}" > $\n</#list>\ngen 2 > $`
+      );
+      expect(out.map(l => l.args)).toEqual([['<#-- @group g -->'], ['2']]);
+      expect(out.map(l => l.group)).toEqual([undefined, undefined]);
+    }
+  });
+
+  it('drops a multi-line comment without splitting the command', () => {
+    const out = parser.parseGeneratorScript(
+      'gen 1 <#-- a\nb --> > 1\ngen 2 > 2'
+    );
+    expect(out.map(l => [l.args, l.lineNumber])).toEqual([
+      [['1'], 1],
+      [['2'], 3],
+    ]);
+  });
+
+  it('numbers every expanded line by its source line', () => {
+    const out = parser.parseGeneratorScript(
+      '<#list 1..2 as i>\ngen ${i} > $\n</#list>\ngen 5 > 1'
+    );
+    expect(out.map(l => l.lineNumber)).toEqual([2, 2, 4]);
+  });
+
+  it('keeps source line numbers when a string value holds a newline', () => {
+    const out = parser.parseGeneratorScript(
+      '<#list ["1 > 1\\ngen 2"] as s>\ngen ${s} > 2\n</#list>\ngen 3 > 3'
+    );
+    expect(out.map(l => [l.raw, l.lineNumber])).toEqual([
+      ['gen 1 > 1', 2],
+      ['gen 2 > 2', 2],
+      ['gen 3 > 3', 4],
+    ]);
+    expect(() =>
+      parser.parseGeneratorScript(
+        '<#list ["a\\nb"] as s>\ngen ${s} > $\n</#list>\ngen 5 > 1'
+      )
+    ).toThrow("Missing '> target' on line 2: gen a");
+  });
+
+  it('takes a raw string literal as written', () => {
+    expect(
+      argsOf(
+        '<#list [r"C:\\", r"a\\nb", r"${x}"] as s>\ngen "${s}" > $\n</#list>'
+      )
+    ).toEqual(['C:\\', 'a\\nb', '${x}']);
+    expect(
+      argsOf('<#assign r = 3>\n<#list [r, r+1] as n>\ngen ${n} > $\n</#list>')
+    ).toEqual(['3', '4']);
   });
 });
 
