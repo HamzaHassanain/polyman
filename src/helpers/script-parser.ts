@@ -12,8 +12,9 @@
  *                   itself writes those files (no stdout redirect)
  *
  * Supported FreeMarker constructs:
- *   - `<#-- comment -->`         — ignored, may include `@group <name>` to
- *                                  start a new group block
+ *   - `<#-- comment -->`         — ignored, also inside a tag or `${...}`.
+ *                                  May include `@group <name>` to start a
+ *                                  new group block
  *   - `<#list a..b as i> ... </#list>`
  *                                — expanded over the inclusive range (counting
  *                                  down when a > b)
@@ -284,7 +285,7 @@ type FmListNode = Extract<FmPiece, { kind: 'list' }>;
 class FmExprError extends Error {}
 
 const FM_TOKEN_RE =
-  /(<#--[\s\S]*?-->)|<(\/?)([#@])([A-Za-z_][\w.]*)|\$\{([^}]*)\}|(#\{)|(\[\/?[#@][\w.]*)/g;
+  /(<#--[\s\S]*?-->)|<(\/?)([#@])([A-Za-z_][\w.]*)|(\$\{)|(#\{)|(\[\/?[#@][\w.]*)/g;
 
 /**
  * Skips a FreeMarker string literal that starts at `start`: `"..."` or
@@ -307,20 +308,37 @@ function skipStringLiteral(source: string, start: number): number | null {
 }
 
 /**
- * Index of the `>` that closes a FreeMarker tag whose name ends at `from`.
- * A string literal may contain `>`. Returns -1 when the tag never closes.
+ * Reads the inside of a FreeMarker tag (`closer` is `>`) or interpolation
+ * (`}`) from `from`. A string literal may contain the closer, and a
+ * `<#-- -->` comment may sit anywhere outside one, as FreeMarker allows; the
+ * comment reads as a space. Returns the inside without comments and the
+ * index of the closer, or null when it never closes.
  */
-function scanTagClose(script: string, from: number): number {
-  for (let i = from; i < script.length; i++) {
+function readUntilClose(
+  script: string,
+  from: number,
+  closer: '>' | '}'
+): { inside: string; close: number } | null {
+  let inside = '';
+  let kept = from;
+  let i = from;
+  while (i < script.length) {
     const end = skipStringLiteral(script, i);
     if (end !== null) {
-      if (end < 0) return -1;
-      i = end - 1;
-      continue;
+      if (end < 0) return null;
+      i = end;
+    } else if (script.startsWith('<#--', i)) {
+      const commentEnd = script.indexOf('-->', i + '<#--'.length);
+      if (commentEnd < 0) return null;
+      inside += script.slice(kept, i) + ' ';
+      i = kept = commentEnd + '-->'.length;
+    } else if (script[i] === closer) {
+      return { inside: inside + script.slice(kept, i), close: i };
+    } else {
+      i++;
     }
-    if (script[i] === '>') return i;
   }
-  return -1;
+  return null;
 }
 
 /**
@@ -363,10 +381,6 @@ function parseFreeMarker(script: string): FmPiece[] {
   let last = 0;
   const addText = (to: number): void => {
     const text = script.slice(last, to);
-    const at = text.indexOf('${');
-    if (at >= 0) {
-      throw new Error(`Unterminated "\${" on line ${lineAt(last + at)}`);
-    }
     if (text.length > 0) {
       target().push({ kind: 'text', value: text, line: lineAt(last) });
     }
@@ -397,8 +411,12 @@ function parseFreeMarker(script: string): FmPiece[] {
     }
 
     if (found[5] !== undefined) {
-      last = offset + found[0].length;
-      target().push({ kind: 'expr', source: found[5], line });
+      const expr = readUntilClose(script, tokenRe.lastIndex, '}');
+      if (expr === null) {
+        throw new Error(`Unterminated "\${" on line ${line}`);
+      }
+      tokenRe.lastIndex = last = expr.close + 1;
+      target().push({ kind: 'expr', source: expr.inside, line });
       continue;
     }
 
@@ -419,13 +437,12 @@ function parseFreeMarker(script: string): FmPiece[] {
     const name = found[4];
     const shown = `<${found[2]}${sigil}${name}>`;
 
-    const close = scanTagClose(script, tokenRe.lastIndex);
-    if (close < 0) {
+    const tag = readUntilClose(script, tokenRe.lastIndex, '>');
+    if (tag === null) {
       throw new Error(`Unclosed FreeMarker tag ${shown} on line ${line}`);
     }
-    const args = script.slice(tokenRe.lastIndex, close);
-    tokenRe.lastIndex = close + 1;
-    last = close + 1;
+    const args = tag.inside;
+    tokenRe.lastIndex = last = tag.close + 1;
 
     if (sigil === '#' && name === 'list') {
       if (closing) {
@@ -721,10 +738,10 @@ function rethrowExpr(e: unknown, shown: string, line: number): never {
 /** One line of the expanded script. */
 interface ExpandedLine {
   text: string;
-  /** Source line of the line's first piece. */
+  /** Source line of the first non-blank text, else of the first piece. */
   line: number;
-  /** Bodies of the `@` comments on this line, in order. */
-  directives: string[];
+  /** The `@` comments on this line, with the length `text` had at each. */
+  directives: { body: string; at: number }[];
 }
 
 /**
@@ -776,7 +793,12 @@ function expandFreeMarker(script: string): ExpandedLine[] {
         current = null;
         if (fromSource) line++;
       }
-      if (parts[k].length > 0) lineFor(line).text += parts[k];
+      if (parts[k].length === 0) continue;
+      const target = lineFor(line);
+      if (target.text.trim() === '' && parts[k].trim() !== '') {
+        target.line = line;
+      }
+      target.text += parts[k];
     }
   };
 
@@ -786,7 +808,8 @@ function expandFreeMarker(script: string): ExpandedLine[] {
       if (node.kind === 'text') {
         write(node.value, node.line, true);
       } else if (node.kind === 'directive') {
-        lineFor(node.line).directives.push(node.body);
+        const target = lineFor(node.line);
+        target.directives.push({ body: node.body, at: target.text.length });
       } else if (node.kind === 'expr') {
         const shown = '${' + node.source.trim() + '}';
         let value: FmValue;
@@ -881,18 +904,23 @@ export function parseGeneratorScript(script: string): ParsedScriptLine[] {
     const lineNumber = expanded.line;
     const raw = expanded.text;
 
-    // A line that starts a group holds nothing else. Other `@` directives
-    // are reserved for future use and ignored.
-    const groupMatch =
-      expanded.directives.length > 0
-        ? GROUP_DIRECTIVE_RE.exec(expanded.directives[0])
-        : null;
-    if (groupMatch) {
-      activeGroup = groupMatch[1];
-      continue;
+    const code = raw.trim();
+
+    // An `@group` before the command applies to it; one after the command
+    // applies from the next line. Other `@` directives are reserved for
+    // future use and ignored.
+    const codeStart = raw.length - raw.trimStart().length;
+    let nextGroup: string | undefined;
+    for (const directive of expanded.directives) {
+      const groupMatch = GROUP_DIRECTIVE_RE.exec(directive.body);
+      if (!groupMatch) continue;
+      if (code.length === 0 || directive.at <= codeStart) {
+        activeGroup = groupMatch[1];
+      } else {
+        nextGroup = groupMatch[1];
+      }
     }
 
-    const code = raw.trim();
     if (code.length === 0) continue;
 
     const arrows = unquotedArrows(code);
@@ -948,6 +976,7 @@ export function parseGeneratorScript(script: string): ParsedScriptLine[] {
       raw: raw.trim(),
       lineNumber,
     });
+    if (nextGroup !== undefined) activeGroup = nextGroup;
   }
 
   return out;

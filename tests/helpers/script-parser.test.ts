@@ -725,6 +725,56 @@ describe('parseGeneratorScript - string values are output, not script', () => {
   });
 });
 
+describe('parseGeneratorScript - comments inside tags and next to commands', () => {
+  const linesOf = (script: string) =>
+    parser
+      .parseGeneratorScript(script)
+      .map(l => [l.raw, l.group ?? null, l.lineNumber]);
+
+  it('allows a comment inside a tag or ${}, as FreeMarker does', () => {
+    expect(linesOf('<#assign n = 7 <#-- size -->>\ngen ${n} > $')).toEqual([
+      ['gen 7 > $', null, 2],
+    ]);
+    expect(linesOf('gen ${1 <#-- size } --> + 2} > $')).toEqual([
+      ['gen 3 > $', null, 1],
+    ]);
+    expect(
+      linesOf('<#list 1..2 <#-- > --> as i>\ngen ${i} > $\n</#list>')
+    ).toEqual([
+      ['gen 1 > $', null, 2],
+      ['gen 2 > $', null, 2],
+    ]);
+  });
+
+  it('still reports an unclosed comment inside a tag or ${}', () => {
+    expect(() =>
+      parser.parseGeneratorScript('<#assign n = 7 <#-- size >\ngen 1 > $')
+    ).toThrow('Unclosed FreeMarker tag <#assign> on line 1');
+    expect(() =>
+      parser.parseGeneratorScript('gen ${1 <#-- } > $\ngen 2 > $')
+    ).toThrow('Unterminated "${" on line 1');
+  });
+
+  it('keeps a command that follows a multi-line @group on its last line', () => {
+    expect(linesOf('<#-- @group small\n-->gen 1 > $\ngen 2 > $')).toEqual([
+      ['gen 1 > $', 'small', 2],
+      ['gen 2 > $', 'small', 3],
+    ]);
+  });
+
+  it('keeps a command on the same line as an @group', () => {
+    expect(linesOf('<#-- @group a --> gen 1 > 1\ngen 2 > 2')).toEqual([
+      ['gen 1 > 1', 'a', 1],
+      ['gen 2 > 2', 'a', 2],
+    ]);
+    // A group after the command starts with the next line.
+    expect(linesOf('gen 1 > 1 <#-- @group a -->\ngen 2 > 2')).toEqual([
+      ['gen 1 > 1', null, 1],
+      ['gen 2 > 2', 'a', 2],
+    ]);
+  });
+});
+
 describe('parseGeneratorScript - one command per line (Polygon)', () => {
   const body = 'gen-equal ${i} 5 > $';
 
