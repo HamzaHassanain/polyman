@@ -26,11 +26,16 @@ import { PlanView, TaskDetails } from './components/PlanView.js';
 import { StatusLine } from './components/StatusLine.js';
 import { Transcript } from './components/Transcript.js';
 import { fg } from './theme.js';
-import { liveBudget, sizeOf, visualLines } from './layout.js';
+import {
+  liveBudget,
+  sizeOf,
+  visualLines,
+  type TerminalStream,
+} from './layout.js';
 
 /** The terminal size, updated when the window is resized. */
 function useTerminalSize(): { columns: number; rows: number } {
-  const { stdout } = useStdout();
+  const stdout: TerminalStream = useStdout().stdout;
   const [size, setSize] = useState(() => sizeOf(stdout));
   useEffect(() => {
     const onResize = () => setSize(sizeOf(stdout));
@@ -80,7 +85,7 @@ export const RESIZE_SETTLE_MS = 150;
  * again (the caller remounts `<Static>` with this number as its key).
  */
 function useRedrawOnResize(columns: number): number {
-  const { stdout } = useStdout();
+  const stdout: TerminalStream = useStdout().stdout;
   const [generation, setGeneration] = useState(0);
   const first = useRef(true);
   useEffect(() => {

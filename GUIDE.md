@@ -140,7 +140,7 @@ Polyman is a command-line tool designed for competitive programming problem sett
 
 ### Prerequisites
 
-- **Node.js** ^20.19.0 or ≥ 22.12.0
+- **Node.js** ≥ 22.12.0
 - **C++ Compiler** (g++ with C++23 support by default; set `cppStandard` in `Config.json` to target an older standard, or use another compiler with `POLYMAN_CXX` or `compiler.cpp`, see [Local Compiler Overrides](#local-compiler-overrides))
 - **Java JDK** (optional, for Java solutions)
 - **Python** (optional, for Python solutions)
