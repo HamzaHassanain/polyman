@@ -41,7 +41,7 @@ jobs:
     name: Corpus (g++, Java 17, Python)
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    container: node:20
+    container: node:22
     steps:
       - uses: actions/checkout@v7
       - run: npm ci --no-audit --no-fund
@@ -57,7 +57,7 @@ jobs:
           retention-days: 30
 
   # Environments polyman's users have. Each lane pins one fact about them.
-  # node-20.19 is blocking; no-python-alias is reported, not yet blocking.
+  # node-22.12 is blocking; no-python-alias is reported, not yet blocking.
   toolchain:
     name: Corpus toolchain (${{ matrix.lane }})
     runs-on: ubuntu-latest
@@ -68,9 +68,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # The oldest Node polyman supports (^20.19.0 || >=22.12.0).
-          - lane: node-20.19
-            image: node:20.19
+          # The oldest Node polyman supports (>=22.12.0).
+          - lane: node-22.12
+            image: node:22.12
             python-alias: 'yes'
             allow-failure: false
           # Stock Debian/Ubuntu: python3 only, no `python` command.
@@ -103,7 +103,7 @@ jobs:
     name: Corpus PCH
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    container: node:20
+    container: node:22
     steps:
       - uses: actions/checkout@v7
       - run: npm ci --no-audit --no-fund
@@ -128,7 +128,7 @@ jobs:
     name: Corpus truth
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    container: node:20
+    container: node:22
     steps:
       - uses: actions/checkout@v7
       - run: apt-get update -qq && apt-get install -y -qq default-jdk-headless >/dev/null

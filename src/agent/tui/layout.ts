@@ -8,6 +8,13 @@
  * the sum stays under the terminal height.
  */
 
+/**
+ * The stream Ink draws on. Ink types it as a plain writable stream, but a
+ * terminal (and the test stream) also has a size and `isTTY`.
+ */
+export type TerminalStream = NodeJS.WritableStream &
+  Partial<Pick<NodeJS.WriteStream, 'columns' | 'rows' | 'isTTY'>>;
+
 /** Lines we always keep free under the terminal height. */
 export const SAFETY_LINES = 2;
 

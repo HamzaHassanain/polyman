@@ -12,19 +12,12 @@ updates:
       npm-minor-and-patch:
         update-types: [minor, patch]
     ignore:
-      # polyman still supports Node 20.19 (package.json engines). These
-      # majors need Node 22.12 or change the API the executor depends on,
-      # so they wait for the release that drops Node 20.
-      - dependency-name: commander
-        update-types: [version-update:semver-major]
+      # execa 6+ is ESM-only and changes the API the executor depends on,
+      # so it is a planned change, not a weekly bump.
       - dependency-name: execa
         update-types: [version-update:semver-major]
-      - dependency-name: chalk
-        update-types: [version-update:semver-major]
-      - dependency-name: vitest
-        update-types: [version-update:semver-major]
-      - dependency-name: '@vitest/*'
-        update-types: [version-update:semver-major]
+      # The Node types follow the oldest Node line polyman supports, they
+      # move by hand when engines moves.
       - dependency-name: '@types/node'
         update-types: [version-update:semver-major]
   - package-ecosystem: github-actions

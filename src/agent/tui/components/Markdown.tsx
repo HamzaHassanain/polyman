@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { Box, Text, useStdout } from 'ink';
 import { lexer, type Token, type Tokens } from 'marked';
 import { fg, gradient } from '../theme.js';
+import type { TerminalStream } from '../layout.js';
 
 /** Draws inline tokens (bold, code, links, ...) as nested `<Text>`. */
 function inline(tokens: Token[] | undefined, keyBase: string): ReactNode[] {
@@ -192,7 +193,7 @@ export function Markdown({
   /** Columns for the code boxes. The terminal width minus the bullet. */
   width?: number;
 }) {
-  const { stdout } = useStdout();
+  const stdout: TerminalStream = useStdout().stdout;
   const columns = width ?? Math.max(10, (stdout.columns || 80) - 2);
   // Ink counts a tab as one column but the terminal moves to the next tab
   // stop, so lines get longer than Ink thinks and the redraw breaks.

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- polyman needs Node.js 22.12 or newer. Node 20 is end of life since April 2026, and Ink 8 (the chat UI) and chalk 6 need Node 22. The chat moves to Ink 8, with the same keys and look (GitHub PR 148).
 - Generator scripts expand `<#list ["a", "b"] as s>` over FreeMarker string literals (`"..."`, `'...'` or raw `r"..."`). A string value is output only: a `<#--` or `@group` inside it is not read as a comment.
 - Generator script errors and `lineNumber` name the source line, also for lines expanded from a `<#list>`. A multi-line `<#-- ... -->` inside a command no longer splits the command in two.
 - A generator command on the same line as a `<#-- @group g -->` comment is kept. Before, the command was dropped without an error. A group comment before the command applies to it; one after it applies from the next line.

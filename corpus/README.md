@@ -167,7 +167,7 @@ judge a pull request's survivors, run the workflow by hand on its branch. The su
 
 | Workflow                          | Jobs                                                                                       |
 | --------------------------------- | ------------------------------------------------------------------------------------------ |
-| `corpus.yml` (push, pull request) | `corpus`, `toolchain` (node-20.19, no-python-alias), `pch`, `truth`                        |
+| `corpus.yml` (push, pull request) | `corpus`, `toolchain` (node-22.12, no-python-alias), `pch`, `truth`                        |
 | `ci.yml`                          | `macos`: the corpus with Homebrew GNU g++, on the default branch and by hand               |
 | `mutation.yml`                    | `mutation`, `survivors` (8 shards), `survivors-report`                                     |
 | `release.yml` (`v*` tags)         | `publish` to npm `next`, `next-check` (no regression against `latest`), `promote`, Release |

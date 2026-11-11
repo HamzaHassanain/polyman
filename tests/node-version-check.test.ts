@@ -4,13 +4,13 @@ import { isSupportedNodeVersion } from '../src/node-version-check';
 describe('isSupportedNodeVersion', () => {
   it.each([
     ['20.18.0', false],
-    ['20.19.0', true],
+    ['20.19.0', false],
     ['21.7.0', false],
     ['22.11.0', false],
     ['22.12.0', true],
     ['24.0.0', true],
     ['18.20.4', false],
-    ['20.20.1', true],
+    ['20.20.1', false],
     ['22.23.3', true],
     ['v22.12.0', true],
     ['v20.18.1', false],
@@ -49,6 +49,12 @@ describe('on load', () => {
     const { exitCalls, printed } = await loadWithNode('18.20.4');
     expect(exitCalls).toEqual([3]);
     expect(printed).toContain('found 18.20.4');
+  });
+
+  it('exits on Node.js 20, which Ink 8 does not support', async () => {
+    const { exitCalls, printed } = await loadWithNode('20.19.0');
+    expect(exitCalls).toEqual([3]);
+    expect(printed).toContain('>=22.12.0');
   });
 
   it('does not exit on a supported Node.js', async () => {
