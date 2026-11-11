@@ -689,6 +689,7 @@ Where `target` is one of:
 - `<#-- comment -->` is stripped.
 - `<#-- @group <name> -->` headers tag every following script line with that group.
 - `<#list a..b as i> ... ${i} ... </#list>` expands into one line per integer in the inclusive range.
+- `<#list ["a", "b"] as s> ... ${s} ... </#list>` expands into one line per string in the list.
 
 **Example (the canonical Polygon shape from the docs):**
 

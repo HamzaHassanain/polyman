@@ -12,18 +12,23 @@
  *                   itself writes those files (no stdout redirect)
  *
  * Supported FreeMarker constructs:
- *   - `<#-- comment -->`         — ignored, may include `@group <name>` to
- *                                  start a new group block
+ *   - `<#-- comment -->`         — ignored, also inside a tag or `${...}`.
+ *                                  May include `@group <name>` to start a
+ *                                  new group block
  *   - `<#list a..b as i> ... </#list>`
  *                                — expanded over the inclusive range (counting
  *                                  down when a > b)
  *   - `<#list [5, 50, 500] as n> ... </#list>`
  *                                — expanded over a sequence of integers
+ *   - `<#list ["a", r"b\c"] as s> ... </#list>`
+ *                                — expanded over a sequence of string
+ *                                  literals, raw (`r"..."`) ones included
  *   - `<#assign n = 7>`          — defines an integer variable
  *   - `${expr}`                  — integer expression over loop and assigned
  *                                  variables: `+ - * %`, parentheses, unary
- *                                  minus. Anything else is rejected, never
- *                                  passed through literally.
+ *                                  minus. A bare `${name}` also prints a
+ *                                  string loop variable. Anything else is
+ *                                  rejected, never passed through literally.
  *
  * Any other FreeMarker directive (`<#if>`, `<#macro>`, `<@x>`, ...), the
  * `#{...}` numeric interpolation and the square-bracket tag syntax (`[#list]`,
@@ -262,7 +267,8 @@ function parseTarget(target: string, lineNumber: number): ScriptOutput {
 }
 
 type FmPiece =
-  | { kind: 'text'; value: string }
+  | { kind: 'text'; value: string; line: number }
+  | { kind: 'directive'; body: string; line: number }
   | { kind: 'expr'; source: string; line: number }
   | { kind: 'assign'; name: string; source: string; line: number }
   | {
@@ -279,7 +285,61 @@ type FmListNode = Extract<FmPiece, { kind: 'list' }>;
 class FmExprError extends Error {}
 
 const FM_TOKEN_RE =
-  /(<#--[\s\S]*?-->)|<(\/?)([#@])([A-Za-z_][\w.]*)([^>]*)>|\$\{([^}]*)\}|(#\{)|(\[\/?[#@][\w.]*)/g;
+  /(<#--[\s\S]*?-->)|<(\/?)([#@])([A-Za-z_][\w.]*)|(\$\{)|(#\{)|(\[\/?[#@][\w.]*)/g;
+
+/**
+ * Skips a FreeMarker string literal that starts at `start`: `"..."` or
+ * `'...'`, where a backslash escapes the next character, or a raw `r"..."`,
+ * where it does not. Returns the index just past the closing quote, `null`
+ * when no literal starts at `start`, or -1 when the literal never closes.
+ */
+function skipStringLiteral(source: string, start: number): number | null {
+  let i = start;
+  if (source[i] === 'r' && !(start > 0 && /\w/.test(source[start - 1]))) i++;
+  const quote = source[i];
+  if (quote !== '"' && quote !== "'") return null;
+  const raw = i > start;
+  for (i++; i < source.length; i++) {
+    const c = source[i];
+    if (c === '\\' && !raw) i++;
+    else if (c === quote) return i + 1;
+  }
+  return -1;
+}
+
+/**
+ * Reads the inside of a FreeMarker tag (`closer` is `>`) or interpolation
+ * (`}`) from `from`. A string literal may contain the closer, and a
+ * `<#-- -->` comment may sit anywhere outside one, as FreeMarker allows; the
+ * comment reads as a space. Returns the inside without comments and the
+ * index of the closer, or null when it never closes.
+ */
+function readUntilClose(
+  script: string,
+  from: number,
+  closer: '>' | '}'
+): { inside: string; close: number } | null {
+  let inside = '';
+  let kept = from;
+  let i = from;
+  while (i < script.length) {
+    const end = skipStringLiteral(script, i);
+    if (end !== null) {
+      if (end < 0) return null;
+      i = end;
+    } else if (script.startsWith('<#--', i)) {
+      const commentEnd = script.indexOf('-->', i + '<#--'.length);
+      if (commentEnd < 0) return null;
+      inside += script.slice(kept, i) + ' ';
+      i = kept = commentEnd + '-->'.length;
+    } else if (script[i] === closer) {
+      return { inside: inside + script.slice(kept, i), close: i };
+    } else {
+      i++;
+    }
+  }
+  return null;
+}
 
 /**
  * Builds a lookup from a character offset to its 1-based line number. The
@@ -305,7 +365,8 @@ function makeLineLookup(text: string): (offset: number) => number {
 }
 
 /**
- * Splits a script into text, `${expr}`, `<#assign>` and `<#list>` nodes.
+ * Splits a script into text, `@` comment, `${expr}`, `<#assign>` and
+ * `<#list>` nodes. Other comments are dropped, as FreeMarker drops them.
  * Throws for any other FreeMarker construct, naming it.
  */
 function parseFreeMarker(script: string): FmPiece[] {
@@ -315,68 +376,75 @@ function parseFreeMarker(script: string): FmPiece[] {
   const target = (): FmPiece[] =>
     open.length > 0 ? open[open.length - 1].body : root;
 
-  let pending = '';
-  const flush = (): void => {
-    if (pending.length === 0) return;
-    target().push({ kind: 'text', value: pending });
-    pending = '';
-  };
-  const addText = (text: string, from: number): void => {
-    const at = text.indexOf('${');
-    if (at >= 0) {
-      throw new Error(`Unterminated "\${" on line ${lineAt(from + at)}`);
+  // A fresh regex per call, so the scan position is never shared.
+  const tokenRe = new RegExp(FM_TOKEN_RE.source, 'g');
+  let last = 0;
+  const addText = (to: number): void => {
+    const text = script.slice(last, to);
+    if (text.length > 0) {
+      target().push({ kind: 'text', value: text, line: lineAt(last) });
     }
-    pending += text;
   };
 
-  let last = 0;
-  for (const m of script.matchAll(FM_TOKEN_RE)) {
-    const offset = m.index;
-    addText(script.slice(last, offset), last);
-    last = offset + m[0].length;
+  let found: RegExpExecArray | null;
+  while ((found = tokenRe.exec(script)) !== null) {
+    const offset = found.index;
+    addText(offset);
     const line = lineAt(offset);
 
-    if (m[1] !== undefined) {
-      // Comments that survived preprocess (`@group ...`) stay as text, but
-      // FreeMarker would evaluate a `${...}` inside them, so refuse those.
-      const interp = m[1].indexOf('${');
+    if (found[1] !== undefined) {
+      last = offset + found[0].length;
+      const body = found[1].slice('<#--'.length, -'-->'.length).trim();
+      if (!body.startsWith('@')) continue;
+      // An `@group` comment is read after expansion, where a `${...}` in it
+      // would not have been evaluated, so refuse it.
+      const interp = found[1].indexOf('${');
       if (interp >= 0) {
-        const expr = /^\$\{[^}]*\}?/.exec(m[1].slice(interp))![0];
+        const expr = /^\$\{[^}]*\}?/.exec(found[1].slice(interp))![0];
         throw new Error(
           `Unsupported expression ${expr} in @group on line ` +
             `${lineAt(offset + interp)}`
         );
       }
-      pending += m[1];
+      target().push({ kind: 'directive', body, line });
       continue;
     }
 
-    if (m[6] !== undefined) {
-      flush();
-      target().push({ kind: 'expr', source: m[6], line });
+    if (found[5] !== undefined) {
+      const expr = readUntilClose(script, tokenRe.lastIndex, '}');
+      if (expr === null) {
+        throw new Error(`Unterminated "\${" on line ${line}`);
+      }
+      tokenRe.lastIndex = last = expr.close + 1;
+      target().push({ kind: 'expr', source: expr.inside, line });
       continue;
     }
 
-    if (m[7] !== undefined) {
+    if (found[6] !== undefined) {
       throw new Error(
         `Unsupported FreeMarker construct #{...} on line ${line}`
       );
     }
-    if (m[8] !== undefined) {
+    if (found[7] !== undefined) {
       throw new Error(
-        `Unsupported FreeMarker construct ${m[8]} (square-bracket syntax) ` +
+        `Unsupported FreeMarker construct ${found[7]} (square-bracket syntax) ` +
           `on line ${line}`
       );
     }
 
-    const closing = m[2] === '/';
-    const sigil = m[3];
-    const name = m[4];
-    const args = m[5];
-    const shown = `<${m[2]}${sigil}${name}>`;
+    const closing = found[2] === '/';
+    const sigil = found[3];
+    const name = found[4];
+    const shown = `<${found[2]}${sigil}${name}>`;
+
+    const tag = readUntilClose(script, tokenRe.lastIndex, '>');
+    if (tag === null) {
+      throw new Error(`Unclosed FreeMarker tag ${shown} on line ${line}`);
+    }
+    const args = tag.inside;
+    tokenRe.lastIndex = last = tag.close + 1;
 
     if (sigil === '#' && name === 'list') {
-      flush();
       if (closing) {
         if (open.length === 0) {
           throw new Error(`Unexpected </#list> on line ${line}`);
@@ -404,7 +472,6 @@ function parseFreeMarker(script: string): FmPiece[] {
     }
 
     if (sigil === '#' && name === 'assign' && !closing) {
-      flush();
       const assign = /^\s+([A-Za-z_]\w*)\s*=\s*([\s\S]+?)\s*$/.exec(args);
       if (!assign) {
         throw new Error(
@@ -425,8 +492,7 @@ function parseFreeMarker(script: string): FmPiece[] {
       `Unsupported FreeMarker directive ${shown} on line ${line}`
     );
   }
-  addText(script.slice(last), last);
-  flush();
+  addText(script.length);
 
   if (open.length > 0) {
     throw new Error(`Unclosed <#list> on line ${open[open.length - 1].line}`);
@@ -434,15 +500,156 @@ function parseFreeMarker(script: string): FmPiece[] {
   return root;
 }
 
+/** A loop variable is an integer, or a string from a quoted sequence item. */
+type FmValue = number | string;
+
+/**
+ * FreeMarker string-literal escapes. `\x` is handled separately: it takes
+ * one to four hex digits. Any other backslash is an error, as in FreeMarker.
+ * `\=` is left out: only FreeMarker 2.3.28+ accepts it, and Polygon's
+ * version is unknown.
+ * https://freemarker.apache.org/docs/dgui_template_exp.html#dgui_template_exp_stringliteral
+ */
+const STRING_ESCAPES: Record<string, string> = {
+  '"': '"',
+  "'": "'",
+  '{': '{',
+  '\\': '\\',
+  n: '\n',
+  r: '\r',
+  t: '\t',
+  b: '\b',
+  f: '\f',
+  l: '<',
+  g: '>',
+  a: '&',
+};
+
+/**
+ * Parses a FreeMarker string literal that occupies all of `source`.
+ * `source` is already trimmed. A raw string (`r"..."`) is taken as written.
+ * Interpolation (`${...}`, `#{...}`) and trailing junk are rejected: this
+ * parser does not evaluate them.
+ */
+function parseStringLiteral(source: string): string {
+  const end = skipStringLiteral(source, 0);
+  if (end === null) throw new FmExprError('unsupported');
+  if (end < 0) throw new FmExprError('Unclosed string');
+  if (source.slice(end).trim() !== '') throw new FmExprError('unsupported');
+
+  if (source[0] === 'r') return source.slice(2, end - 1);
+
+  // skipStringLiteral has checked that no backslash escapes the last quote.
+  const body = source.slice(1, end - 1);
+  let out = '';
+  let i = 0;
+  while (i < body.length) {
+    const c = body[i];
+
+    if (c === '\\') {
+      const esc = body[i + 1];
+      if (esc === 'x') {
+        let j = i + 2;
+        let hex = '';
+        while (
+          hex.length < 4 &&
+          j < body.length &&
+          /[0-9A-Fa-f]/.test(body[j])
+        ) {
+          hex += body[j];
+          j++;
+        }
+        if (hex.length === 0) {
+          throw new FmExprError('Invalid string escape "\\x"');
+        }
+        out += String.fromCharCode(parseInt(hex, 16));
+        i = j;
+        continue;
+      }
+
+      const mapped = STRING_ESCAPES[esc];
+      if (mapped === undefined)
+        throw new FmExprError(`Invalid string escape "\\${esc}"`);
+
+      out += mapped;
+      i += 2;
+      continue;
+    }
+
+    // `$\{` is an escaped `{`, so it does not start an interpolation.
+    if ((c === '$' || c === '#') && body[i + 1] === '{') {
+      throw new FmExprError('String interpolation is not supported');
+    }
+    out += c;
+    i++;
+  }
+  return out;
+}
+
+/** Splits a `[...]` sequence on commas that are outside string literals. */
+function splitSequenceItems(inner: string): string[] {
+  const items: string[] = [];
+  let start = 0;
+  for (let i = 0; i < inner.length; i++) {
+    const end = skipStringLiteral(inner, i);
+    if (end !== null) {
+      // An unclosed literal is reported when the item is parsed.
+      if (end < 0) break;
+      i = end - 1;
+      continue;
+    }
+    if (inner[i] === ',') {
+      items.push(inner.slice(start, i));
+      start = i + 1;
+    }
+  }
+  items.push(inner.slice(start));
+  return items;
+}
+
+/**
+ * A `${...}` or sequence item that is not a string literal: a bare variable
+ * that holds a string gives that string, anything else is an integer
+ * expression.
+ */
+function evalValue(
+  source: string,
+  lookup: (name: string) => FmValue | undefined
+): FmValue {
+  const name = source.trim();
+  if (/^[A-Za-z_]\w*$/.test(name)) {
+    const v = lookup(name);
+    if (typeof v === 'string') return v;
+  }
+  return evalExpression(source, lookup);
+}
+
+/**
+ * One item of a `<#list [...]>` sequence: a string literal, a string
+ * variable, or an integer expression.
+ */
+function evalSequenceItem(
+  item: string,
+  lookup: (name: string) => FmValue | undefined
+): FmValue {
+  const trimmed = item.trim();
+  if (trimmed.length === 0) throw new FmExprError('unsupported');
+  if (skipStringLiteral(trimmed, 0) !== null) {
+    return parseStringLiteral(trimmed);
+  }
+  return evalValue(trimmed, lookup);
+}
+
 /**
  * Evaluates an integer expression: `+ - * %`, parentheses, unary minus,
- * integer literals and variables. Anything else (`/`, strings, built-ins,
- * decimals) is unsupported, because its FreeMarker result can't be matched
- * here with certainty.
+ * integer literals and variables. Anything else (`/`, string literals,
+ * built-ins, decimals) is unsupported, because its FreeMarker result can't
+ * be matched here with certainty. A variable that holds a string is rejected
+ * here too; `${name}` prints it before this function is called.
  */
 function evalExpression(
   source: string,
-  lookup: (name: string) => number | undefined
+  lookup: (name: string) => FmValue | undefined
 ): number {
   const tokens = source.match(/\s*(\d+|[A-Za-z_]\w*|[-+*%()]|\S)/g) ?? [];
   const toks = tokens.map(t => t.trim());
@@ -465,6 +672,9 @@ function evalExpression(
     if (/^[A-Za-z_]\w*$/.test(t)) {
       const v = lookup(t);
       if (v === undefined) throw new FmExprError(`Undefined variable "${t}"`);
+      if (typeof v !== 'number') {
+        throw new FmExprError(`Variable "${t}" is a string`);
+      }
       return v;
     }
     if (t === '(') {
@@ -514,16 +724,38 @@ function evalExpression(
   return value;
 }
 
+/** Adds the script line to an {@link FmExprError}. */
+function rethrowExpr(e: unknown, shown: string, line: number): never {
+  if (!(e instanceof FmExprError)) throw e;
+  if (e.message === 'unsupported') {
+    throw new Error(`Unsupported expression ${shown} on line ${line}`, {
+      cause: e,
+    });
+  }
+  throw new Error(`${e.message} in ${shown} on line ${line}`, { cause: e });
+}
+
+/** One line of the expanded script. */
+interface ExpandedLine {
+  text: string;
+  /** Source line of the first non-blank text, else of the first piece. */
+  line: number;
+  /** The `@` comments on this line, with the length `text` had at each. */
+  directives: { body: string; at: number }[];
+}
+
 /**
  * Expands `<#list>`, `<#assign>` and `${expr}` the way Polygon's FreeMarker
- * does for the integer subset documented at the top of this file. Directive
- * tags expand to nothing, so the newlines around them are kept and line
- * numbers of scripts without lists stay aligned with the source.
+ * does for the subset documented at the top of this file, and splits the
+ * result into lines. Each line keeps the source line it starts on, so every
+ * iteration of a list body points at the body's line in the source. `@`
+ * comments travel beside the text, never inside it, so text that a string
+ * value puts on a line is never read as a comment.
  */
-function expandFreeMarker(script: string): string {
-  const globals = new Map<string, number>();
-  const locals: Map<string, number>[] = [];
-  const lookup = (name: string): number | undefined => {
+function expandFreeMarker(script: string): ExpandedLine[] {
+  const globals = new Map<string, FmValue>();
+  const locals: Map<string, FmValue>[] = [];
+  const lookup = (name: string): FmValue | undefined => {
     for (let i = locals.length - 1; i >= 0; i--) {
       const v = locals[i].get(name);
       if (v !== undefined) return v;
@@ -534,28 +766,59 @@ function expandFreeMarker(script: string): string {
     try {
       return evalExpression(source, lookup);
     } catch (e) {
-      if (!(e instanceof FmExprError)) throw e;
-      if (e.message === 'unsupported') {
-        throw new Error(`Unsupported expression ${shown} on line ${line}`, {
-          cause: e,
-        });
+      return rethrowExpr(e, shown, line);
+    }
+  };
+  const evaluateItem = (item: string, line: number, shown: string): FmValue => {
+    try {
+      return evalSequenceItem(item, lookup);
+    } catch (e) {
+      return rethrowExpr(e, shown, line);
+    }
+  };
+
+  const lines: ExpandedLine[] = [];
+  let current: ExpandedLine | null = null;
+  const lineFor = (line: number): ExpandedLine =>
+    (current ??= { text: '', line, directives: [] });
+  /**
+   * Appends text that starts on source line `line`. A newline in source text
+   * moves to the next source line; one from a string value does not.
+   */
+  const write = (text: string, line: number, fromSource: boolean): void => {
+    const parts = text.split('\n');
+    for (let k = 0; k < parts.length; k++) {
+      if (k > 0) {
+        lines.push(lineFor(line));
+        current = null;
+        if (fromSource) line++;
       }
-      throw new Error(`${e.message} in ${shown} on line ${line}`, {
-        cause: e,
-      });
+      if (parts[k].length === 0) continue;
+      const target = lineFor(line);
+      if (target.text.trim() === '' && parts[k].trim() !== '') {
+        target.line = line;
+      }
+      target.text += parts[k];
     }
   };
 
   let expandedItems = 0;
-  const render = (nodes: FmPiece[]): string => {
-    let out = '';
+  const render = (nodes: FmPiece[]): void => {
     for (const node of nodes) {
       if (node.kind === 'text') {
-        out += node.value;
+        write(node.value, node.line, true);
+      } else if (node.kind === 'directive') {
+        const target = lineFor(node.line);
+        target.directives.push({ body: node.body, at: target.text.length });
       } else if (node.kind === 'expr') {
-        out += String(
-          evaluate(node.source, node.line, '${' + node.source.trim() + '}')
-        );
+        const shown = '${' + node.source.trim() + '}';
+        let value: FmValue;
+        try {
+          value = evalValue(node.source, lookup);
+        } catch (e) {
+          return rethrowExpr(e, shown, node.line);
+        }
+        write(String(value), node.line, false);
       } else if (node.kind === 'assign') {
         globals.set(
           node.name,
@@ -566,15 +829,14 @@ function expandFreeMarker(script: string): string {
           )
         );
       } else {
-        out += renderList(node);
+        renderList(node);
       }
     }
-    return out;
   };
 
-  const renderList = (node: FmListNode): string => {
+  const renderList = (node: FmListNode): void => {
     const shown = `<#list ${node.header} as ${node.name}>`;
-    const values: number[] = [];
+    const values: FmValue[] = [];
     const tooLarge = (): Error =>
       new Error(
         `${shown} on line ${node.line} expands to more than ` +
@@ -583,8 +845,8 @@ function expandFreeMarker(script: string): string {
     const seq = /^\[([\s\S]*)\]$/.exec(node.header.trim());
     if (seq) {
       if (seq[1].trim().length > 0) {
-        for (const item of seq[1].split(',')) {
-          values.push(evaluate(item, node.line, shown));
+        for (const item of splitSequenceItems(seq[1])) {
+          values.push(evaluateItem(item, node.line, shown));
         }
       }
     } else {
@@ -604,68 +866,24 @@ function expandFreeMarker(script: string): string {
       }
     }
 
-    const parts: string[] = [];
     for (const v of values) {
       expandedItems++;
       if (expandedItems > MAX_LIST_ITEMS) throw tooLarge();
       locals.push(new Map([[node.name, v]]));
       try {
-        parts.push(render(node.body));
+        // No separator, like FreeMarker: a one-line body stays on one line.
+        // The newlines of a multi-line body come from the body text itself.
+        render(node.body);
       } finally {
         locals.pop();
       }
     }
-    // No separator, like FreeMarker: a one-line body stays on one line. The
-    // newlines of a multi-line body come from the body text itself.
-    return parts.join('');
   };
 
-  return render(parseFreeMarker(script));
-}
-
-/**
- * Strips multi-line comments and expands the supported FreeMarker constructs
- * (see {@link expandFreeMarker}) before splitting the script into lines.
- *
- * Comments that contain an `@group` (or other `@`-prefixed directive) are
- * collapsed onto a single line so the per-line parser can still detect them.
- * Comments that don't start with `@` are dropped entirely. This way the line
- * numbers stay close to the source while multi-line `<#-- ... -->` blocks
- * don't bleed past the comment boundary.
- */
-function preprocess(script: string): string[] {
-  const directiveStripped = script.replace(
-    /<#--([\s\S]*?)-->/g,
-    (match, body: string) => {
-      const trimmed = body.trim();
-      if (trimmed.startsWith('@')) {
-        // Keep as a single-line directive so the line parser sees it.
-        const newlines = match.split('\n').length - 1;
-        return `<#-- ${trimmed} -->` + '\n'.repeat(newlines);
-      }
-      // Drop the contents but preserve newlines so source line numbers stay
-      // roughly aligned with the original.
-      const newlines = match.split('\n').length - 1;
-      return '\n'.repeat(newlines);
-    }
-  );
-
-  const expanded = expandFreeMarker(directiveStripped);
-
-  return expanded.split(/\r?\n/);
-}
-
-function extractCommentDirective(line: string): string | null {
-  const matches = [...line.matchAll(COMMENT_RE)];
-  for (const m of matches) {
-    const body = m[1].trim();
-    if (body.startsWith('@')) return body;
-  }
-  return null;
-}
-
-function stripComments(line: string): string {
-  return line.replace(COMMENT_RE, ' ').trim();
+  render(parseFreeMarker(script));
+  if (current !== null) lines.push(current);
+  for (const l of lines) l.text = l.text.replace(/\r$/, '');
+  return lines;
 }
 
 /**
@@ -679,25 +897,30 @@ function stripComments(line: string): string {
  */
 export function parseGeneratorScript(script: string): ParsedScriptLine[] {
   const out: ParsedScriptLine[] = [];
-  const lines = preprocess(script);
   let activeGroup: string | undefined;
   let totalTests = 0;
 
-  for (let i = 0; i < lines.length; i++) {
-    const raw = lines[i];
-    const lineNumber = i + 1;
+  for (const expanded of expandFreeMarker(script)) {
+    const lineNumber = expanded.line;
+    const raw = expanded.text;
 
-    const directive = extractCommentDirective(raw);
-    if (directive) {
-      const groupMatch = GROUP_DIRECTIVE_RE.exec(directive);
-      if (groupMatch) {
+    const code = raw.trim();
+
+    // An `@group` before the command applies to it; one after the command
+    // applies from the next line. Other `@` directives are reserved for
+    // future use and ignored.
+    const codeStart = raw.length - raw.trimStart().length;
+    let nextGroup: string | undefined;
+    for (const directive of expanded.directives) {
+      const groupMatch = GROUP_DIRECTIVE_RE.exec(directive.body);
+      if (!groupMatch) continue;
+      if (code.length === 0 || directive.at <= codeStart) {
         activeGroup = groupMatch[1];
-        continue;
+      } else {
+        nextGroup = groupMatch[1];
       }
-      // Other @ directives reserved for future use; ignore silently.
     }
 
-    const code = stripComments(raw);
     if (code.length === 0) continue;
 
     const arrows = unquotedArrows(code);
@@ -753,6 +976,7 @@ export function parseGeneratorScript(script: string): ParsedScriptLine[] {
       raw: raw.trim(),
       lineNumber,
     });
+    if (nextGroup !== undefined) activeGroup = nextGroup;
   }
 
   return out;
