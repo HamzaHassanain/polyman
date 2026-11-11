@@ -11,6 +11,7 @@
  * - Generated test contents. They are a product of the script and the
  *   generator binaries, so the script is compared instead.
  * - Compiler choices (`sourceType`), limits, tags and the problem title.
+ * - Test groups, points and other per-test settings of a testset.
  * - Testsets that exist only on Polygon. Polygon has no endpoint that lists
  *   the testsets of a problem, so those cannot be detected here; each such
  *   gap is reported as a warning.
@@ -24,6 +25,7 @@ import {
   Statement,
 } from '../../types';
 import type { PolygonSDK } from '../../polygon';
+import { PolymanError } from '../../errors';
 import {
   readGeneratorPayload,
   readManualTestPayload,
@@ -55,6 +57,19 @@ export interface ProblemDiff {
 function sameContent(local: string, remote: string): boolean {
   const toLf = (text: string): string => text.replace(/\r\n/g, '\n');
   return toLf(local) === toLf(remote);
+}
+
+/**
+ * Compares two generator scripts. Polygon drops the empty lines of a script
+ * it saves, so a blank line can never survive a push and is not a change.
+ */
+function sameScript(local: string, remote: string): boolean {
+  const lines = (text: string): string =>
+    text
+      .split(/\r?\n/)
+      .filter(line => line.trim().length > 0)
+      .join('\n');
+  return lines(local) === lines(remote);
 }
 
 /** Picks the status for two texts that are both present. */
@@ -99,6 +114,9 @@ async function diffSolutions(
     return;
   }
   const remoteNames = new Set(remote.map(solution => solution.name));
+  const remoteTags = new Map(
+    remote.map(solution => [solution.name, solution.tag])
+  );
   const localNames = new Set<string>();
 
   for (const solution of config.solutions ?? []) {
@@ -121,10 +139,16 @@ async function diffSolutions(
         () => sdk.viewSolution(problemId, filename)
       );
       if (remoteText === undefined) continue;
+      // A push sends the tag with the source, so a new tag is a change too.
+      const remoteTag = remoteTags.get(filename);
+      const tagChanged =
+        remoteTag !== undefined &&
+        solution.tag !== undefined &&
+        remoteTag !== solution.tag;
       components.push({
         component: 'solution',
         name: filename,
-        status: statusOf(content, remoteText),
+        status: tagChanged ? 'changed' : statusOf(content, remoteText),
       });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -271,20 +295,6 @@ async function diffValidator(
     return;
   }
 
-  if (!hasRemote) {
-    const { filename } = readSourcePayload(
-      problemDir,
-      config.validator.source,
-      'Validator'
-    );
-    components.push({
-      component: 'validator',
-      name: filename,
-      status: 'local-only',
-    });
-    return;
-  }
-
   let payload: { filename: string; content: string };
   try {
     payload = readSourcePayload(
@@ -296,6 +306,15 @@ async function diffValidator(
     warnings.push(
       `validator: ${error instanceof Error ? error.message : String(error)}`
     );
+    return;
+  }
+
+  if (!hasRemote) {
+    components.push({
+      component: 'validator',
+      name: payload.filename,
+      status: 'local-only',
+    });
     return;
   }
 
@@ -414,7 +433,18 @@ async function diffStatements(
 
   for (const payload of localPayloads) {
     const name = `${payload.lang}/${payload.section}`;
-    if (!remote[payload.lang] || emptyOnRemote(payload.lang, payload.section)) {
+    const emptyRemote =
+      !remote[payload.lang] || emptyOnRemote(payload.lang, payload.section);
+    if (
+      remote[payload.lang] &&
+      emptyRemote &&
+      payload.content.trim().length === 0
+    ) {
+      // An empty local file pushes an empty section: nothing changes.
+      components.push({ component: 'statement', name, status: 'same' });
+      continue;
+    }
+    if (emptyRemote) {
       components.push({ component: 'statement', name, status: 'local-only' });
       continue;
     }
@@ -472,12 +502,20 @@ async function diffTestset(
   );
   if (remoteScript !== undefined) {
     // A testset Polygon does not know answers with an empty script, and
-    // `clearTestset` writes a single space, so both count as absent.
+    // `clearTestset` writes a single space, so both count as absent. A
+    // testset with only manual tests has no local script either; a push
+    // then saves an empty script, which replaces the one on Polygon.
     const absentOnRemote = remoteScript.trim().length === 0;
+    const absentLocally = script.trim().length === 0;
+    let status: DiffStatus;
+    if (absentLocally && absentOnRemote) status = 'same';
+    else if (absentLocally) status = 'changed';
+    else if (absentOnRemote) status = 'local-only';
+    else status = sameScript(script, remoteScript) ? 'same' : 'changed';
     components.push({
       component: 'generator-script',
       name: testset.name,
-      status: absentOnRemote ? 'local-only' : statusOf(script, remoteScript),
+      status,
     });
   }
 
@@ -522,6 +560,21 @@ export async function diffProblem(
 ): Promise<ProblemDiff> {
   const components: DiffComponent[] = [];
   const warnings: string[] = [];
+
+  // Read the problem itself first. If Polygon cannot give us that (wrong ID,
+  // no access, network down), every other read would fail too, and an empty
+  // list would look like "nothing to push". That is a Polygon failure.
+  try {
+    await sdk.getProblemInfo(problemId);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new PolymanError(
+      `Could not read problem ${problemId} from Polygon: ${reason}`,
+      4,
+      undefined,
+      { cause: error }
+    );
+  }
 
   await diffSolutions(sdk, problemId, problemDir, config, components, warnings);
   await diffChecker(sdk, problemId, problemDir, config, components, warnings);

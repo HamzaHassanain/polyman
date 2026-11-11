@@ -20,10 +20,12 @@ import os from 'os';
 import path from 'path';
 import { diffProblem } from '../../../src/helpers/remote/diffing';
 import type { PolygonSDK } from '../../../src/polygon';
+import { PolymanError } from '../../../src/errors';
 import type ConfigFile from '../../../src/types';
 import type { DiffComponent } from '../../../src/types';
 
 type SdkMethod =
+  | 'getProblemInfo'
   | 'getSolutions'
   | 'viewSolution'
   | 'getChecker'
@@ -39,6 +41,7 @@ type Handler = unknown;
 
 function buildSdk(handlers: Partial<Record<SdkMethod, Handler>> = {}) {
   const defaults: Record<SdkMethod, Handler> = {
+    getProblemInfo: { timeLimit: 1000, memoryLimit: 256 },
     getSolutions: [],
     viewSolution: '',
     getChecker: '',
@@ -137,6 +140,22 @@ describe('diffing.ts', () => {
       expect(statusOf(components, 'solution', 'main.cpp')).toBe('same');
       expect(statusOf(components, 'solution', 'wa.cpp')).toBe('changed');
       expect(statusOf(components, 'solution', 'jury.cpp')).toBe('remote-only');
+    });
+
+    it('calls a solution with a new tag changed, since push sends the tag too', async () => {
+      const { sdk } = buildSdk({
+        getSolutions: [
+          { name: 'main.cpp', tag: 'MA' },
+          { name: 'wa.cpp', tag: 'TL' },
+        ],
+        viewSolution: (problemId: number, name: string) =>
+          name === 'wa.cpp' ? 'bad\n' : 'int main(){}\n',
+      });
+
+      const { components } = await diffProblem(sdk, 7, dir, config());
+
+      expect(statusOf(components, 'solution', 'main.cpp')).toBe('same');
+      expect(statusOf(components, 'solution', 'wa.cpp')).toBe('changed');
     });
 
     it('marks a solution Polygon has never heard of as local only without fetching it', async () => {
@@ -397,6 +416,31 @@ describe('diffing.ts', () => {
       expect(statusOf(components, 'validator', 'val.cpp')).toBe('local-only');
     });
 
+    it('warns about a missing local validator instead of failing the whole diff', async () => {
+      const solution = write('solutions/main.cpp', 'int main(){}\n');
+      const { sdk } = buildSdk({
+        getValidator: '',
+        getSolutions: [{ name: 'main.cpp', tag: 'MA' }],
+        viewSolution: 'int main(){}\n',
+      });
+
+      const { components, warnings } = await diffProblem(
+        sdk,
+        7,
+        dir,
+        asConfig({
+          solutions: [{ name: 'main', source: solution, tag: 'MA' }],
+          validator: { name: 'val', source: './validator/missing.cpp' },
+        })
+      );
+
+      expect(find(components, 'validator', 'missing.cpp')).toBeUndefined();
+      expect(warnings.join('\n')).toContain(
+        'validator: Validator file not found'
+      );
+      expect(statusOf(components, 'solution', 'main.cpp')).toBe('same');
+    });
+
     it('compares a validator that exists on both sides', async () => {
       const source = write('validator/val.cpp', 'validator\n');
       const { sdk } = buildSdk({
@@ -519,6 +563,32 @@ describe('diffing.ts', () => {
       );
     });
 
+    it('calls an empty section same when Polygon has it empty too', async () => {
+      // A fresh template has empty statement files, and Polygon answers ''
+      // for a section nobody wrote. A push would change nothing there.
+      const legend = write('statements/english/legend.tex', '');
+      const notes = write('statements/english/notes.tex', '');
+      const { sdk } = buildSdk({
+        getStatements: { english: { legend: '', notes: 'Notes\n' } },
+      });
+
+      const { components } = await diffProblem(
+        sdk,
+        7,
+        dir,
+        asConfig({
+          statements: {
+            english: { name: 'P', encoding: 'UTF-8', legend, notes },
+          },
+        })
+      );
+
+      expect(statusOf(components, 'statement', 'english/legend')).toBe('same');
+      expect(statusOf(components, 'statement', 'english/notes')).toBe(
+        'changed'
+      );
+    });
+
     it('skips a section whose file is missing locally, exactly as push does', async () => {
       const legend = write('statements/english/legend.tex', 'Legend\n');
       const { sdk } = buildSdk({
@@ -606,6 +676,22 @@ describe('diffing.ts', () => {
       expect(mocks['getScript']).toHaveBeenCalledWith(7, 'tests');
     });
 
+    it('ignores the empty lines Polygon drops from a saved script', async () => {
+      // Real answer from Polygon after a push: the blank line is gone.
+      const { sdk } = buildSdk({
+        getScript: '<#-- header -->\r\ngen 1 2 > $\r\n',
+      });
+
+      const { components } = await diffProblem(
+        sdk,
+        7,
+        dir,
+        testsetConfig('<#-- header -->\n\ngen-random 1 2 > $\n')
+      );
+
+      expect(statusOf(components, 'generator-script', 'tests')).toBe('same');
+    });
+
     it('calls a changed script changed', async () => {
       const { sdk } = buildSdk({ getScript: 'gen 1 3 > $\n' });
 
@@ -634,6 +720,25 @@ describe('diffing.ts', () => {
       );
     });
 
+    it('calls a testset with only manual tests same when neither side has a script', async () => {
+      const { sdk } = buildSdk({ getScript: ' ', getTestInput: '1 2\n' });
+      const config = testsetConfig('');
+      delete (config.testsets![0] as { generatorScript?: unknown })
+        .generatorScript;
+
+      const { components } = await diffProblem(sdk, 7, dir, config);
+
+      expect(statusOf(components, 'generator-script', 'tests')).toBe('same');
+    });
+
+    it('calls a script that only Polygon has changed, since push empties it', async () => {
+      const { sdk } = buildSdk({ getScript: 'gen 1 2 > $\n' });
+
+      const { components } = await diffProblem(sdk, 7, dir, testsetConfig(''));
+
+      expect(statusOf(components, 'generator-script', 'tests')).toBe('changed');
+    });
+
     it('compares each declared manual test input', async () => {
       const { sdk, mocks } = buildSdk({
         getTestInput: (problemId: number, testset: string, index: number) =>
@@ -649,6 +754,23 @@ describe('diffing.ts', () => {
 
       expect(statusOf(components, 'manual-test', 'tests/1')).toBe('same');
       expect(mocks['getTestInput']).toHaveBeenCalledWith(7, 'tests', 1);
+    });
+
+    it('warns about a manual test Polygon refuses instead of calling it changed', async () => {
+      const { sdk } = buildSdk({
+        getScript: 'gen 1 2 > $\n',
+        getTestInput: new Error('Polygon API Error: test not found'),
+      });
+
+      const { components, warnings } = await diffProblem(
+        sdk,
+        7,
+        dir,
+        testsetConfig('gen-random 1 2 > $\n')
+      );
+
+      expect(find(components, 'manual-test', 'tests/1')).toBeUndefined();
+      expect(warnings.join('\n')).toContain('test not found');
     });
 
     it('warns about a testset whose script cannot be read and moves on', async () => {
@@ -669,6 +791,26 @@ describe('diffing.ts', () => {
         'script of testset tests: could not read it from Polygon (404)'
       );
       expect(statusOf(components, 'manual-test', 'tests/1')).toBe('same');
+    });
+  });
+
+  describe('problem access', () => {
+    it('fails with exit code 4 when the problem cannot be read at all', async () => {
+      const { sdk, mocks } = buildSdk({
+        getProblemInfo: new Error('Polygon API Error: no access'),
+      });
+
+      const error = await diffProblem(sdk, 7, dir, asConfig({})).then(
+        () => undefined,
+        (e: unknown) => e
+      );
+
+      expect(error).toBeInstanceOf(PolymanError);
+      expect((error as PolymanError).exitCode).toBe(4);
+      expect((error as Error).message).toContain(
+        'Could not read problem 7 from Polygon'
+      );
+      expect(mocks['getSolutions']).not.toHaveBeenCalled();
     });
   });
 

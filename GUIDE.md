@@ -2381,7 +2381,7 @@ polyman remote diff ./my-problem
 
 | Component | How |
 |-----------|-----|
-| Solutions | By file name, then by content |
+| Solutions | By file name, then by content and tag |
 | Checker | The standard checker by name (`std::wcmp.cpp`), a custom one by content |
 | Validator | Same as the checker |
 | Generators | Membership of the source files, then content |
@@ -2391,12 +2391,13 @@ polyman remote diff ./my-problem
 **What is not:**
 
 - Generated test contents. They are produced by the script and the generator binaries, so the script is compared instead.
-- `sourceType`, time and memory limits, tags and the title.
+- `sourceType`, time and memory limits, problem tags and the title.
+- Test groups, points and other per-test settings.
 - Testsets that exist only on Polygon: the API has no endpoint that lists a problem's testsets. `remote view` shows them.
 
-`remote diff` reads the local files through the same code a push uploads from, so it cannot disagree with the real thing: a Java solution is compared after the `public class Main` rename, a script after its generator names are rewritten, and every file after line endings are normalized. Local `LF` and Polygon `CRLF` are the same text here. A blank line is not: adding or removing one counts as a change.
+`remote diff` reads the local files through the same code a push uploads from, so it cannot disagree with the real thing: a Java solution is compared after the `public class Main` rename, a script after its generator names are rewritten, and every file after line endings are normalized. Local `LF` and Polygon `CRLF` are the same text here. A blank line is not: adding or removing one counts as a change. The one exception is the generator script, because Polygon drops its empty lines when it saves it. An empty local statement section against an empty one on Polygon is `same`.
 
-Nothing is uploaded, nothing is downloaded to disk, and `Config.json` is not touched. It needs the problem to be on Polygon already (`Config.json` has a `problemId`); a problem that was never pushed exits 2 and points at `--dry-run` below.
+Nothing is uploaded, nothing is downloaded to disk, and `Config.json` is not touched. It needs the problem to be on Polygon already (`Config.json` has a `problemId`); a problem that was never pushed exits 2 and points at `--dry-run` below. If Polygon cannot read the problem at all (wrong ID, no access, network down), the command exits 4 instead of printing an empty list.
 
 #### Dry run
 

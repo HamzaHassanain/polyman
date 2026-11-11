@@ -60,6 +60,7 @@ const resetSdk = (): void => {
     updateProblemInfo: resolved(),
     createProblem: resolved({ id: 99 }),
     // reads
+    getProblemInfo: resolved({ timeLimit: 1000, memoryLimit: 256 }),
     getSolutions: resolved([{ name: 'main.cpp', tag: 'MA' }]),
     viewSolution: resolved('int main(){}\n'),
     getChecker: resolved('std::wcmp.cpp'),
@@ -303,6 +304,92 @@ describe('remote diff and push --dry-run', () => {
       ]) {
         expect(sdk[method], method).not.toHaveBeenCalled();
       }
+    });
+
+    it('only ever calls read methods, for every kind of component', async () => {
+      const dir = writeProblem({
+        ...baseConfig,
+        checker: { name: 'chk', source: './checker/chk.cpp' },
+        validator: { name: 'val', source: './validator/val.cpp' },
+        generators: [{ name: 'gen-random', source: './generators/gen.cpp' }],
+        statements: {
+          english: {
+            encoding: 'UTF-8',
+            name: 'Two Sum',
+            legend: './statements/english/legend.tex',
+          },
+        },
+        testsets: [
+          {
+            name: 'tests',
+            groupsEnabled: true,
+            generatorScript: { script: 'gen-random 1 > $\n' },
+            manualTests: [{ index: 1, input: './manual/m1.in' }],
+          },
+        ],
+      });
+      for (const [file, text] of [
+        ['checker/chk.cpp', 'chk\n'],
+        ['validator/val.cpp', 'val\n'],
+        ['generators/gen.cpp', 'gen\n'],
+        ['statements/english/legend.tex', 'legend\n'],
+        ['manual/m1.in', '1 2\n'],
+      ]) {
+        fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
+        fs.writeFileSync(path.join(dir, file), text);
+      }
+      sdk['getChecker'].mockResolvedValue('chk.cpp');
+      sdk['getValidator'].mockResolvedValue('val.cpp');
+      sdk['getStatements'].mockResolvedValue({
+        english: { encoding: 'UTF-8', name: 'Two Sum', legend: 'old\n' },
+      });
+      const before = fs.readFileSync(path.join(dir, 'Config.json'), 'utf-8');
+
+      await actions.remotePushProblemAction(dir, { dryRun: true, json: true });
+
+      const reads = new Set([
+        'getProblemInfo',
+        'getSolutions',
+        'viewSolution',
+        'getChecker',
+        'getValidator',
+        'getFiles',
+        'viewFile',
+        'getStatements',
+        'getScript',
+        'getTestInput',
+      ]);
+      const called = Object.keys(sdk).filter(
+        method => sdk[method].mock.calls.length > 0
+      );
+      expect(called.filter(method => !reads.has(method))).toEqual([]);
+      expect(called).toEqual(
+        expect.arrayContaining([
+          'viewFile',
+          'getStatements',
+          'getScript',
+          'getTestInput',
+        ])
+      );
+      expect(written()).toMatchObject({ ok: true, exitCode: 0 });
+      expect(fs.readFileSync(path.join(dir, 'Config.json'), 'utf-8')).toBe(
+        before
+      );
+    });
+
+    it('fails with exit code 4 when Polygon cannot read the problem', async () => {
+      sdk['getProblemInfo'].mockRejectedValue(
+        new Error('Polygon API Error: no access')
+      );
+      const dir = writeProblem(baseConfig);
+
+      const error = await failure(
+        actions.remotePushProblemAction(dir, { dryRun: true, json: true })
+      );
+
+      expect(exitCodeFor(error)).toBe(4);
+      expect(written()).toMatchObject({ ok: false, exitCode: 4 });
+      expect(sdk['createProblem']).not.toHaveBeenCalled();
     });
 
     it('treats a problem that is not on Polygon as a warning, not a failure', async () => {
