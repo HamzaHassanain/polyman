@@ -76,6 +76,7 @@ import {
   stepGetValidProblemName,
   stepCreateProblemOnPolygon,
   stepUpdateConfigWithProblemId,
+  stepDiffProblem,
 } from './steps';
 
 import { logTemplateCreationSuccess } from './helpers/create-template';
@@ -102,6 +103,8 @@ import {
 import { listPrebuiltTestlibs } from './helpers/prebuilt-testlib';
 import { validatorSelfTestWarning } from './helpers/validator-selftests';
 import type { PullFailure } from './helpers/remote/pulling';
+import type { ProblemDiff } from './helpers/remote/diffing';
+import type { DiffComponent, DiffStatus } from './types';
 
 import { fmt } from './formatter';
 import { report } from './report';
@@ -1583,6 +1586,160 @@ export const remotePullProblemAction = async (
   report.finish(true);
 };
 
+/** What each diff status means when it is printed for a human. */
+const DIFF_STATUS_LABELS: Record<DiffStatus, string> = {
+  same: 'same',
+  changed: 'changed',
+  'local-only': 'local only',
+  'remote-only': 'remote only',
+};
+
+/** Heading used for each diff component group in the printed listing. */
+const DIFF_GROUP_LABELS: Record<string, string> = {
+  solution: 'Solutions',
+  checker: 'Checker',
+  validator: 'Validator',
+  generator: 'Generators',
+  'generator-script': 'Generator scripts',
+  'manual-test': 'Manual tests',
+  statement: 'Statements',
+};
+
+function diffStatusIcon(status: DiffStatus): string {
+  const icons: Record<DiffStatus, string> = {
+    same: fmt.checkmark(),
+    changed: fmt.cross(),
+    'local-only': fmt.warningIcon(),
+    'remote-only': fmt.infoIcon(),
+  };
+  return icons[status];
+}
+
+/**
+ * Prints a comparison as one listing grouped by component and returns the
+ * number of components that differ. `same` rows are printed too: they are
+ * what proves a component was really compared rather than skipped.
+ */
+function printDiffListing(diff: ProblemDiff): void {
+  const groupNames: string[] = [];
+  const groups = new Map<string, DiffComponent[]>();
+  for (const component of diff.components) {
+    const group = groups.get(component.component);
+    if (group) {
+      group.push(component);
+    } else {
+      groups.set(component.component, [component]);
+      groupNames.push(component.component);
+    }
+  }
+
+  for (const groupName of groupNames) {
+    const components = groups.get(groupName) ?? [];
+    fmt.newLine();
+    fmt.info(`  ${fmt.bold(DIFF_GROUP_LABELS[groupName] ?? groupName)}`);
+    for (const component of components) {
+      const line = `${diffStatusIcon(component.status)} ${component.name}  ${fmt.dim(
+        DIFF_STATUS_LABELS[component.status]
+      )}`;
+      fmt.info(
+        component.status === 'same' ? `  ${fmt.dim(line)}` : `  ${line}`
+      );
+    }
+  }
+
+  const changes = diff.components.filter(
+    component => component.status !== 'same'
+  ).length;
+  for (const warning of diff.warnings) {
+    fmt.warning(`  ${fmt.warningIcon()} ${warning}`);
+  }
+  fmt.newLine();
+  if (changes === 0) {
+    fmt.successBox('NOTHING TO PUSH');
+    fmt.info(
+      `  ${fmt.infoIcon()} All ${fmt.highlight(
+        String(diff.components.length)
+      )} component(s) match Polygon.`
+    );
+  } else {
+    fmt.section('DIFFERENCE SUMMARY');
+    fmt.info(
+      `  ${fmt.infoIcon()} ${fmt.highlight(String(changes))} of ${fmt.highlight(
+        String(diff.components.length)
+      )} component(s) differ from Polygon.`
+    );
+  }
+}
+
+/**
+ * Compares a local problem with its Polygon copy and reports what a push
+ * would change. Reads only: it downloads nothing, uploads nothing and writes
+ * no files.
+ *
+ * @param {string} problemPath - Path to problem directory with Config.json
+ * @param {{ json?: boolean }} [options] - With `json`, print a diff report to
+ *   stdout and human output to stderr.
+ * @returns {Promise<void>} Resolves when the comparison is printed
+ *
+ * @throws {Error} If credentials are not registered
+ * @throws {Error} If Config.json is missing or has no problem ID
+ * @throws {Error} If a Polygon request fails
+ *
+ * @example
+ * // From CLI: polyman remote diff ./my-problem
+ * await remoteDiffAction('./my-problem');
+ */
+export const remoteDiffAction = async (
+  problemPath: string,
+  options: { json?: boolean } = {}
+): Promise<void> => {
+  if (options.json) {
+    report.startDiff('remote diff');
+  }
+  fmt.section('🔍  COMPARE PROBLEM WITH POLYGON');
+
+  try {
+    let stepNum = 1;
+
+    const credentials = stepReadCredentials(stepNum++);
+    const sdk = stepInitializeSDK(stepNum++, credentials);
+    const problemDir = path.resolve(process.cwd(), problemPath);
+    const config = stepReadConfig(stepNum++, problemDir);
+
+    if (!config.problemId) {
+      throw new PolymanError(
+        `Config.json has no problem ID, so this problem is not on Polygon yet and there is nothing to compare. Run ${fmt.highlight(
+          'polyman remote push <directory> --dry-run'
+        )} to see what a first push would upload`,
+        2
+      );
+    }
+
+    const diff = await stepDiffProblem(
+      stepNum++,
+      sdk,
+      config.problemId,
+      problemDir,
+      config
+    );
+    printDiffListing(diff);
+    fmt.newLine();
+    fmt.info(
+      `  ${fmt.infoIcon()} Push what differs with: ${fmt.highlight(
+        `polyman remote push ${problemPath}`
+      )}`
+    );
+    fmt.newLine();
+    report.finish(true);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    fmt.errorBox('FAILED TO COMPARE WITH POLYGON!');
+    report.fail(message);
+    report.finish(false, exitCodeFor(error));
+    throw error;
+  }
+};
+
 /**
  * Pushes local problem to Polygon.
  * Creates new problem if Config.json doesn't contain problem ID.
@@ -1590,6 +1747,8 @@ export const remotePullProblemAction = async (
  * Uploads all files including solutions, tests, checker, validator, statements.
  *
  * @param {string} problemPath - Path to problem directory with Config.json
+ * @param {object} [options] - What to push; `dryRun` only compares with
+ *   Polygon and uploads nothing
  * @returns {void} Resolves when push completes
  *
  * @throws {Error} If credentials are not registered
@@ -1615,11 +1774,16 @@ export const remotePushProblemAction = async (
     info?: boolean;
     yes?: boolean;
     name?: string;
+    dryRun?: boolean;
     json?: boolean;
   }
 ): Promise<void> => {
   if (options?.json) {
-    report.startRemote('remote push');
+    if (options.dryRun) {
+      report.startDiff('remote push');
+    } else {
+      report.startRemote('remote push');
+    }
   }
   fmt.section('⬆️  PUSH PROBLEM TO POLYGON');
 
@@ -1660,6 +1824,60 @@ export const remotePushProblemAction = async (
     // step 3: Read Config.json
     const problemDir = path.resolve(process.cwd(), problemPath);
     const config = stepReadConfig(stepNum++, problemDir);
+
+    // --dry-run: compare and stop. A real push creates a problem on Polygon
+    // and wipes testsets here, so the dry run must return before any of that.
+    if (options?.dryRun) {
+      if (!config.problemId) {
+        fmt.newLine();
+        fmt.warning(
+          `  ${fmt.warningIcon()} Config.json has no problem ID: this problem is not on Polygon yet.`
+        );
+        fmt.info(
+          `  ${fmt.infoIcon()} A real push would create it and upload every component.`
+        );
+        fmt.info(
+          `  ${fmt.infoIcon()} Dry run: nothing was created or uploaded.`
+        );
+        report.addWarning(
+          'Config.json has no problem ID: the problem is not on Polygon yet, so every component would be uploaded.'
+        );
+        fmt.newLine();
+        report.finish(true);
+        return;
+      }
+
+      const diff = await stepDiffProblem(
+        stepNum++,
+        sdk,
+        config.problemId,
+        problemDir,
+        config
+      );
+      printDiffListing(diff);
+      if (!pushAll) {
+        const selected = [
+          pushSolutions && 'solutions',
+          pushChecker && 'checker',
+          pushValidator && 'validator',
+          pushGenerators && 'generators',
+          pushStatements && 'statements',
+          pushTests && 'tests',
+          pushMetadata && 'metadata',
+          pushInfo && 'info',
+        ].filter(Boolean);
+        fmt.info(
+          `  ${fmt.infoIcon()} This command would push only: ${fmt.highlight(
+            selected.join(', ')
+          )}.`
+        );
+      }
+      fmt.newLine();
+      fmt.info(`  ${fmt.infoIcon()} Dry run: nothing was created or uploaded.`);
+      fmt.newLine();
+      report.finish(true);
+      return;
+    }
 
     // step 4: Get problem ID (or create new problem)
     let problemId = config.problemId;

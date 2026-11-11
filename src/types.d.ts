@@ -1073,6 +1073,58 @@ interface RemoteReport extends ReportBase {
   warnings: string[];
 }
 
+/**
+ * How one component differs between the local problem folder and Polygon.
+ * - `same`: what a push would send equals what is on Polygon.
+ * - `changed`: a push would overwrite different content on Polygon.
+ * - `local-only`: the component is not on Polygon yet, a push would add it.
+ * - `remote-only`: the component is on Polygon but the local problem does not
+ *   have it, so a push cannot recreate it.
+ * @typedef {DiffStatus}
+ */
+type DiffStatus = 'same' | 'changed' | 'local-only' | 'remote-only';
+
+/**
+ * One compared component inside a diff report.
+ * @interface DiffComponent
+ * @property {string} component - What kind of thing it is (solution, checker,
+ *   validator, generator, generator-script, statement, manual-test)
+ * @property {string} name - Which one: the Polygon file name for a source
+ *   file, `<lang>/<section>` for a statement, `<testset>/<index>` for a test
+ * @property {DiffStatus} status - How the two sides differ
+ */
+interface DiffComponent {
+  component: string;
+  name: string;
+  status: DiffStatus;
+}
+
+/**
+ * Report emitted by `polyman remote diff --json`, and by
+ * `polyman remote push --dry-run --json`: what a push would change on Polygon,
+ * compared by content. It lists every component polyman managed to compare,
+ * including the ones that are `same`, so a caller can show a full table.
+ * @interface DiffReport
+ * @property {number | null} problemId - Polygon problem ID; null when the
+ *   problem is not on Polygon yet, which is reported as an error
+ * @property {DiffComponent[]} components - One entry per compared component,
+ *   in a stable order (solutions, checker, validator, generators, statements,
+ *   then each testset's script and manual tests)
+ * @property {number} changes - How many components are not `same`
+ * @property {string[]} warnings - Components polyman could not compare, and
+ *   other things that did not fail the command but need a look
+ */
+interface DiffReport extends ReportBase {
+  command: string;
+  exitCode: number;
+  durationMs: number;
+  errors: string[];
+  problemId: number | null;
+  components: DiffComponent[];
+  changes: number;
+  warnings: string[];
+}
+
 type JsonReport =
   | RunReport
   | VerifyReport
@@ -1082,7 +1134,8 @@ type JsonReport =
   | ValidateReport
   | SelfTestReport
   | SolutionTestReport
-  | RemoteReport;
+  | RemoteReport
+  | DiffReport;
 
 // ==================== Exports ====================
 
@@ -1159,6 +1212,9 @@ export {
   SolutionTestReport,
   RemoteAction,
   RemoteReport,
+  DiffStatus,
+  DiffComponent,
+  DiffReport,
   JsonReport,
 };
 

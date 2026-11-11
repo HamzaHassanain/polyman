@@ -156,6 +156,7 @@ polyman remote pull 123456 ./my-problem
 cd my-problem
 
 # Work locally, then push back (the problem ID comes from Config.json)
+polyman remote diff .
 polyman remote push .
 polyman remote commit . "Updated solutions"
 ```
@@ -217,6 +218,8 @@ Full chapter: [GUIDE.md - Chat (AI agent)](GUIDE.md#chat-ai-agent), with the key
 | `polyman remote list`                    | List your problems   |
 | `polyman remote pull <id> <dir>`         | Download problem     |
 | `polyman remote push <dir>`              | Upload changes       |
+| `polyman remote push <dir> --dry-run`    | Same, but upload nothing |
+| `polyman remote diff <dir>`              | Show what a push would change |
 | `polyman remote view <id>`               | Show problem details |
 | `polyman remote commit <id> "msg"`       | Commit changes       |
 | `polyman remote package <id> <type>`     | Build package        |
@@ -252,7 +255,7 @@ The scripts are built from the CLI's own command list, so they stay current afte
 
 ### Scripting and AI agents
 
-`run` and `verify` accept `--json`: stdout then carries exactly one JSON document and all human-readable output moves to stderr, so `polyman verify --json > verify.json` is safe to parse. The exit code is unchanged. `remote push` accepts `--yes` and `--name <slug>` so a new problem can be created without a terminal; without a TTY the command fails fast instead of waiting on a prompt. See [GUIDE.md](GUIDE.md#full-verification) for the report shape.
+`run` and `verify` accept `--json`: stdout then carries exactly one JSON document and all human-readable output moves to stderr, so `polyman verify --json > verify.json` is safe to parse. The exit code is unchanged. `remote push` accepts `--yes` and `--name <slug>` so a new problem can be created without a terminal; without a TTY the command fails fast instead of waiting on a prompt. `remote diff --json` lists one entry per component with a `same`/`changed`/`local-only`/`remote-only` status and a `changes` count, and `remote push --dry-run` answers the same question inside the push command without creating or uploading anything. See [GUIDE.md](GUIDE.md#full-verification) for the report shape.
 
 `polyman ai login|logout|list|models|use` saves API keys for AI model providers (OpenAI, Anthropic, DeepSeek, Qwen, Gemini, Groq, Mistral, OpenRouter, a local Ollama, or any OpenAI-compatible server) in `~/.polyman/ai.json` (mode 0600) and sets a default model; `polyman chat` uses these settings. See [GUIDE.md](GUIDE.md#ai-provider-keys).
 
@@ -382,7 +385,7 @@ Choose your learning path:
 3. **Implement** → Write solutions, validator, generator, checker
 4. **Generate** → `polyman generate --all`
 5. **Verify** → `polyman verify`
-6. **Sync** → `polyman remote push .` + `polyman remote commit . "msg"`
+6. **Sync** → `polyman remote diff .` to see what would change, then `polyman remote push .` + `polyman remote commit . "msg"`
 
 Detailed walkthrough: [GUIDE.md - Complete Workflow Example](GUIDE.md#complete-workflow-example)
 

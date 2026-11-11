@@ -13,7 +13,13 @@ import { normalizeLineEndingsFromSystemToRemote } from './utils';
 import { LocalManualTest, LocalTestset, TestOptions } from '../../types';
 import { readScriptText, toPolygonScript } from '../script-parser';
 import { getResolvedTests } from '../testset';
-import { renamePublicClass } from '../java-class';
+import {
+  STATEMENT_SECTIONS,
+  readGeneratorPayload,
+  readNormalizedFile,
+  readSolutionPayload,
+  readSourcePayload,
+} from './local-payloads';
 
 /** Polygon compiler used for C++ files that do not declare a `sourceType`. */
 export const DEFAULT_CPP_SOURCE_TYPE = 'cpp.g++17';
@@ -106,23 +112,13 @@ export async function uploadSolutions(
 
   for (const solution of config.solutions) {
     try {
-      const solutionPath = insideProblem(problemDir, solution.source);
-      if (!fs.existsSync(solutionPath)) {
-        throw new Error(`Solution file not found: ${solution.source}`);
-      }
-
-      let source = fs.readFileSync(solutionPath, 'utf-8');
-      const filename = path.basename(solution.source);
-      // Polygon requires `public class Main`; locally the public class
-      // matches the file name. Only the uploaded copy is renamed.
-      if (path.extname(filename).toLowerCase() === '.java') {
-        source = renamePublicClass(
-          source,
-          path.basename(filename, path.extname(filename)),
-          'Main'
-        );
-      }
-      const code = normalizeLineEndingsFromSystemToRemote(source);
+      // A Java solution gets its public class renamed to `Main` inside the
+      // reader: Polygon requires it, while locally the class must match the
+      // file name.
+      const { filename, content: code } = readSolutionPayload(
+        problemDir,
+        solution
+      );
 
       const sourceType = resolveSourceType(filename, solution.sourceType);
 
@@ -173,19 +169,16 @@ export async function uploadChecker(
     }
 
     // Custom checker - upload file first, then set it
-    const checkerPath = insideProblem(problemDir, checker.source);
     // Resolve the tests path now so a refusal leaves nothing half-uploaded.
     const testsPath = checker.testsFilePath
       ? insideProblem(problemDir, checker.testsFilePath)
       : undefined;
-    if (!fs.existsSync(checkerPath)) {
-      throw new Error(`Checker file not found: ${checker.source}`);
-    }
 
-    const code = normalizeLineEndingsFromSystemToRemote(
-      fs.readFileSync(checkerPath, 'utf-8')
+    const { filename, content: code } = readSourcePayload(
+      problemDir,
+      checker.source,
+      'Checker'
     );
-    const filename = path.basename(checker.source);
 
     await sdk.saveFile(problemId, 'source', filename, code, {
       sourceType: resolveSourceType(filename, checker.sourceType),
@@ -309,19 +302,16 @@ export async function uploadValidator(
   }
 
   try {
-    const validatorPath = insideProblem(problemDir, config.validator.source);
     // Resolve the tests path now so a refusal leaves nothing half-uploaded.
     const testsPath = config.validator.testsFilePath
       ? insideProblem(problemDir, config.validator.testsFilePath)
       : undefined;
-    if (!fs.existsSync(validatorPath)) {
-      throw new Error(`Validator file not found: ${config.validator.source}`);
-    }
 
-    const code = normalizeLineEndingsFromSystemToRemote(
-      fs.readFileSync(validatorPath, 'utf-8')
+    const { filename, content: code } = readSourcePayload(
+      problemDir,
+      config.validator.source,
+      'Validator'
     );
-    const filename = path.basename(config.validator.source);
 
     await sdk.saveFile(problemId, 'source', filename, code, {
       sourceType: resolveSourceType(filename, config.validator.sourceType),
@@ -407,15 +397,10 @@ export async function uploadGenerators(
 
   for (const generator of config.generators) {
     try {
-      const genPath = insideProblem(problemDir, generator.source);
-      if (!fs.existsSync(genPath)) {
-        throw new Error(`Generator file not found: ${generator.source}`);
-      }
-
-      const code = normalizeLineEndingsFromSystemToRemote(
-        fs.readFileSync(genPath, 'utf-8')
+      const { filename, content: code } = readGeneratorPayload(
+        problemDir,
+        generator
       );
-      const filename = path.basename(generator.source);
 
       const sourceType = resolveSourceType(filename, generator.sourceType);
 
@@ -465,71 +450,13 @@ export async function uploadStatements(
         name: statement.name || config.name,
       };
 
-      // Read each statement component file
-      if (statement.legend) {
-        const legendPath = insideProblem(problemDir, statement.legend);
-
-        if (fs.existsSync(legendPath)) {
-          statementData['legend'] = normalizeLineEndingsFromSystemToRemote(
-            fs.readFileSync(legendPath, 'utf-8')
-          );
-        }
-      }
-
-      if (statement.input) {
-        const inputPath = insideProblem(problemDir, statement.input);
-        if (fs.existsSync(inputPath)) {
-          statementData['input'] = normalizeLineEndingsFromSystemToRemote(
-            fs.readFileSync(inputPath, 'utf-8')
-          );
-        }
-      }
-
-      if (statement.output) {
-        const outputPath = insideProblem(problemDir, statement.output);
-        if (fs.existsSync(outputPath)) {
-          statementData['output'] = normalizeLineEndingsFromSystemToRemote(
-            fs.readFileSync(outputPath, 'utf-8')
-          );
-        }
-      }
-
-      if (statement.notes) {
-        const notesPath = insideProblem(problemDir, statement.notes);
-        if (fs.existsSync(notesPath)) {
-          statementData['notes'] = normalizeLineEndingsFromSystemToRemote(
-            fs.readFileSync(notesPath, 'utf-8')
-          );
-        }
-      }
-
-      if (statement.tutorial) {
-        const tutorialPath = insideProblem(problemDir, statement.tutorial);
-        if (fs.existsSync(tutorialPath)) {
-          statementData['tutorial'] = normalizeLineEndingsFromSystemToRemote(
-            fs.readFileSync(tutorialPath, 'utf-8')
-          );
-        }
-      }
-
-      if (statement.interaction) {
-        const interactionPath = insideProblem(
-          problemDir,
-          statement.interaction
-        );
-        if (fs.existsSync(interactionPath)) {
-          statementData['interaction'] = normalizeLineEndingsFromSystemToRemote(
-            fs.readFileSync(interactionPath, 'utf-8')
-          );
-        }
-      }
-
-      if (statement.scoring) {
-        const scoringPath = insideProblem(problemDir, statement.scoring);
-        if (fs.existsSync(scoringPath)) {
-          statementData['scoring'] = normalizeLineEndingsFromSystemToRemote(
-            fs.readFileSync(scoringPath, 'utf-8')
-          );
+      // Read each statement section that is configured and present locally.
+      for (const section of STATEMENT_SECTIONS) {
+        const sectionSource = statement[section];
+        if (!sectionSource) continue;
+        const sectionPath = insideProblem(problemDir, sectionSource);
+        if (fs.existsSync(sectionPath)) {
+          statementData[section] = readNormalizedFile(sectionPath);
         }
       }
 
@@ -780,10 +707,7 @@ async function uploadManualTests(
       if (!fs.existsSync(testPath)) {
         throw new Error(`Manual test file not found: ${m.input}`);
       }
-      const input = normalizeLineEndingsFromSystemToRemote(
-        fs.readFileSync(testPath, 'utf-8')
-      );
-      ready.push({ m, input });
+      ready.push({ m, input: readNormalizedFile(testPath) });
     } catch (error) {
       logError(error);
       recordFailure(failures, label, error);
