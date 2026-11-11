@@ -109,7 +109,7 @@ Some of the people who starred the repository, with what their own GitHub profil
 
 ### System Requirements
 
-- **Node.js** ^20.19.0 or ≥ 22.12.0
+- **Node.js** ≥ 22.12.0
 - **C++ Compiler** (g++ with C++23 support; set `cppStandard` in `Config.json` for older compilers, or pick another compiler with `POLYMAN_CXX` or `compiler.cpp`, see [GUIDE.md](GUIDE.md#local-compiler-overrides))
 - **Python 3** (optional - for Python solutions)
 - **Java JDK** (optional - for Java solutions)
@@ -421,7 +421,7 @@ Please ensure code follows the existing style and includes tests.
 
 GitHub Actions runs these checks on a pull request:
 
-- `ci`: format check, lint, the unit tests with coverage, and the build, on Node 20 and 22.
+- `ci`: format check, lint, the unit tests with coverage, and the build, on Node 22 and 24.
 - `corpus`: real problems with wrong solutions on purpose, judged with real compilers. It runs when the PR changes `src/`, `corpus/`, `template/`, `assets/` or the dependencies. See [corpus/README.md](corpus/README.md).
 - `mutation`: mutation testing of the verdict code. It runs when the PR changes `src/helpers/solution.ts`, `src/types.d.ts` or the tests.
 - `codeql`: code scanning.
