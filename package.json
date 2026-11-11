@@ -53,7 +53,6 @@
   "keywords": [],
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/chalk": "^0.4.31",
     "@types/commander": "^2.12.0",
     "@types/node": "^24.10.0",
     "@types/ora": "^3.1.0",
