@@ -1151,6 +1151,31 @@ describe('PolygonSDK', () => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
+    it('throws on a 4xx JSON FAILED body of a raw call instead of returning it as the file', async () => {
+      fetchMock.mockResolvedValue({
+        ...makeJsonResponse({
+          status: 'FAILED',
+          comment: 'apiKey: Incorrect API key',
+        }),
+        ok: false,
+        status: 400,
+      });
+      const r = await settle(sdk.getScript(1, 'tests'));
+      expect(r.status).toBe('rejected');
+      const reason = (r as PromiseRejectedResult).reason as PolymanError;
+      expect(reason.message).toBe(
+        'Polygon API Error: apiKey: Incorrect API key'
+      );
+      expect(reason.exitCode).toBe(4);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns a raw file that looks like JSON when Polygon answered 200', async () => {
+      const file = '{"status":"FAILED","comment":"this is a test input"}';
+      fetchMock.mockResolvedValue(makeTextResponse(file));
+      expect(await sdk.getTestInput(1, 'tests', 1)).toBe(file);
+    });
+
     it('does not retry a 4xx answer on a raw call', async () => {
       fetchMock.mockResolvedValue(makeHtmlResponse(404));
       const r = await settle(sdk.viewFile(1, 'source', 'a.cpp'));

@@ -180,6 +180,29 @@ function polygonError(message: string, cause?: unknown): PolymanError {
   );
 }
 
+/**
+ * Returns the JSON FAILED envelope inside a raw response body, or `undefined`
+ * when the body is anything else.
+ *
+ * @internal
+ */
+function parseFailedBody(text: string): { comment?: string } | undefined {
+  if (!text.trimStart().startsWith('{')) return undefined;
+  try {
+    const body: unknown = JSON.parse(text);
+    if (
+      typeof body === 'object' &&
+      body !== null &&
+      (body as { status?: unknown }).status === 'FAILED'
+    ) {
+      return body;
+    }
+  } catch {
+    // Not JSON: it is the file.
+  }
+  return undefined;
+}
+
 /** Outcome of one HTTP attempt against Polygon. @internal */
 type Attempt =
   { ok: true; value: unknown } | { ok: false; retry: boolean; error: Error };
@@ -427,6 +450,16 @@ export class PolygonSDK {
           error: polygonError(
             `Polygon request ${methodName} returned an HTML page instead of the file`
           ),
+        };
+      }
+      // A refused raw call (no such file, bad key) comes back as a 4xx with
+      // the usual JSON FAILED body. It is an error, not the file content.
+      const failed = isClientError ? parseFailedBody(text) : undefined;
+      if (failed !== undefined) {
+        return {
+          ok: false,
+          retry: false,
+          error: polygonError(`Polygon API Error: ${failed.comment}`),
         };
       }
       return { ok: true, value: text };
