@@ -10,7 +10,7 @@ describe('corpus pch', () => {
   const pch = jobOf(corpus, 'pch');
 
   it('runs the PCH check after a build, with clang installed', () => {
-    expect(pch['container']).toBe('node:20');
+    expect(pch['container']).toBe('node:22');
     expect(runsOf(pch)).toEqual([
       'npm ci --no-audit --no-fund',
       'apt-get update -qq && apt-get install -y -qq clang >/dev/null',

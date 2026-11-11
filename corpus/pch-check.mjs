@@ -191,7 +191,7 @@ export const RUNS = [
   {
     name: 'clang',
     clang: true,
-    // clang 14 on the node:20 image does not know c++23, the default
+    // clang 14 on the node:22 image does not know c++23, the default
     cppStandard: 'c++20',
     expect: p => {
       const problems = [];

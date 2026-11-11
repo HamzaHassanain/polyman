@@ -9,7 +9,7 @@ import {
   type EditorState,
   type History,
 } from '../editor.js';
-import { windowOf } from '../layout.js';
+import { windowOf, type TerminalStream } from '../layout.js';
 
 /**
  * The part of a long input that fits in `maxLines` lines, around the line
@@ -81,7 +81,7 @@ export function Composer({
   /** Most lines of the input text. A longer input shows the cursor part. */
   maxLines?: number;
 }) {
-  const { stdout } = useStdout();
+  const stdout: TerminalStream = useStdout().stdout;
   const width = Math.max(10, (stdout.columns || 80) - 1);
   // Keys can come faster than React renders: read and write the newest value.
   const current = useRef(value);

@@ -140,7 +140,7 @@ Polyman is a command-line tool designed for competitive programming problem sett
 
 ### Prerequisites
 
-- **Node.js** ^20.19.0 or ≥ 22.12.0
+- **Node.js** ≥ 22.12.0
 - **C++ Compiler** (g++ with C++23 support by default; set `cppStandard` in `Config.json` to target an older standard, or use another compiler with `POLYMAN_CXX` or `compiler.cpp`, see [Local Compiler Overrides](#local-compiler-overrides))
 - **Java JDK** (optional, for Java solutions)
 - **Python** (optional, for Python solutions)
@@ -689,6 +689,7 @@ Where `target` is one of:
 - `<#-- comment -->` is stripped.
 - `<#-- @group <name> -->` headers tag every following script line with that group.
 - `<#list a..b as i> ... ${i} ... </#list>` expands into one line per integer in the inclusive range.
+- `<#list ["a", "b"] as s> ... ${s} ... </#list>` expands into one line per string in the list.
 
 **Example (the canonical Polygon shape from the docs):**
 

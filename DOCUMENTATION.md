@@ -328,7 +328,7 @@ int main(int argc, char* argv[]) {
 
 Generators are testlib C++ programs that take parameters as positional `argv[]` and write the test content to stdout. The pipeline is:
 
-1. **Parse** — `script-parser.ts` reads the testset's `generatorScript.script` (or `scriptFile`) as Codeforces-Polygon syntax: each non-comment line is `gen-name [args...] > target` where `target` is `N`, `$` (smallest unused), or `{1-3,7}` (multi-output). FreeMarker `<#-- comments -->` and `<#list a..b as i> ... ${i} ... </#list>` blocks are supported, and `<#-- @group <name> -->` headers tag every following line.
+1. **Parse** — `script-parser.ts` reads the testset's `generatorScript.script` (or `scriptFile`) as Codeforces-Polygon syntax: each non-comment line is `gen-name [args...] > target` where `target` is `N`, `$` (smallest unused), or `{1-3,7}` (multi-output). FreeMarker `<#-- comments -->`, `<#list a..b as i> ... ${i} ... </#list>`, and `<#list ["a", "b"] as s>` blocks are supported, and `<#-- @group <name> -->` headers tag every following line.
 2. **Resolve** — `script-parser.ts:resolveTests` merges parsed lines with the testset's `manualTests[]`, assigning concrete Polygon indices to every `$`. Manual indices and explicit indices reserve slots; `$` walks the smallest free integer. Duplicate indices are an error.
 3. **Compile + run** — `generator.ts:executeResolvedTests` compiles each referenced generator once and, per resolved test, either copies the manual `.in` file into `testsets/<name>/test<index>.txt`, runs the generator with stdout redirected to that file, or (for `> {indices}` lines) runs the generator with cwd set to the testset directory and verifies it wrote the promised files itself.
 

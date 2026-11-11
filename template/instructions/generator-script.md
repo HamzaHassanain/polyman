@@ -29,6 +29,7 @@ Indices are unique across the whole testset — script lines, multi-output targe
 - `<#-- @group <name> -->` headers tag every following line with that group, until the next `@group` (or end of file). The group surfaces as `LocalTestset` group metadata and is what `polyman generate --group <name>` filters on.
 - `<#list a..b as i> … ${i} … </#list>` expands to one line per integer in `[a, b]` inclusive. `${i}` is substituted for each iteration.
 - Reverse loops (`<#list 5..1 as i>`) work too.
+- `<#list [5, 50] as n>` and `<#list ["a", "b"] as s>` expand once per item. A quoted item is a FreeMarker string literal, and `${s}` inserts that text. A string cannot be used in an integer expression.
 
 ## Example
 

@@ -12,7 +12,7 @@ import {
 } from './workflow-yaml';
 
 // Pins which corpus lanes block a pull request (.github/workflows/corpus.yml):
-// `corpus` and the node-20.19 toolchain lane block, the no-python-alias lane is
+// `corpus` and the node-22.12 toolchain lane block, the no-python-alias lane is
 // reported, not yet blocking. And the Windows and macOS lanes in ci.yml are
 // reported, never blocking, and not run on every pull request.
 const corpus = readWorkflow('corpus.yml');
@@ -61,7 +61,7 @@ describe('corpus lanes on pull requests', () => {
 
   it('judges with g++, Java and python', () => {
     const job = jobOf(corpus, 'corpus');
-    expect(job['container']).toBe('node:20');
+    expect(job['container']).toBe('node:22');
     const runs = stepsOf(job);
     expect(runs.map(s => s['run'])).toEqual(
       expect.arrayContaining([
@@ -81,10 +81,10 @@ describe('corpus lanes on pull requests', () => {
         .map(l => asMap(l))
         .map(l => [asString(l['lane']), l])
     );
-    expect(Object.keys(byLane)).toEqual(['node-20.19', 'no-python-alias']);
-    expect(byLane['node-20.19']).toEqual({
-      lane: 'node-20.19',
-      image: 'node:20.19',
+    expect(Object.keys(byLane)).toEqual(['node-22.12', 'no-python-alias']);
+    expect(byLane['node-22.12']).toEqual({
+      lane: 'node-22.12',
+      image: 'node:22.12',
       'python-alias': 'yes',
       'allow-failure': 'false',
     });

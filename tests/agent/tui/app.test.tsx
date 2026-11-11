@@ -52,6 +52,10 @@ function setup(setMode?: (m: string) => void) {
     ...(setMode ? { setMode } : {}),
   };
   const ui = render(<App session={session} bus={bus} info={info} />);
+  // The test stdout has no rows. Ink 8 then asks `tput` for the size on
+  // every frame, which makes a streamed answer 4 times slower. A tall
+  // terminal is the same as no height limit.
+  Object.defineProperty(ui.stdout, 'rows', { value: 1000 });
   return { bus, session, ...ui };
 }
 
@@ -276,8 +280,11 @@ describe('App with the fake session', () => {
     expect(stdout.frames).not.toContain(CLEAR_TERMINAL);
     await tick(RESIZE_SETTLE_MS * 2);
     expect(stdout.frames).toContain(CLEAR_TERMINAL);
-    // The debug renderer of the tests keeps every static line, so the
-    // welcome box printed again shows as a second copy.
-    await waitFor(lastFrame, f => count(f) === 2);
+    // After the clear, the welcome box is printed again at the new width.
+    // Ink drops the old static lines when <Static> is remounted, so the
+    // frame has one copy, not the old wide one.
+    const frame = await waitFor(lastFrame, f => count(f) === 1);
+    const top = frame.split('\n').find(l => l.startsWith('╭')) ?? '';
+    expect([...top].length).toBeLessThanOrEqual(60);
   });
 });
