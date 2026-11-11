@@ -19,8 +19,10 @@ import type {
   Test,
   File,
   RemoteAction,
+  DiffComponent,
   TestlibSourceType,
 } from './types';
+import { diffProblem, type ProblemDiff } from './helpers/remote/diffing';
 import {
   readCredentials,
   getProblemId,
@@ -1540,6 +1542,46 @@ export async function stepUpdateProblemInfo(
     `  ${fmt.infoIcon()} Memory Limit: ${fmt.highlight(config.memoryLimit + 'MB')}`
   );
   fmt.stepComplete('Problem info updated');
+}
+
+/**
+ * Step: Compare the local problem with what is on Polygon.
+ *
+ * Reads only. It uploads nothing and writes nothing, so it is safe to run
+ * before a push, and it is what `push --dry-run` shows.
+ *
+ * @returns {Promise<ProblemDiff>} One entry per compared component, plus the
+ *   components that could not be compared
+ */
+export async function stepDiffProblem(
+  stepNum: number,
+  sdk: PolygonSDK,
+  problemId: number,
+  problemDir: string,
+  config: ConfigFile
+): Promise<ProblemDiff> {
+  fmt.step(stepNum, 'Comparing With Polygon');
+
+  const diff = await diffProblem(sdk, problemId, problemDir, config);
+  for (const component of diff.components) {
+    report.addDiffComponent(component);
+  }
+  for (const warning of diff.warnings) {
+    report.addWarning(warning);
+  }
+
+  const changes = diff.components.filter(
+    (component: DiffComponent) => component.status !== 'same'
+  ).length;
+  fmt.info(
+    `  ${fmt.infoIcon()} Compared ${fmt.highlight(
+      String(diff.components.length)
+    )} component(s), ${fmt.highlight(String(changes))} would change`
+  );
+  fmt.stepComplete(
+    changes === 0 ? 'Nothing would change' : 'Differences found'
+  );
+  return diff;
 }
 
 /**

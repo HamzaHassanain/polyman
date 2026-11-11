@@ -577,6 +577,36 @@ describe('cli.ts', () => {
     );
   });
 
+  it('should pass --dry-run through to remote push', async () => {
+    await loadCli(['remote', 'push', './p', '--dry-run']);
+    expect(actions.remotePushProblemAction).toHaveBeenCalledWith(
+      './p',
+      expect.objectContaining({ dryRun: true })
+    );
+  });
+
+  it('should accept the short -d push flag', async () => {
+    await loadCli(['remote', 'push', './p', '-d']);
+    expect(actions.remotePushProblemAction).toHaveBeenCalledWith(
+      './p',
+      expect.objectContaining({ dryRun: true })
+    );
+  });
+
+  it('should register remote diff command', async () => {
+    await loadCli(['remote', 'diff', './p']);
+    expect(actions.remoteDiffAction).toHaveBeenCalledWith('./p', {
+      json: false,
+    });
+  });
+
+  it('should pass --json to remote diff', async () => {
+    await loadCli(['remote', 'diff', './p', '--json']);
+    expect(actions.remoteDiffAction).toHaveBeenCalledWith('./p', {
+      json: true,
+    });
+  });
+
   it('should reject push with a problem id and a directory', async () => {
     const exitSpy = vi
       .spyOn(process, 'exit')
