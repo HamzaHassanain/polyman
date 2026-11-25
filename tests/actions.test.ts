@@ -2023,6 +2023,19 @@ describe('actions.ts', () => {
       expect(formatter.fmt.successBox).toHaveBeenCalled();
     });
 
+    it('should forward minorChanges to stepCommitChanges', async () => {
+      await actions.remoteCommitProblemAction('./p', 'msg', {
+        minorChanges: true,
+      });
+      expect(steps.stepCommitChanges).toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.anything(),
+        11,
+        'msg',
+        true
+      );
+    });
+
     it('should handle errors', async () => {
       vi.mocked(steps.stepCommitChanges).mockRejectedValue(new Error('fail'));
       await expect(

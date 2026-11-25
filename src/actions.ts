@@ -2182,6 +2182,8 @@ export const remoteViewProblemAction = async (
  *
  * @param {string} problemIdOrPath - Problem ID or path to directory with Config.json
  * @param {string} commitMessage - Commit message describing changes
+ * @param {object} [options] - Commit options
+ * @param {boolean} [options.minorChanges] - Don't send an email notification
  * @returns {void} Resolves when commit completes
  *
  * @throws {Error} If credentials are not registered
@@ -2192,11 +2194,14 @@ export const remoteViewProblemAction = async (
  * // From CLI: polyman remote-commit ./my-problem "Updated time limits"
  * await remoteCommitProblemAction('./my-problem', 'Updated time limits');
  * // Commits changes with message
+ * await remoteCommitProblemAction('./my-problem', 'Minor cleanup', {
+ *   minorChanges: true
+ * });
  */
 export const remoteCommitProblemAction = async (
   problemIdOrPath: string,
   commitMessage: string,
-  options: { json?: boolean } = {}
+  options: { json?: boolean; minorChanges?: boolean } = {}
 ): Promise<void> => {
   if (options.json) {
     report.startRemote('remote commit');
@@ -2216,7 +2221,13 @@ export const remoteCommitProblemAction = async (
     const problemId = stepGetProblemId(stepNum++, problemIdOrPath);
 
     // step 4: Commit changes
-    await stepCommitChanges(stepNum++, sdk, problemId, commitMessage);
+    await stepCommitChanges(
+      stepNum++,
+      sdk,
+      problemId,
+      commitMessage,
+      options.minorChanges === true
+    );
 
     // Final success message
     fmt.successBox('CHANGES COMMITTED SUCCESSFULLY!');

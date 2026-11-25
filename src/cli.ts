@@ -699,6 +699,7 @@ remote
  * @example
  * polyman remote commit 123456 "Updated test cases"
  * polyman remote commit ./my-problem "Fixed validator"
+ * polyman remote commit 123456 "Minor cleanup" --minor-changes
  * */
 remote
   .command('commit <problem-id> <message>')
@@ -707,10 +708,19 @@ remote
     '--json',
     'Print a JSON report to stdout (human output goes to stderr)'
   )
+  .option(
+    '--minor-changes',
+    'Do not send an email notification to Polygon watchers'
+  )
   .action(
-    async (problemId: string, message: string, options: { json?: boolean }) => {
+    async (
+      problemId: string,
+      message: string,
+      options: { json?: boolean; minorChanges?: boolean }
+    ) => {
       await remoteCommitProblemAction(problemId, message, {
         json: options.json === true,
+        minorChanges: options.minorChanges === true,
       });
     }
   );
