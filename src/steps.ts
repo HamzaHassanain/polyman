@@ -720,9 +720,13 @@ export function stepInitializeSDK(
   credentials: { apiKey: string; secret: string }
 ): PolygonSDK {
   fmt.step(stepNum, 'Initializing Polygon SDK');
+  const interval = process.env['POLYMAN_POLYGON_MIN_INTERVAL_MS'];
   const sdk = new PolygonSDKClass({
     apiKey: credentials.apiKey,
     apiSecret: credentials.secret,
+    ...(interval !== undefined
+      ? { minRequestIntervalMs: Number(interval) }
+      : {}),
   });
   fmt.info(`  ${fmt.infoIcon()} Connected to Polygon API`);
   fmt.stepComplete('SDK initialized');

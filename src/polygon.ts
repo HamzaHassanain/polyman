@@ -82,6 +82,12 @@ export interface PolygonConfig {
   apiKey: string;
   apiSecret: string;
   baseUrl?: string;
+  /**
+   * Minimum delay between the start of two API requests, in milliseconds.
+   * Polygon's nginx front end rate-limits around one request per second;
+   * spacing calls keeps bulk pushes from tripping HTTP 429.
+   */
+  minRequestIntervalMs?: number;
 }
 
 /**
@@ -90,6 +96,29 @@ export interface PolygonConfig {
  * @internal
  */
 const RETRY_DELAY_MS = 1500;
+
+/**
+ * Default spacing between Polygon API requests. Polygon allows roughly one
+ * request per second with a small burst; 1000 ms stays under that limit.
+ *
+ * @internal
+ */
+const DEFAULT_MIN_REQUEST_INTERVAL_MS = 1000;
+
+/**
+ * How long to wait after an HTTP 429 when Polygon does not send Retry-After.
+ *
+ * @internal
+ */
+const RATE_LIMIT_RETRY_DELAY_MS = 2000;
+
+/**
+ * Maximum number of retries for an HTTP 429. A 429 is rejected by nginx
+ * before the API sees it, so retrying is safe even for non-idempotent calls.
+ *
+ * @internal
+ */
+const MAX_RATE_LIMIT_RETRIES = 3;
 
 /**
  * Methods that `request()` repeats once after a transient failure (network
@@ -203,9 +232,36 @@ function parseFailedBody(text: string): { comment?: string } | undefined {
   return undefined;
 }
 
+/**
+ * Parses a Retry-After header (delta-seconds or HTTP-date) into milliseconds.
+ *
+ * @internal
+ */
+function parseRetryAfterMs(
+  header: string | null | undefined
+): number | undefined {
+  if (!header) return undefined;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds)) {
+    return Math.max(0, Math.floor(seconds * 1000));
+  }
+  const date = Date.parse(header);
+  if (!Number.isNaN(date)) {
+    return Math.max(0, date - Date.now());
+  }
+  return undefined;
+}
+
 /** Outcome of one HTTP attempt against Polygon. @internal */
 type Attempt =
-  { ok: true; value: unknown } | { ok: false; retry: boolean; error: Error };
+  | { ok: true; value: unknown }
+  | {
+      ok: false;
+      retry: boolean;
+      error: Error;
+      status?: number;
+      retryAfterMs?: number;
+    };
 
 /**
  * Comprehensive SDK for Codeforces Polygon API.
@@ -256,6 +312,12 @@ export class PolygonSDK {
   private apiSecret: string;
   /** @internal */
   private baseUrl: string;
+  /** @internal */
+  private minRequestIntervalMs: number;
+  /** Serializes every request so calls never overlap. @internal */
+  private requestChain: Promise<void> = Promise.resolve();
+  /** When the previous request started, for spacing. @internal */
+  private lastRequestStartedAt = 0;
 
   /**
    * Creates a new Polygon SDK instance.
@@ -273,6 +335,13 @@ export class PolygonSDK {
     this.apiKey = config.apiKey;
     this.apiSecret = config.apiSecret;
     this.baseUrl = config.baseUrl || 'https://polygon.codeforces.com/api';
+    const configuredInterval = config.minRequestIntervalMs;
+    this.minRequestIntervalMs =
+      configuredInterval !== undefined &&
+      Number.isFinite(configuredInterval) &&
+      configuredInterval >= 0
+        ? configuredInterval
+        : DEFAULT_MIN_REQUEST_INTERVAL_MS;
   }
 
   /**
@@ -327,6 +396,48 @@ export class PolygonSDK {
    *
    * @internal
    */
+  /**
+   * Waits until this request may start, then returns a callback that lets the
+   * next request take its turn. Requests are serialized so bursts cannot
+   * trigger Polygon's rate limiter.
+   *
+   * @internal
+   */
+  private async waitForRequestSlot(): Promise<() => void> {
+    const previous = this.requestChain;
+    let release!: () => void;
+    this.requestChain = new Promise<void>(resolve => {
+      release = resolve;
+    });
+
+    await previous;
+    const remaining =
+      this.minRequestIntervalMs - (Date.now() - this.lastRequestStartedAt);
+    if (remaining > 0) {
+      await new Promise<void>(resolve => setTimeout(resolve, remaining));
+    }
+    this.lastRequestStartedAt = Date.now();
+    return release;
+  }
+
+  /**
+   * Sends one attempt through the rate limiter.
+   *
+   * @internal
+   */
+  private async send(
+    methodName: string,
+    params: Record<string, string | number | boolean>,
+    returnRaw: boolean
+  ): Promise<Attempt> {
+    const release = await this.waitForRequestSlot();
+    try {
+      return await this.attempt(methodName, params, returnRaw);
+    } finally {
+      release();
+    }
+  }
+
   private async request<T>(
     methodName: string,
     params: Record<string, string | number | boolean> = {},
@@ -334,27 +445,49 @@ export class PolygonSDK {
   ): Promise<T> {
     const mayRetry =
       RETRYABLE_METHODS.has(methodName) && params['checkExisting'] !== true;
+    let rateLimitRetries = 0;
+    let ordinaryRetried = false;
+    let wasRateLimited = false;
 
-    let outcome = await this.attempt(methodName, params, returnRaw);
-    if (!outcome.ok && outcome.retry && mayRetry) {
-      await new Promise<void>(resolve => setTimeout(resolve, RETRY_DELAY_MS));
-      outcome = await this.attempt(methodName, params, returnRaw);
-    }
-    if (!outcome.ok) {
+    for (;;) {
+      const outcome = await this.send(methodName, params, returnRaw);
+
+      if (outcome.ok) {
+        if (returnRaw) {
+          return outcome.value as T;
+        }
+        const data = outcome.value as PolygonResponse<T>;
+        if (data.status === 'FAILED') {
+          throw polygonError(`Polygon API Error: ${data.comment}`);
+        }
+        return data.result as T;
+      }
+
+      // HTTP 429 is rejected by nginx before the API sees the call, so it is
+      // safe to retry even methods that are otherwise never retried.
+      if (outcome.status === 429) {
+        wasRateLimited = true;
+        if (rateLimitRetries < MAX_RATE_LIMIT_RETRIES) {
+          rateLimitRetries += 1;
+          await new Promise<void>(resolve =>
+            setTimeout(
+              resolve,
+              outcome.retryAfterMs ?? RATE_LIMIT_RETRY_DELAY_MS
+            )
+          );
+          continue;
+        }
+        throw outcome.error;
+      }
+
+      if (!wasRateLimited && outcome.retry && mayRetry && !ordinaryRetried) {
+        ordinaryRetried = true;
+        await new Promise<void>(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+        continue;
+      }
+
       throw outcome.error;
     }
-
-    if (returnRaw) {
-      return outcome.value as T;
-    }
-
-    const data = outcome.value as PolygonResponse<T>;
-
-    if (data.status === 'FAILED') {
-      throw polygonError(`Polygon API Error: ${data.comment}`);
-    }
-
-    return data.result as T;
   }
 
   /**
@@ -406,6 +539,30 @@ export class PolygonSDK {
           `Polygon request ${methodName} failed: ${reason}`,
           err
         ),
+      };
+    }
+
+    // nginx rejects bursts with an HTML 429 before the API sees the call.
+    if (response.status === 429) {
+      let body = '';
+      try {
+        body = (await response.text()).replace(/\s+/g, ' ').trim();
+      } catch {
+        // The body is not needed for the error message.
+      }
+      const retryAfterMs = parseRetryAfterMs(
+        response.headers?.get?.('retry-after')
+      );
+      return {
+        ok: false,
+        retry: true,
+        error: polygonError(
+          `Polygon request ${methodName} rate limited (HTTP 429)${
+            body ? `: ${body.slice(0, 120)}` : ''
+          }`
+        ),
+        status: 429,
+        ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
       };
     }
 
