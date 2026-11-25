@@ -789,6 +789,20 @@ describe('steps.ts', () => {
       });
       expect(sdk).toBeDefined();
     });
+
+    it('should forward POLYMAN_POLYGON_MIN_INTERVAL_MS when set', () => {
+      vi.stubEnv('POLYMAN_POLYGON_MIN_INTERVAL_MS', '250');
+      try {
+        steps.stepInitializeSDK(1, { apiKey: 'k', secret: 's' });
+        expect(polygonModule.PolygonSDK).toHaveBeenCalledWith({
+          apiKey: 'k',
+          apiSecret: 's',
+          minRequestIntervalMs: 250,
+        });
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
   });
 
   describe('stepListProblems', () => {

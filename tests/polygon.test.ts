@@ -6,6 +6,7 @@ import { PolymanError } from '../src/errors';
 const mockConfig = {
   apiKey: 'key',
   apiSecret: 'secret',
+  minRequestIntervalMs: 0,
 };
 
 interface FetchCall {
@@ -64,7 +65,11 @@ describe('PolygonSDK', () => {
       fetchMock.mockResolvedValue(
         makeJsonResponse({ status: 'OK', result: [] })
       );
-      const s = new PolygonSDK({ apiKey: 'k', apiSecret: 's' });
+      const s = new PolygonSDK({
+        apiKey: 'k',
+        apiSecret: 's',
+        minRequestIntervalMs: 0,
+      });
       await s.listProblems();
       const call = parseFetchCall(fetchMock.mock.calls[0]);
       expect(call.url).toBe('https://polygon.codeforces.com/api/problems.list');
@@ -78,10 +83,36 @@ describe('PolygonSDK', () => {
         apiKey: 'k',
         apiSecret: 's',
         baseUrl: 'https://example.com/api',
+        minRequestIntervalMs: 0,
       });
       await s.listProblems();
       const call = parseFetchCall(fetchMock.mock.calls[0]);
       expect(call.url).toBe('https://example.com/api/problems.list');
+    });
+  });
+
+  describe('request rate limiting', () => {
+    it('serializes requests and spaces them by the configured interval', async () => {
+      const startedAt: number[] = [];
+      fetchMock.mockImplementation(async () => {
+        startedAt.push(Date.now());
+        await new Promise(resolve => setTimeout(resolve, 5));
+        return makeJsonResponse({ status: 'OK', result: [] });
+      });
+      const limited = new PolygonSDK({
+        ...mockConfig,
+        minRequestIntervalMs: 80,
+      });
+
+      await Promise.all([
+        limited.listProblems(),
+        limited.listProblems(),
+        limited.listProblems(),
+      ]);
+
+      expect(startedAt).toHaveLength(3);
+      expect(startedAt[1] - startedAt[0]).toBeGreaterThanOrEqual(70);
+      expect(startedAt[2] - startedAt[1]).toBeGreaterThanOrEqual(70);
     });
   });
 
@@ -970,6 +1001,18 @@ describe('PolygonSDK', () => {
       return { status: 200, ...makeJsonResponse({ status: 'OK', result }) };
     }
 
+    function rateLimitedResponse(retryAfter?: string) {
+      return {
+        status: 429,
+        headers: {
+          get: (name: string) =>
+            name.toLowerCase() === 'retry-after' ? (retryAfter ?? null) : null,
+        },
+        json: () => Promise.reject(new SyntaxError('not json')),
+        text: () => Promise.resolve('<html>429 Too Many Requests</html>'),
+      };
+    }
+
     /** Runs a call to completion with the retry wait skipped. */
     async function settle<T>(
       promise: Promise<T>
@@ -1268,6 +1311,33 @@ describe('PolygonSDK', () => {
       expect(fetchMock).toHaveBeenCalledTimes(2);
       expect(r.status).toBe('rejected');
       expect(messageOf(r)).toContain('problem.testAnswer');
+    });
+
+    it('retries a non-idempotent call after HTTP 429 and succeeds', async () => {
+      fetchMock
+        .mockResolvedValueOnce(rateLimitedResponse('0'))
+        .mockResolvedValueOnce(okResponse(undefined));
+      const r = await settle(sdk.saveValidatorTest(1, 1, 'x', 'VALID'));
+      expect(r.status).toBe('fulfilled');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('honours a numeric Retry-After header', async () => {
+      const timeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+      fetchMock
+        .mockResolvedValueOnce(rateLimitedResponse('1'))
+        .mockResolvedValueOnce(okResponse([]));
+      const r = await settle(sdk.listProblems());
+      expect(r.status).toBe('fulfilled');
+      expect(timeoutSpy).toHaveBeenCalledWith(expect.any(Function), 1000);
+    });
+
+    it('stops after three HTTP 429 retries', async () => {
+      fetchMock.mockResolvedValue(rateLimitedResponse('0'));
+      const r = await settle(sdk.listProblems());
+      expect(r.status).toBe('rejected');
+      expect(messageOf(r)).toContain('rate limited');
+      expect(fetchMock).toHaveBeenCalledTimes(4);
     });
   });
 

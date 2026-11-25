@@ -3384,6 +3384,21 @@ polyman remote push . -s  # Just solutions
 polyman remote push . -c  # Just checker
 ```
 
+#### HTTP 429 / Rate Limiting
+
+Polyman serializes Polygon API calls and spaces them by one second by default,
+because Polygon's nginx front end allows roughly one request per second. It also
+retries a 429 response up to three times, honoring `Retry-After` when present.
+
+To make bulk pushes gentler or faster, tune the interval in milliseconds:
+
+```bash
+POLYMAN_POLYGON_MIN_INTERVAL_MS=2000 polyman remote push .
+```
+
+Set it to `0` to disable the spacing (not recommended). SDK users can set
+`minRequestIntervalMs` directly in `PolygonConfig`.
+
 #### Package Build Timeout
 
 **Error:** `Package build timed out after 30 minutes`
