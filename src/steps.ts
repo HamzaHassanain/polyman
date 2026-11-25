@@ -1017,13 +1017,23 @@ export async function stepCommitChanges(
   stepNum: number,
   sdk: PolygonSDK,
   problemId: number,
-  message: string
+  message: string,
+  minorChanges = false
 ): Promise<void> {
   fmt.step(stepNum, 'Committing Changes to Polygon');
   fmt.info(`  ${fmt.infoIcon()} Message: "${message}"`);
+  if (minorChanges) {
+    fmt.info(
+      `  ${fmt.infoIcon()} Minor changes: no email notification will be sent`
+    );
+  }
   await recordAction(
     { component: 'problem', name: problemId.toString(), action: 'commit' },
-    () => sdk.commitChanges(problemId, { message })
+    () =>
+      sdk.commitChanges(problemId, {
+        message,
+        ...(minorChanges ? { minorChanges: true } : {}),
+      })
   );
   fmt.stepComplete('Changes committed');
 }

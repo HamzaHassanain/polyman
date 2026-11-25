@@ -982,6 +982,17 @@ describe('steps.ts', () => {
       await steps.stepCommitChanges(1, sdk, 5, 'msg');
       expect(sdk.commitChanges).toHaveBeenCalledWith(5, { message: 'msg' });
     });
+
+    it('should pass minorChanges to sdk without altering the default', async () => {
+      const sdk = {
+        commitChanges: vi.fn().mockResolvedValue(undefined),
+      } as any;
+      await steps.stepCommitChanges(1, sdk, 5, 'msg', true);
+      expect(sdk.commitChanges).toHaveBeenCalledWith(5, {
+        message: 'msg',
+        minorChanges: true,
+      });
+    });
   });
 
   describe('stepValidatePackageType', () => {

@@ -639,7 +639,16 @@ describe('cli.ts', () => {
     expect(actions.remoteCommitProblemAction).toHaveBeenCalledWith(
       '42',
       'msg',
-      { json: false }
+      { json: false, minorChanges: false }
+    );
+  });
+
+  it('should pass --minor-changes to remote commit', async () => {
+    await loadCli(['remote', 'commit', '42', 'msg', '--minor-changes']);
+    expect(actions.remoteCommitProblemAction).toHaveBeenCalledWith(
+      '42',
+      'msg',
+      { json: false, minorChanges: true }
     );
   });
 
@@ -661,7 +670,7 @@ describe('cli.ts', () => {
     expect(actions.remoteCommitProblemAction).toHaveBeenCalledWith(
       '42',
       'msg',
-      { json: true }
+      { json: true, minorChanges: false }
     );
     await loadCli(['remote', 'package', '42', 'full', '--json']);
     expect(actions.remotePackageProblemAction).toHaveBeenCalledWith(

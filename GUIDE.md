@@ -2455,6 +2455,14 @@ polyman remote commit 123456 "Updated test cases and fixed validator"
 polyman remote commit ./my-problem "Added edge case tests"
 ```
 
+**Skipping Email Notification:**
+
+By default Polygon emails watchers about a commit. Pass `--minor-changes` to make it a minor commit, which does not send email:
+
+```bash
+polyman remote commit 123456 "Minor cleanup" --minor-changes
+```
+
 **What Happens:**
 
 1. Reads problem ID from Config.json (if directory path is provided)
