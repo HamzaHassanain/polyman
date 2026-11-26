@@ -34,6 +34,7 @@ import {
   downloadSolutions,
   downloadChecker,
   downloadValidator,
+  VALIDATOR_PLACEHOLDER_SOURCE,
   downloadGenerators,
   downloadStatements,
   fetchProblemMetadata,
@@ -1358,7 +1359,7 @@ export async function stepDownloadProblemFilesAndSetUpConfig(
   if (checkerResult.placeholder) warnings.push(checkerResult.placeholder);
   if (validatorResult.missing) {
     warnings.push(
-      `Polygon has no validator set for problem ${problemId}: val.cpp is listed in Config.json but not created, so verify will fail until you add it`
+      `Polygon has no validator set for problem ${problemId}: ${VALIDATOR_PLACEHOLDER_SOURCE} is listed in Config.json but not created, so verify will fail until you add it`
     );
   } else if (validatorResult.placeholder) {
     warnings.push(validatorResult.placeholder);

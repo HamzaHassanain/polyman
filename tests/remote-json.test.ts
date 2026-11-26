@@ -478,20 +478,20 @@ describe('remote commands with --json', () => {
     const refused = (): Promise<never> =>
       Promise.reject(new Error('Polygon API Error: no access'));
     const notCreated =
-      'val.cpp is listed in Config.json but not created, so verify will fail until you add it';
+      './validator/val.cpp is listed in Config.json but not created, so verify will fail until you add it';
 
     it.each([
       {
         kind: 'the solutions list',
         setUp: () => sdk['getSolutions'].mockImplementation(refused),
         warning:
-          'Could not download the solutions list (Polygon API Error: no access): acc.cpp is listed in Config.json as the main solution but not created',
+          'Could not download the solutions list (Polygon API Error: no access): ./solutions/acc.cpp is listed in Config.json as the main solution but not created',
       },
       {
         kind: 'no solutions',
         setUp: () => sdk['getSolutions'].mockResolvedValue([]),
         warning:
-          'No solution was downloaded from Polygon: acc.cpp is listed in Config.json as the main solution but not created',
+          'No solution was downloaded from Polygon: ./solutions/acc.cpp is listed in Config.json as the main solution but not created',
       },
       {
         kind: 'the checker',
@@ -834,7 +834,7 @@ describe('remote commands with --json', () => {
     });
 
     it('fails the pull and keeps the placeholders in warnings when a download fails next to them', async () => {
-      // The only solution is refused, so acc.cpp is also put in as a
+      // The only solution is refused, so the placeholder is also put in as a
       // placeholder; the validator is missing on Polygon too.
       sdk['viewSolution'].mockImplementation(refused);
       sdk['getValidator'].mockResolvedValue('');
@@ -851,7 +851,7 @@ describe('remote commands with --json', () => {
         'Could not download the solution main.cpp (Polygon API Error: no access): Config.json does not list it',
       ]);
       expect(doc.warnings).toEqual([
-        'No solution was downloaded from Polygon: acc.cpp is listed in Config.json as the main solution but not created',
+        'No solution was downloaded from Polygon: ./solutions/acc.cpp is listed in Config.json as the main solution but not created',
         `Polygon has no validator set for problem 7: ${notCreated}`,
       ]);
       expect(human()).toContain('PULL COMPLETED WITH ERRORS');

@@ -1194,12 +1194,13 @@ describe('steps.ts', () => {
         { name: 'wcmp', source: 'wcmp.cpp', isStandard: true },
         {
           count: 0,
-          data: { name: 'validator', source: 'val.cpp' },
+          data: { name: 'validator', source: './validator/val.cpp' },
           missing: true,
         }
       );
       expect(warnings).toHaveLength(1);
       expect(warnings[0]).toContain('no validator set for problem 7');
+      expect(warnings[0]).toContain('./validator/val.cpp');
       expect(failures).toEqual([]);
     });
 
