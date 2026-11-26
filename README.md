@@ -206,6 +206,7 @@ Full chapter: [GUIDE.md - Chat (AI agent)](GUIDE.md#chat-ai-agent), with the key
 | `polyman run <solution> --all` | Run solution on all tests                     |
 | `polyman test <component>`     | Test validator/checker/solution               |
 | `polyman verify`               | Complete verification workflow                |
+| `polyman verify <dir>`         | Verify another problem folder                 |
 | `polyman verify --json`        | Same, as a JSON report on stdout              |
 | `polyman cache status`         | Show cached compiled binaries                 |
 | `polyman cache clear`          | Delete the compilation cache                  |

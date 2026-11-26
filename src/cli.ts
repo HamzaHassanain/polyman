@@ -42,6 +42,7 @@ import {
 } from './completion';
 import { printComprehensiveHelp } from './help';
 import { setCacheEnabled } from './helpers/compile-cache';
+import { runInDirectory } from './helpers/directory';
 import { configureTerminal } from './terminal';
 import { PolymanError, exitCodeFor } from './errors';
 import { fmt } from './formatter';
@@ -438,19 +439,24 @@ program
  *
  * @example
  * polyman verify
+ * polyman verify ./my-problem
  * polyman verify --json   # machine-readable report on stdout
  */
 program
-  .command('verify')
+  .command('verify [directory]')
   .description('Run full problem verification (generate, validate, test all)')
   .option(
     '--json',
     'Print a JSON report to stdout (human output goes to stderr)'
   )
   .option('--no-cache', NO_CACHE_DESCRIPTION)
-  .action(async (options: { json?: boolean }) => {
-    await fullVerificationAction({ json: options.json === true });
-  });
+  .action(
+    async (directory: string | undefined, options: { json?: boolean }) => {
+      await runInDirectory(directory, () =>
+        fullVerificationAction({ json: options.json === true })
+      );
+    }
+  );
 
 // ============================================================================
 // CACHE COMMANDS

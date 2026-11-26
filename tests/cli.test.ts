@@ -271,6 +271,55 @@ describe('cli.ts', () => {
     });
   });
 
+  it('should verify a problem in the given directory', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'polyman-verify-'));
+    const start = process.cwd();
+    let cwdDuringAction = '';
+    vi.mocked(actions.fullVerificationAction).mockImplementationOnce(() => {
+      cwdDuringAction = process.cwd();
+      return Promise.resolve();
+    });
+
+    try {
+      await loadCli(['verify', dir, '--json']);
+      expect(cwdDuringAction).toBe(dir);
+      expect(process.cwd()).toBe(start);
+      expect(actions.fullVerificationAction).toHaveBeenCalledWith({
+        json: true,
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('should accept . as the verify directory', async () => {
+    await loadCli(['verify', '.']);
+    expect(actions.fullVerificationAction).toHaveBeenCalledWith({
+      json: false,
+    });
+  });
+
+  it('should reject verify with a missing directory', async () => {
+    const exitSpy = vi
+      .spyOn(process, 'exit')
+      .mockImplementation((() => undefined) as never);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await loadCli([
+        'verify',
+        join(tmpdir(), `polyman-verify-missing-${Date.now()}`),
+      ]);
+    } catch {
+      // commander may throw when exit is stubbed
+    }
+    const output = logSpy.mock.calls.map(c => String(c[0])).join('\n');
+    expect(output).toContain('Directory not found');
+    expect(exitSpy).toHaveBeenCalledWith(2);
+    expect(actions.fullVerificationAction).not.toHaveBeenCalled();
+    exitSpy.mockRestore();
+    logSpy.mockRestore();
+  });
+
   it('should register chat command', async () => {
     await loadCli(['chat']);
     expect(chat.startChat).toHaveBeenCalledWith({});
