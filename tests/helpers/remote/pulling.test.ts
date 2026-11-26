@@ -207,18 +207,22 @@ describe('pulling.ts', () => {
       expect(result.placeholder).toBeUndefined();
     });
 
-    it('should return default acc.cpp when getSolutions fails', async () => {
+    it('should return the solution placeholder when getSolutions fails', async () => {
       mockSdk.getSolutions.mockRejectedValue(new Error('network'));
 
       const result = await pulling.downloadSolutions(asSdk(mockSdk), 1, 'dir');
 
       expect(result.count).toBe(0);
       expect(result.data).toEqual([
-        { name: 'main', source: 'acc.cpp', tag: 'MA' },
+        { name: 'main', source: './solutions/acc.cpp', tag: 'MA' },
       ]);
+      expect(fs.mkdirSync).toHaveBeenCalledWith(path.join('dir', 'solutions'), {
+        recursive: true,
+      });
+      expect(fs.writeFileSync).not.toHaveBeenCalled();
     });
 
-    it('should return default acc.cpp when no solutions returned', async () => {
+    it('should return the solution placeholder when no solutions returned', async () => {
       mockSdk.getSolutions.mockResolvedValue([]);
 
       const result = await pulling.downloadSolutions(asSdk(mockSdk), 1, 'dir');
@@ -226,9 +230,10 @@ describe('pulling.ts', () => {
       expect(result.count).toBe(0);
       expect(result.data[0].name).toBe('main');
       expect(result.data[0].tag).toBe('MA');
+      expect(result.data[0].source).toBe('./solutions/acc.cpp');
     });
 
-    it('should return default acc.cpp when all viewSolution calls fail', async () => {
+    it('should return the solution placeholder when all viewSolution calls fail', async () => {
       mockSdk.getSolutions.mockResolvedValue([
         {
           name: 'a.cpp',
@@ -243,7 +248,7 @@ describe('pulling.ts', () => {
       const result = await pulling.downloadSolutions(asSdk(mockSdk), 1, 'dir');
 
       expect(result.count).toBe(0);
-      expect(result.data[0].source).toBe('acc.cpp');
+      expect(result.data[0].source).toBe('./solutions/acc.cpp');
     });
 
     describe('Java class naming', () => {
@@ -501,22 +506,28 @@ describe('pulling.ts', () => {
       expect(result.count).toBe(2);
     });
 
-    it('should return default val.cpp when getValidator fails', async () => {
+    it('should return the validator placeholder when getValidator fails', async () => {
       mockSdk.getValidator.mockRejectedValue(new Error('boom'));
 
       const result = await pulling.downloadValidator(asSdk(mockSdk), 1, 'dir');
 
-      expect(result.data).toEqual({ name: 'validator', source: 'val.cpp' });
+      expect(result.data).toEqual({
+        name: 'validator',
+        source: './validator/val.cpp',
+      });
       expect(result.count).toBe(0);
+      expect(fs.mkdirSync).toHaveBeenCalledWith(path.join('dir', 'validator'), {
+        recursive: true,
+      });
     });
 
-    it('should return default val.cpp when viewFile fails', async () => {
+    it('should return the validator placeholder when viewFile fails', async () => {
       mockSdk.getValidator.mockResolvedValue('validator.cpp');
       mockSdk.viewFile.mockRejectedValue(new Error('view fail'));
 
       const result = await pulling.downloadValidator(asSdk(mockSdk), 1, 'dir');
 
-      expect(result.data.source).toBe('val.cpp');
+      expect(result.data.source).toBe('./validator/val.cpp');
       expect(result.count).toBe(0);
     });
   });
@@ -1622,9 +1633,16 @@ describe('pulling.ts', () => {
         'dir'
       );
 
-      expect(result.data).toEqual({ name: 'validator', source: 'val.cpp' });
+      expect(result.data).toEqual({
+        name: 'validator',
+        source: './validator/val.cpp',
+      });
       expect(result.count).toBe(0);
       expect(result.missing).toBe(true);
+      expect(fs.mkdirSync).toHaveBeenCalledWith(path.join('dir', 'validator'), {
+        recursive: true,
+      });
+      expect(fs.writeFileSync).not.toHaveBeenCalled();
       expect(mockSdk.viewFile).not.toHaveBeenCalled();
       const warnings = vi.mocked(fmt).warning.mock.calls.map(c => c[0]);
       expect(
@@ -1651,8 +1669,14 @@ describe('pulling.ts', () => {
 
       const result = await pulling.downloadValidator(asSdk(mockSdk), 1, 'dir');
 
-      expect(result.data).toEqual({ name: 'validator', source: 'val.cpp' });
+      expect(result.data).toEqual({
+        name: 'validator',
+        source: './validator/val.cpp',
+      });
       expect(result.count).toBe(0);
+      expect(fs.mkdirSync).toHaveBeenCalledWith(path.join('dir', 'validator'), {
+        recursive: true,
+      });
       expect(mockSdk.viewFile).not.toHaveBeenCalled();
       const errors = vi.mocked(fmt).error.mock.calls.map(c => c[0]);
       expect(errors.some(e => e.includes('Refusing unsafe name'))).toBe(true);
@@ -1693,7 +1717,10 @@ describe('pulling.ts', () => {
       const result = await pulling.downloadSolutions(asSdk(mockSdk), 1, 'dir');
 
       expect(result.count).toBe(0);
-      expect(result.data[0]?.source).toBe('acc.cpp');
+      expect(result.data[0]?.source).toBe('./solutions/acc.cpp');
+      expect(fs.mkdirSync).toHaveBeenCalledWith(path.join('dir', 'solutions'), {
+        recursive: true,
+      });
       expect(mockSdk.viewSolution).not.toHaveBeenCalled();
       expect(written()).toEqual([]);
     });

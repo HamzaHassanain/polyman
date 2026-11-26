@@ -86,6 +86,17 @@ function withoutExtension(name: string): string {
   return name.replace(/\.[^.]+$/, '');
 }
 
+/** Path used in Config.json when no solution could be downloaded. */
+export const SOLUTION_PLACEHOLDER_SOURCE = './solutions/acc.cpp';
+
+/** Path used in Config.json when Polygon has no validator to download. */
+export const VALIDATOR_PLACEHOLDER_SOURCE = './validator/val.cpp';
+
+/** Creates a placeholder's folder, without creating a fake source file. */
+function ensurePlaceholderDirectory(problemDir: string, subdir: string): void {
+  fs.mkdirSync(path.join(problemDir, subdir), { recursive: true });
+}
+
 /**
  * Downloads all solutions from Polygon and returns metadata.
  *
@@ -95,8 +106,8 @@ function withoutExtension(name: string): string {
  * @returns {Promise<{ data: Array<LocalSolution>; count: number; failures: PullFailure[]; placeholder?: string }>}
  *   `failures` has one entry per solution that could not be downloaded
  *   (Config.json does not list it). `placeholder` is a warning, set when no
- *   solution was downloaded and Config.json lists the acc.cpp placeholder
- *   instead
+ *   solution was downloaded and Config.json lists the main solution
+ *   placeholder instead
  */
 export async function downloadSolutions(
   sdk: PolygonSDK,
@@ -159,12 +170,17 @@ export async function downloadSolutions(
   } catch (error) {
     listError = reason(error);
     fmt.error(
-      `  ${fmt.cross()} Could not download Solution, adding acc.cpp to be implemented`
+      `  ${fmt.cross()} Could not download Solution, adding ${SOLUTION_PLACEHOLDER_SOURCE} to be implemented`
     );
   }
 
   if (solutionsData.length === 0) {
-    solutionsData.push({ name: 'main', source: 'acc.cpp', tag: 'MA' as const });
+    ensurePlaceholderDirectory(problemDir, 'solutions');
+    solutionsData.push({
+      name: 'main',
+      source: SOLUTION_PLACEHOLDER_SOURCE,
+      tag: 'MA' as const,
+    });
     const why = listError
       ? `Could not download the solutions list (${listError})`
       : 'No solution was downloaded from Polygon';
@@ -172,7 +188,7 @@ export async function downloadSolutions(
       data: solutionsData,
       count,
       failures,
-      placeholder: `${why}: acc.cpp is listed in Config.json as the main solution but not created`,
+      placeholder: `${why}: ${SOLUTION_PLACEHOLDER_SOURCE} is listed in Config.json as the main solution but not created`,
     };
   }
 
@@ -295,7 +311,7 @@ export async function downloadChecker(
  *   downloaded (Config.json then has no `testsFilePath` for the validator).
  *   `missing` is true when Polygon has no validator set for the problem.
  *   `placeholder` is a warning, set when the download failed and Config.json
- *   lists the val.cpp placeholder instead
+ *   lists the validator placeholder instead
  */
 export async function downloadValidator(
   sdk: PolygonSDK,
@@ -315,10 +331,11 @@ export async function downloadValidator(
     const rawName = await sdk.getValidator(problemId);
     if (rawName === '') {
       fmt.warning(
-        `  ⚠️  No validator set on Polygon for problem ${problemId}, adding val.cpp to be implemented`
+        `  ⚠️  No validator set on Polygon for problem ${problemId}, adding ${VALIDATOR_PLACEHOLDER_SOURCE} to be implemented`
       );
+      ensurePlaceholderDirectory(problemDir, 'validator');
       return {
-        data: { name: 'validator', source: 'val.cpp' },
+        data: { name: 'validator', source: VALIDATOR_PLACEHOLDER_SOURCE },
         count: 0,
         failures,
         missing: true,
@@ -382,13 +399,14 @@ export async function downloadValidator(
     };
   } catch (error) {
     fmt.error(
-      `  ${fmt.cross()} Could not download validator (${reason(error)}), adding val.cpp to be implemented`
+      `  ${fmt.cross()} Could not download validator (${reason(error)}), adding ${VALIDATOR_PLACEHOLDER_SOURCE} to be implemented`
     );
+    ensurePlaceholderDirectory(problemDir, 'validator');
     return {
-      data: { name: 'validator', source: 'val.cpp' },
+      data: { name: 'validator', source: VALIDATOR_PLACEHOLDER_SOURCE },
       count: 0,
       failures,
-      placeholder: `Could not download the validator (${reason(error)}): val.cpp is listed in Config.json but not created, so verify will fail until you add it`,
+      placeholder: `Could not download the validator (${reason(error)}): ${VALIDATOR_PLACEHOLDER_SOURCE} is listed in Config.json but not created, so verify will fail until you add it`,
     };
   }
 }
