@@ -1748,8 +1748,11 @@ Runs complete problem verification workflow.
 
 ```bash
 polyman verify
+polyman verify ./my-problem             # verify a problem from outside its folder
 polyman verify --json > verify.json     # JSON report on stdout, human log on stderr
 ```
+
+With no argument `verify` uses the current directory. A directory argument is resolved against the current directory and only changes where the command reads the problem from; it is restored when the command ends. A path that is not a directory exits with code 2.
 
 **`--json`:** writes exactly one JSON document to stdout on every code path, including compile failures and validator self-test failures, and moves all human-readable output to stderr. The exit code is unchanged (0 only when every step passed). Shape:
 
